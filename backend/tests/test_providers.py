@@ -679,3 +679,144 @@ async def test_aniworld_api_errors_are_not_remembered_as_missing(
     # A plain 404 is a real "not found" and is remembered.
     assert await provider.scan(AnimeInfo(id=4, title="Unknown Show"), [1]) == {1: []}
     assert (await get_mapping(4, "aniworld")).external_id is None
+
+
+# --- AniScraper (bundled service) --------------------------------------------------------------
+
+SCRAPER_SEARCH = [
+    {
+        "slug": "attack-on-titan-junior-high",
+        "title": "Attack on Titan: Junior High",
+        "description": "",
+        "url": "https://aniworld.to/anime/stream/attack-on-titan-junior-high",
+    },
+    {
+        "slug": "attack-on-titan",
+        "title": "Attack on Titan",
+        "description": "",
+        "url": "https://aniworld.to/anime/stream/attack-on-titan",
+    },
+]
+SCRAPER_SERIES = {
+    "slug": "attack-on-titan",
+    "title": "Attack on Titan",
+    "description": None,
+    "url": "https://aniworld.to/anime/stream/attack-on-titan",
+    "seasons": [
+        {
+            "season": 3,
+            "name": "Season 3",
+            "episodes": [
+                {
+                    "episode": n,
+                    "title_de": None,
+                    "title_en": f"Ep {n}",
+                    "url": f"https://aniworld.to/anime/stream/attack-on-titan/staffel-3/episode-{n}",
+                    "hosters": ["VOE", "Filemoon"],
+                    "languages": ["German Dub", "German Sub"] if n == 1 else ["German Sub"],
+                }
+                for n in (1, 2)
+            ],
+        }
+    ],
+}
+SCRAPER_EPISODE = {
+    "slug": "attack-on-titan",
+    "season": 3,
+    "episode": 2,
+    "languages": ["English Sub", "German Sub"],
+    "streams": {
+        "German Sub": [
+            {"hoster": "VOE", "url": "https://aniworld.to/redirect/456", "link_id": "456"},
+            {"hoster": "Filemoon", "url": "https://aniworld.to/redirect/457", "link_id": "457"},
+        ],
+        "English Sub": [
+            {"hoster": "VOE", "url": "https://aniworld.to/redirect/789", "link_id": "789"}
+        ],
+    },
+}
+
+
+def _scraper_handler(requests):
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url).removeprefix("http://aniscraper:8000"))
+        path = request.url.path
+        if path == "/search/titles":
+            q = request.url.params["q"]
+            return httpx.Response(200, json=SCRAPER_SEARCH if "Titan" in q else [])
+        if path == "/anime/attack-on-titan" and request.url.params.get("season") == "3":
+            return httpx.Response(200, json=SCRAPER_SERIES)
+        if path.startswith("/anime/") and path.count("/") == 2:
+            return httpx.Response(200, json={**SCRAPER_SERIES, "seasons": []})
+        if path == "/anime/attack-on-titan/season/3/episode/2":
+            return httpx.Response(200, json=SCRAPER_EPISODE)
+        if request.url.host == "aniworld.to":
+            return httpx.Response(302, headers={"location": f"https://voe.example{path}"})
+        return httpx.Response(404, json={"detail": "Not found"})
+
+    return handler
+
+
+async def test_aniscraper_provider(database, monkeypatch, memory_cache):
+    from app.providers.aniworld import AniScraperProvider
+    from app.services import anilist
+    from app.services.anilist import AniListInfo
+    from app.services.mappings import delete_mapping, get_mapping
+
+    async def fake_lookup(mal_id):
+        return AniListInfo(
+            id=104578,
+            season=3,
+            titles=["Attack on Titan Season 3"],
+            root_titles=["Attack on Titan"],
+        )
+
+    monkeypatch.setattr(anilist, "lookup", fake_lookup)
+    await delete_mapping(35760, "aniworld")
+    requests: list[str] = []
+    http = httpx.AsyncClient(transport=httpx.MockTransport(_scraper_handler(requests)))
+    provider = AniScraperProvider("http://aniscraper:8000", http=http)
+    anime = AnimeInfo(id=35760, title="Shingeki no Kyojin Season 3")
+
+    found = await provider.scan(anime, [1, 2, 3])
+    assert [(o.id, o.label, o.language) for o in found[1]] == [
+        ("aniworld:de-dub", "VOE / Filemoon", "de-dub"),
+        ("aniworld:de-sub", "VOE / Filemoon", "de-sub"),
+    ]
+    assert [o.language for o in found[2]] == ["de-sub"] and found[3] == []
+    # The search hit whose title matches exactly is tried before the other hit.
+    assert requests[0] == "/search/titles?q=Attack+on+Titan"
+    assert [r for r in requests if r.startswith("/anime/")] == [
+        "/anime/attack-on-titan?season=3&streams=false"
+    ]
+    assert (await get_mapping(35760, "aniworld")).external_id == "attack-on-titan"
+
+    resolved = await provider.resolve(anime, 2, "de-sub")
+    assert [(s.url, s.label) for s in resolved.streams] == [
+        ("https://voe.example/redirect/456", "VOE"),
+        ("https://voe.example/redirect/457", "Filemoon"),
+    ]
+    assert len((await provider.resolve(anime, 2, "en-sub")).streams) == 1
+    with pytest.raises(ProviderError, match="No de-dub stream"):
+        await provider.resolve(anime, 2, "de-dub")
+
+
+async def test_aniscraper_outage_is_not_remembered(database, monkeypatch, memory_cache):
+    from app.providers.aniworld import AniScraperProvider
+    from app.services import anilist
+    from app.services.mappings import delete_mapping, get_mapping
+
+    async def not_on_anilist(mal_id):
+        return None
+
+    monkeypatch.setattr(anilist, "lookup", not_on_anilist)
+    await delete_mapping(5, "aniworld")
+    down = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(502, json={"detail": "Could not reach aniworld.to"})
+        )
+    )
+    provider = AniScraperProvider("http://aniscraper:8000", http=down)
+    with pytest.raises(ProviderError, match="lookup failed"):
+        await provider.scan(AnimeInfo(id=5, title="Naruto"), [1])
+    assert await get_mapping(5, "aniworld") is None

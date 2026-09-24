@@ -143,13 +143,17 @@ def resolved_from_json(data: dict[str, Any]) -> Resolved:
 def enabled_providers() -> list[StreamProvider]:
     from app.core.config import get_settings
     from app.providers.anivexa import AnivexaProvider
-    from app.providers.aniworld import AniWorldApiProvider, AniWorldProvider
+    from app.providers.aniworld import AniScraperProvider, AniWorldApiProvider, AniWorldProvider
     from app.providers.database import DatabaseProvider
     from app.providers.reanime import ReAnimeProvider
 
     s = get_settings()
     providers: list[StreamProvider] = [DatabaseProvider()]
-    if s.aniworld_api_url:  # a self-hosted AniWorld API replaces scraping the site directly
+    # AniWorld, in order of preference: the bundled AniScraper service, another self-hosted
+    # AniWorld API, or scraping the site from the backend itself.
+    if s.aniscraper_url:
+        providers.append(AniScraperProvider(s.aniscraper_url))
+    elif s.aniworld_api_url:
         providers.append(AniWorldApiProvider(s.aniworld_api_url))
     elif s.aniworld_url:
         providers.append(AniWorldProvider(s.aniworld_url, s.aniworld_series_path))

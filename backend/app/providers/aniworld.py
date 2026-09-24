@@ -176,6 +176,10 @@ class AniWorldProvider:
     def season_path(self, slug: str, season: int) -> str:
         return f"/{self.series_path.replace('{slug}', slug)}/staffel-{season}"
 
+    async def candidate_slugs(self, titles: list[str]) -> list[str]:
+        """Series slugs to try, best first."""
+        return slug_candidates(titles)
+
     async def season_episodes(self, slug: str, season: int) -> set[int] | None:
         """Episode numbers of a season; None if the series/season doesn't exist. An empty set
         means it exists but the numbers couldn't be read."""
@@ -209,7 +213,7 @@ class AniWorldProvider:
         titles += [t for t in (anime.title_en, anime.title) if t]
 
         failures = 0
-        for slug in slug_candidates(titles):
+        for slug in await self.candidate_slugs(titles):
             try:
                 found = await self.season_episodes(slug, season)
             except ProviderError:
@@ -324,11 +328,11 @@ class AniWorldApiProvider(AniWorldProvider):
     def __init__(self, api_url: str, http: httpx.AsyncClient | None = None):
         super().__init__(api_url, "", http)
 
-    async def _api(self, path: str) -> Any:
+    async def _api(self, path: str, params: dict[str, Any] | None = None) -> Any:
         """Parsed JSON, or None when the API says the series/episode doesn't exist (4xx)."""
         client = self._client()
         try:
-            resp = await client.get(f"{self.base_url}{path}")
+            resp = await client.get(f"{self.base_url}{path}", params=params)
         finally:
             if self._http is None:
                 await client.aclose()
@@ -357,8 +361,11 @@ class AniWorldApiProvider(AniWorldProvider):
         episodes = await self._season(slug, season)
         return {e["number"] for e in episodes} if episodes else None
 
+    def _languages(self, entry: dict[str, Any]) -> list[Language]:
+        return [api_language(lang) for lang in entry.get("languages") or []]
+
     def _episode_options(self, entry: dict[str, Any]) -> list[SourceOption]:
-        languages = dict.fromkeys(api_language(lang) for lang in entry.get("languages") or [])
+        languages = dict.fromkeys(self._languages(entry))
         label = " / ".join(str(h) for h in entry.get("hosters") or []) or "AniWorld"
         return [
             SourceOption(id=f"{self.name}:{lang}", provider=self.name, label=label, language=lang)
@@ -398,5 +405,91 @@ class AniWorldApiProvider(AniWorldProvider):
             streams=[
                 Stream(kind="embed", url=target, label=str(s.get("hoster") or "AniWorld"))
                 for s, target in zip(streams, targets, strict=True)
+            ]
+        )
+
+
+SCRAPER_LANGUAGES: dict[str, Language] = {
+    "german dub": "de-dub",
+    "german sub": "de-sub",
+    "english sub": "en-sub",
+    "english dub": "en-dub",
+}
+
+
+def _norm(title: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", title.lower())
+
+
+class AniScraperProvider(AniWorldApiProvider):
+    """AniWorld through the bundled AniScraper service (aniscraper/ in this repo):
+
+    GET /search/titles?q=...                           -> matching series slugs
+    GET /anime/{slug}?season=N&streams=false           -> the season's episodes and languages
+    GET /anime/{slug}/season/{s}/episode/{e}           -> the episode's play links per language
+    """
+
+    SEARCH_QUERIES = 3
+
+    async def candidate_slugs(self, titles: list[str]) -> list[str]:
+        """AniWorld's own search first (exact title matches ranked up), then slug guesses."""
+        wanted = {_norm(t) for t in titles}
+        found: list[str] = []
+        for query in list(dict.fromkeys(strip_season(t) for t in titles))[: self.SEARCH_QUERIES]:
+            if len(query) < 2:
+                continue
+            try:
+                results = await self._api("/search/titles", {"q": query}) or []
+            except ProviderError:
+                continue  # search is only a shortcut; the guesses below still get tried
+            hits = [r for r in results if isinstance(r, dict) and r.get("slug")]
+            hits.sort(key=lambda r: _norm(str(r.get("title") or "")) not in wanted)
+            found += [str(r["slug"]) for r in hits]
+        return list(dict.fromkeys(found + slug_candidates(titles)))[:MAX_SLUG_CANDIDATES]
+
+    async def _season(self, slug: str, season: int) -> list[dict[str, Any]] | None:
+        key = f"aniworld:scraper:season:{slug}:{season}"
+        cached = await get_json(key)
+        if cached is not None:
+            return cached
+        data = await self._api(f"/anime/{quote(slug)}", {"season": season, "streams": "false"})
+        seasons = (data or {}).get("seasons") or []
+        episodes = [
+            {**e, "number": e["episode"]}
+            for s in seasons if isinstance(s, dict) and s.get("season") == season
+            for e in s.get("episodes") or []
+            if isinstance(e, dict) and isinstance(e.get("episode"), int)
+        ]  # fmt: skip
+        if not episodes:
+            return None
+        await set_json(key, episodes, LINKS_CACHE_TTL)
+        return episodes
+
+    def _languages(self, entry: dict[str, Any]) -> list[Language]:
+        return [
+            SCRAPER_LANGUAGES.get(str(label).lower(), "unknown")
+            for label in entry.get("languages") or []
+        ]
+
+    async def resolve(self, anime: AnimeInfo, episode: int, key: str) -> Resolved:
+        located = await self.locate(anime)
+        if located is None:
+            raise ProviderError("This anime isn't mapped to an AniWorld series")
+        slug, season, offset = located
+        data = await self._api(f"/anime/{quote(slug)}/season/{season}/episode/{episode + offset}")
+        links = [
+            link
+            for label, group in ((data or {}).get("streams") or {}).items()
+            if SCRAPER_LANGUAGES.get(str(label).lower(), "unknown") == key
+            for link in group
+            if urlsplit(str(link.get("url") or "")).scheme in ("http", "https")
+        ]
+        if not links:
+            raise ProviderError(f"No {key} stream for this episode")
+        targets = await asyncio.gather(*(self.follow_redirect(link["url"]) for link in links))
+        return Resolved(
+            streams=[
+                Stream(kind="embed", url=target, label=str(link.get("hoster") or "AniWorld"))
+                for link, target in zip(links, targets, strict=True)
             ]
         )

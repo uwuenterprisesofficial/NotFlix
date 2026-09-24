@@ -37,7 +37,9 @@ class Settings(BaseSettings):
     # Self-hosted ReAnime.to API (English sources, embeds only). Empty disables the provider.
     reanime_url: str = ""
 
-    # Self-hosted AniWorld API; when set it replaces scraping ANIWORLD_URL directly.
+    # AniWorld source, first one set wins: the bundled AniScraper service (docker compose runs it
+    # at http://aniscraper:8000), another self-hosted AniWorld API, or scraping ANIWORLD_URL.
+    aniscraper_url: str = ""
     aniworld_api_url: str = ""
 
     # AniWorld (German dub/sub). Empty disables the provider. The series path changes with site

@@ -12,6 +12,9 @@ x-backend: &backend
     # Stream providers; an empty URL disables one. Anivexa must be run separately.
     ANIVEXA_URL: ${ANIVEXA_URL:-}
     REANIME_URL: ${REANIME_URL:-}
+    # AniWorld via the bundled AniScraper service by default; set ANISCRAPER_URL= (empty) in .env
+    # to use ANIWORLD_API_URL or direct scraping instead.
+    ANISCRAPER_URL: ${ANISCRAPER_URL-http://aniscraper:8000}
     ANIWORLD_API_URL: ${ANIWORLD_API_URL:-}
     ANIWORLD_URL: ${ANIWORLD_URL-https://aniworld.to}
     # No default here: Compose before 2.24 cuts ${VAR:-default} at the first '}'.
@@ -31,8 +34,17 @@ x-backend: &backend
       condition: service_healthy
     redis:
       condition: service_started
+    aniscraper:
+      condition: service_started
 
 services:
+  # AniWorld scraper (aniscraper/), the default source of German streams.
+  aniscraper:
+    build: ./aniscraper
+    restart: unless-stopped
+    ports:
+      - "8001:8000"  # API docs at http://localhost:8001/docs
+
   db:
     image: postgres:17
     environment:
