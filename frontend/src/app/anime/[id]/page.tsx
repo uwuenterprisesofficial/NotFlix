@@ -81,9 +81,23 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
         signedIn={me !== null}
       />
 
-      {me && <AniWorldMapping animeId={anime.id} />}
-      {me && <AnimeToastMapping animeId={anime.id} />}
-      <AnalyzePanel animeId={anime.id} episodeCount={count} signedIn={me !== null} />
+      {me && (
+        // Rarely needed: fixing a wrong source match, and intro/outro detection.
+        <details className="group mt-12 max-w-2xl">
+          <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded bg-surface-raised px-4 py-2 text-sm font-semibold hover:bg-neutral-700 [&::-webkit-details-marker]:hidden">
+            <span aria-hidden className="transition-transform group-open:rotate-90">
+              ▸
+            </span>
+            More options
+            <span className="font-normal text-muted">
+              AniWorld &amp; AnimeToast pages, intro &amp; outro detection
+            </span>
+          </summary>
+          <AniWorldMapping animeId={anime.id} />
+          <AnimeToastMapping animeId={anime.id} />
+          <AnalyzePanel animeId={anime.id} episodeCount={count} signedIn />
+        </details>
+      )}
     </div>
   );
 }

@@ -175,6 +175,7 @@ export function useSources(
     loadError,
     languages,
     language,
+    countIn: (lang: Language) => all.filter((o) => o.language === lang).length,
     setLanguage: (lang: Language) => {
       setPreferred(lang);
       setChosenId(null);

@@ -5,14 +5,13 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { formatTime } from "@/lib/format";
 import { LANGUAGE_LABELS } from "@/lib/languages";
-import type { SkipSegment } from "@/lib/types";
+import type { Progress, SkipSegment } from "@/lib/types";
 import { DirectVideo } from "./DirectVideo";
+import { LanguageMenu } from "./LanguageMenu";
 import { StreamMenu } from "./StreamMenu";
 import { useAutoSkip } from "./useAutoSkip";
 import { useSources } from "./useSources";
 import { useStoredValue } from "./useStoredValue";
-
-type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function Player({
   animeId,
@@ -38,8 +37,12 @@ export function Player({
   const sources = useSources(animeId, episode, { ...via, server });
   const [autoSkip, setAutoSkip] = useAutoSkip();
   const [autoNext, setAutoNext] = useStoredValue<"0" | "1">("notflix:autonext", "1");
-  const [saveState, setSaveState] = useState<SaveState>(episode <= watched ? "saved" : "idle");
-  const saving = useRef(false);
+  // Episodes watched on MyAnimeList: a count, so unwatching sets it to the episode before.
+  const [progress, setProgress] = useState(watched);
+  const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const savingNow = useRef(false);
+  const isWatched = episode <= progress;
   const autoMarked = useRef(false);
   // Where playback is, so a replacement for a stream that broke continues from there.
   const position = useRef(0);
@@ -58,23 +61,31 @@ export function Player({
     ? sources.resolved.skip_segments
     : segments;
 
-  async function markWatched() {
-    if (!signedIn || saving.current || saveState === "saved") return;
-    saving.current = true;
-    setSaveState("saving");
+  async function setWatched(value: boolean) {
+    if (!signedIn || savingNow.current) return;
+    savingNow.current = true;
+    setSaving(true);
+    setSaveFailed(false);
+    const episodes = value ? episode : episode - 1;
     const res = await fetch(`/api/anime/${animeId}/progress`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ episodes_watched: episode }),
-    });
-    setSaveState(res.ok ? "saved" : "error");
-    saving.current = false;
+      body: JSON.stringify({ episodes_watched: episodes }),
+    }).catch(() => null);
+    if (res?.ok) {
+      const saved: Progress = await res.json();
+      setProgress(saved.episodes_watched);
+    } else {
+      setSaveFailed(true);
+    }
+    savingNow.current = false;
+    setSaving(false);
   }
 
   function autoMarkWatched() {
     if (autoMarked.current) return;
     autoMarked.current = true;
-    void markWatched();
+    if (!isWatched) void setWatched(true);
   }
 
   return (
@@ -123,21 +134,9 @@ export function Player({
 
       {sources.languages.length > 0 && (
         <div className="mt-4 flex flex-wrap items-start gap-3 text-sm">
-          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Language">
-            {sources.languages.map((lang) => (
-              <button
-                key={lang}
-                role="tab"
-                aria-selected={lang === sources.language}
-                onClick={() => sources.setLanguage(lang)}
-                className={`rounded-full px-4 py-1 font-semibold ${lang === sources.language ? "bg-white text-black" : "bg-surface-raised hover:bg-neutral-700"}`}
-              >
-                {LANGUAGE_LABELS[lang]}
-              </button>
-            ))}
-            {sources.loading && (
-              <span className="self-center text-xs text-muted">Loading more sources…</span>
-            )}
+          <div className="flex items-center gap-3">
+            <LanguageMenu sources={sources} />
+            {sources.loading && <span className="text-xs text-muted">Loading more sources…</span>}
           </div>
           <div className="ml-auto">
             <StreamMenu sources={sources} />
@@ -171,18 +170,30 @@ export function Player({
         <div className="ml-auto flex gap-2">
           {signedIn && (
             <button
-              onClick={markWatched}
-              disabled={saveState === "saving" || saveState === "saved"}
-              className="rounded bg-surface-raised px-3 py-1 hover:bg-neutral-700 disabled:opacity-60"
-            >
-              {
-                {
-                  idle: "Mark as watched",
-                  saving: "Saving…",
-                  saved: "✓ Watched",
-                  error: "Retry saving",
-                }[saveState]
+              onClick={() => setWatched(!isWatched)}
+              disabled={saving}
+              aria-pressed={isWatched}
+              title={
+                !isWatched
+                  ? undefined
+                  : progress > episode
+                    ? `Mark as unwatched: your progress goes back to episode ${episode - 1}`
+                    : "Mark as unwatched"
               }
+              className="group/watched rounded bg-surface-raised px-3 py-1 hover:bg-neutral-700 disabled:opacity-60"
+            >
+              {saving ? (
+                "Saving…"
+              ) : saveFailed ? (
+                "Couldn’t save, retry"
+              ) : isWatched ? (
+                <>
+                  <span className="group-hover/watched:hidden">✓ Watched</span>
+                  <span className="hidden group-hover/watched:inline">✕ Unwatch</span>
+                </>
+              ) : (
+                "Mark as watched"
+              )}
             </button>
           )}
           {hasNext && (
@@ -207,7 +218,7 @@ function PlayerStatus({ sources }: { sources: ReturnType<typeof useSources> }) {
   } else if (!sources.loading && sources.languages.length === 0) {
     title = "No source for this episode yet";
     detail =
-      "No provider has this episode. For German sources, check the AniWorld mapping on the show’s page.";
+      "No provider has this episode. For German sources, check the AniWorld and AnimeToast pages under “More options” on the show’s page.";
   } else if (sources.searching) {
     title = "Looking for a direct stream…";
     const checked = sources.candidates.filter((o) => sources.resolutionOf(o)).length;
@@ -235,7 +246,7 @@ function SegmentInfo({ segments, embedded }: { segments: SkipSegment[]; embedded
   if (segments.length === 0) {
     return (
       <p className="mt-4 text-sm text-muted">
-        Intro/outro not detected yet — run the analyser from the show’s page.
+        Intro/outro not detected yet — run the detection under “More options” on the show’s page.
       </p>
     );
   }

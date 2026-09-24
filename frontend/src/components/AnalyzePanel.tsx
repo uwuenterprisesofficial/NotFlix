@@ -50,7 +50,7 @@ export function AnalyzePanel({
   if (!signedIn) return null;
 
   return (
-    <section className="mt-12 max-w-2xl rounded-lg bg-surface-raised p-6">
+    <section className="mt-6 max-w-2xl rounded-lg bg-surface-raised p-6">
       <h2 className="text-lg font-semibold">Intro &amp; outro detection</h2>
       <p className="mt-1 text-sm text-muted">
         Compares the audio of neighbouring episodes to find the shared opening and ending, then
