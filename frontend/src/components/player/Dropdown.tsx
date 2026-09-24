@@ -7,11 +7,13 @@ export function Dropdown({
   button,
   align,
   className = "w-80",
+  onOpen,
   children,
 }: {
   button: ReactNode;
   align: "left" | "right";
   className?: string;
+  onOpen?: () => void;
   children: (close: () => void) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -36,7 +38,10 @@ export function Dropdown({
   return (
     <div ref={root} className="relative">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open) onOpen?.();
+          setOpen(!open);
+        }}
         aria-expanded={open}
         aria-haspopup="menu"
         className="flex max-w-[20rem] items-center gap-2 rounded bg-surface-raised px-3 py-1.5 hover:bg-neutral-700"

@@ -134,6 +134,21 @@ class EpisodeSource(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ResolvedSource(Base):
+    """The playable streams a source option resolved to, kept until its links likely expire."""
+
+    __tablename__ = "resolved_sources"
+    __table_args__ = (UniqueConstraint("anime_id", "episode", "option_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anime_id: Mapped[int] = mapped_column(Integer, index=True)
+    episode: Mapped[int] = mapped_column(Integer)
+    option_id: Mapped[str] = mapped_column(Text)
+    data: Mapped[dict] = mapped_column(JSON)
+    resolved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class SourceScan(Base):
     """Which episodes of an anime a provider was last checked for, and how that went."""
 

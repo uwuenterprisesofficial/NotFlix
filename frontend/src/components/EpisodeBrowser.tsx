@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { LANGUAGE_LABELS, LANGUAGE_ORDER, LANGUAGE_SHORT, PROVIDER_LABELS } from "@/lib/languages";
+import { forgetShowStreams } from "@/lib/streamCache";
 import type { Availability, Language } from "@/lib/types";
 import { useStoredValue } from "./player/useStoredValue";
 
@@ -60,12 +61,16 @@ export function EpisodeBrowser({
 
   useEffect(() => {
     // Marking the data as scanning restarts polling, and the first poll starts the scan.
-    const rescan = () => setData((current) => current && { ...current, scanning: true });
+    const rescan = () => {
+      forgetShowStreams(animeId); // the player's copy is outdated too
+      setData((current) => current && { ...current, scanning: true });
+    };
     window.addEventListener(SOURCES_CHANGED_EVENT, rescan);
     return () => window.removeEventListener(SOURCES_CHANGED_EVENT, rescan);
-  }, []);
+  }, [animeId]);
 
   async function refresh() {
+    forgetShowStreams(animeId);
     setRefreshing(true);
     const res = await fetch(`/api/anime/${animeId}/availability/refresh`, { method: "POST" });
     if (res.ok) setData(await res.json());

@@ -65,7 +65,13 @@ export type Stream = {
   subtitles: Subtitle[];
 };
 
-export type Resolved = { streams: Stream[]; skip_segments: SkipSegment[] };
+export type Resolved = {
+  streams: Stream[];
+  skip_segments: SkipSegment[];
+  /** When these links were fetched, and until when they may be reused (from the API). */
+  resolved_at?: string | null;
+  expires_at?: string | null;
+};
 
 export type SourceOption = {
   id: string;

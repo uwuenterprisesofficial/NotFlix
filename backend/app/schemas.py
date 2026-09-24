@@ -89,6 +89,9 @@ class StreamOut(BaseModel):
 class ResolvedOut(BaseModel):
     streams: list[StreamOut]
     skip_segments: list[SkipSegmentOut]
+    # When these links were fetched, and until when they can be reused without resolving again.
+    resolved_at: datetime | None = None
+    expires_at: datetime | None = None
 
 
 class SourceOptionOut(BaseModel):
@@ -97,6 +100,33 @@ class SourceOptionOut(BaseModel):
     label: str
     language: str
     resolved: ResolvedOut | None
+
+
+class ProviderCoverageOut(BaseModel):
+    name: str
+    status: str  # done | running | failed | none (never scanned)
+    episodes: list[int]  # episodes whose options are included
+
+
+class EpisodeOptionsOut(BaseModel):
+    episode: int
+    options: list[SourceOptionOut]
+
+
+class CachedResolutionOut(BaseModel):
+    episode: int
+    option: str
+    resolved: ResolvedOut
+
+
+class ShowStreamsOut(BaseModel):
+    """Everything the player needs for a show, to keep in the browser until `expires_at`."""
+
+    providers: list[ProviderCoverageOut]
+    scanning: bool
+    expires_at: datetime
+    episodes: list[EpisodeOptionsOut]
+    resolutions: list[CachedResolutionOut]
 
 
 class ProviderScanOut(ORM):

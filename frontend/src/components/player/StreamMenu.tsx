@@ -29,6 +29,7 @@ export function StreamMenu({ sources }: { sources: ReturnType<typeof useSources>
   return (
     <Dropdown
       align="right"
+      onOpen={sources.showAll}
       button={
         <>
           <span className="truncate">

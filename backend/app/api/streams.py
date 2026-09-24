@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
@@ -22,10 +23,14 @@ from app.schemas import (
     AnimeToastMappingIn,
     AniWorldMappingIn,
     AvailabilityOut,
+    CachedResolutionOut,
     EpisodeLanguages,
+    EpisodeOptionsOut,
     MappingOut,
+    ProviderCoverageOut,
     ProviderScanOut,
     ResolvedOut,
+    ShowStreamsOut,
     SkipSegmentOut,
     SourceOptionOut,
     StreamOut,
@@ -33,9 +38,13 @@ from app.schemas import (
 )
 from app.services import catalog, source_scan
 from app.services.mappings import delete_mapping, save_mapping
-from app.services.proxy import proxy_url
+from app.services.proxy import TOKEN_MAX_AGE_S, proxy_url
 
 log = logging.getLogger(__name__)
+# Proxy links handed out now stop working after TOKEN_MAX_AGE_S; clients refetch well before.
+PROXY_LINKS_VALID = timedelta(seconds=TOKEN_MAX_AGE_S) - timedelta(hours=1)
+# While a scan runs, the browser's copy is incomplete: it asks again this soon.
+SCANNING_RECHECK = timedelta(seconds=30)
 router = APIRouter(prefix="/anime/{anime_id}", tags=["streams"])
 providers_router = APIRouter(tags=["streams"])
 
@@ -65,8 +74,16 @@ def stream_out(stream: Stream) -> StreamOut:
     )
 
 
-def resolved_out(resolved: Resolved) -> ResolvedOut:
+def resolved_out(
+    resolved: Resolved, stored: source_scan.StoredResolution | None = None
+) -> ResolvedOut:
+    """`stored` adds when the links were fetched and until when they can be reused (at most as
+    long as the proxy links made here stay valid)."""
     return ResolvedOut(
+        resolved_at=stored.resolved_at if stored else None,
+        expires_at=(
+            min(stored.expires_at, datetime.now(UTC) + PROXY_LINKS_VALID) if stored else None
+        ),
         streams=[stream_out(s) for s in resolved.streams],
         skip_segments=[
             SkipSegmentOut(
@@ -105,6 +122,16 @@ async def _start_scan(
     return info
 
 
+def _option_out(o: SourceOption) -> SourceOptionOut:
+    return SourceOptionOut(
+        id=o.id,
+        provider=o.provider,
+        label=o.label,
+        language=o.language,
+        resolved=resolved_out(o.resolved) if o.resolved else None,
+    )
+
+
 async def _options(info: AnimeInfo, episode: int, provider: str) -> list[SourceOption]:
     """Cached options first; otherwise wait for a running scan, or ask the provider now."""
     cached = await source_scan.cached_options(info.id, episode, provider)
@@ -134,17 +161,53 @@ async def episode_sources(
     info = await _start_scan(db, anime_id, user, around=episode)
     names = [p.name for p in providers_base.enabled_providers() if provider in (None, p.name)]
     found = await asyncio.gather(*(_options(info, episode, name) for name in names))
-    return [
-        SourceOptionOut(
-            id=o.id,
-            provider=o.provider,
-            label=o.label,
-            language=o.language,
-            resolved=resolved_out(o.resolved) if o.resolved else None,
-        )
-        for options in found
-        for o in options
-    ]
+    return [_option_out(o) for options in found for o in options]
+
+
+@router.get("/streams", response_model=ShowStreamsOut)
+async def show_streams(anime_id: int, db: DB, user: OptionalUser, episode: int | None = None):
+    """Every cached source of the show and every still-valid resolution, in one response, for
+    the browser to keep until `expires_at`. A provider that hasn't covered an episode yet
+    (not in its `episodes`, and not failed) is asked through /episodes/{n}/sources."""
+    info = await _start_scan(db, anime_id, user, around=episode)
+    anime = await catalog.get_anime(db, anime_id)
+    airing = anime is None or anime.num_episodes is None or anime.status == "currently_airing"
+    names = [p.name for p in providers_base.enabled_providers()]
+    scans, options = await source_scan.cached_sources(info.id, names)
+    resolutions = await source_scan.cached_resolutions(info.id)
+
+    now = datetime.now(UTC)
+    cap = now + PROXY_LINKS_VALID
+    scanning = source_scan.scanning(info.id)
+    if scanning:
+        expires_at = now + SCANNING_RECHECK
+    else:
+        ttl = source_scan.scan_ttl(airing)
+        finished = [s.finished_at for s in scans.values() if s.finished_at]
+        expires_at = min([cap, *(f + ttl for f in finished)])
+        expires_at = max(expires_at, now + SCANNING_RECHECK)
+    return ShowStreamsOut(
+        providers=[
+            ProviderCoverageOut(
+                name=name,
+                status=scans[name].status if name in scans else "none",
+                episodes=scans[name].episodes if name in scans else [],
+            )
+            for name in names
+        ],
+        scanning=scanning,
+        expires_at=expires_at,
+        episodes=[
+            EpisodeOptionsOut(episode=ep, options=[_option_out(o) for o in found])
+            for ep, found in sorted(options.items())
+        ],
+        resolutions=[
+            CachedResolutionOut(
+                episode=r.episode, option=r.option_id, resolved=resolved_out(r.resolved, r)
+            )
+            for r in resolutions
+        ],
+    )
 
 
 async def _availability(anime_id: int) -> AvailabilityOut:
@@ -173,7 +236,12 @@ async def refresh_availability(anime_id: int, db: DB, user: CurrentUser):
 
 
 @router.get("/episodes/{episode}/resolve", response_model=ResolvedOut)
-async def resolve_source(anime_id: int, episode: int, option: str, db: DB):
+async def resolve_source(anime_id: int, episode: int, option: str, db: DB, fresh: bool = False):
+    """The option's playable streams: stored ones while they're valid (unless `fresh`, e.g.
+    because they stopped working), otherwise asked from the provider and stored."""
+    if not fresh:
+        for stored in await source_scan.cached_resolutions(anime_id, episode, option):
+            return resolved_out(stored.resolved, stored)
     try:
         resolved = await resolve_option(await _anime_info(db, anime_id), episode, option)
     except ProviderUnavailable as e:
@@ -184,7 +252,10 @@ async def resolve_source(anime_id: int, episode: int, option: str, db: DB):
         raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "Source timed out") from e
     except Exception as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Source failed: {e}") from e
-    return resolved_out(resolved)
+    if not resolved.streams:
+        return resolved_out(resolved)  # nothing to play; not worth keeping
+    stored = await source_scan.store_resolution(anime_id, episode, option, resolved)
+    return resolved_out(resolved, stored)
 
 
 @router.get("/mappings", response_model=list[MappingOut])

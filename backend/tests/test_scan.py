@@ -2,8 +2,10 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from sqlalchemy import update
 
-from app.models import SourceScan
+from app.db.session import sync_session
+from app.models import ResolvedSource, SourceScan
 from app.providers import base as providers_base
 from app.providers.base import ProviderError, Resolved, SourceOption, Stream
 from app.services import source_scan
@@ -45,6 +47,7 @@ class CountingProvider:
 
     def __init__(self):
         self.calls: list[int] = []
+        self.resolves: list[tuple[int, str]] = []
 
     async def options(self, anime, episode):
         self.calls.append(episode)
@@ -72,7 +75,13 @@ class CountingProvider:
         return found
 
     async def resolve(self, anime, episode, key):
-        raise ProviderError("not needed")
+        self.resolves.append((episode, key))
+        if not key.startswith("en"):
+            raise ProviderError("not needed")
+        url = f"https://cdn.example/{episode}.mp4"
+        return Resolved(
+            streams=[Stream(kind="direct", url=url, label="HD", format="file", relay=True)]
+        )
 
 
 class BrokenProvider(CountingProvider):
@@ -149,3 +158,61 @@ async def test_correcting_the_aniworld_mapping_drops_its_cache(client, user):
     body = {"slug": "one-piece", "season": 1}
     assert (await client.put("/anime/9/mappings/aniworld", json=body)).status_code == 204
     assert await source_scan.cached_options(9, 1, "aniworld") is None
+
+
+async def test_show_streams_come_in_one_response_with_stored_resolutions(client, providers):
+    assert (await client.get("/anime/9/streams", params={"episode": 2})).json()["scanning"]
+    await source_scan.wait_idle()
+
+    body = (await client.get("/anime/9/streams", params={"episode": 2})).json()
+    assert body["scanning"] is False
+    coverage = {p["name"]: p for p in body["providers"]}
+    assert coverage["counting"] == {
+        "name": "counting",
+        "status": "done",
+        "episodes": list(range(1, 25)),
+    }
+    assert coverage["broken"]["status"] == "failed"
+    assert {e["episode"]: [o["id"] for o in e["options"]] for e in body["episodes"]} == {
+        1: ["counting:de1"],
+        2: ["counting:de2", "counting:en2"],
+        3: ["counting:de3"],
+        4: ["counting:en4"],
+    }
+    assert body["resolutions"] == []
+    # Unknown show, so treated as airing: the cache is good for the 6 hours until the next scan.
+    left = datetime.fromisoformat(body["expires_at"]) - datetime.now(UTC)
+    assert timedelta(hours=5, minutes=59) < left <= timedelta(hours=6)
+
+    params = {"option": "counting:en2"}
+    resolved = (await client.get("/anime/9/episodes/2/resolve", params=params)).json()
+    left = datetime.fromisoformat(resolved["expires_at"]) - datetime.now(UTC)
+    assert timedelta(hours=2, minutes=59) < left <= timedelta(hours=3)  # direct links expire
+    # Stored: asking again (or after a restart) doesn't ask the provider...
+    again = (await client.get("/anime/9/episodes/2/resolve", params=params)).json()
+    assert again["resolved_at"] == resolved["resolved_at"]
+    assert again["streams"][0]["url"].startswith("/api/proxy?t=")
+    assert providers.resolves == [(2, "en2")]
+    # ...unless the stored links stopped working.
+    await client.get("/anime/9/episodes/2/resolve", params={**params, "fresh": True})
+    assert providers.resolves == [(2, "en2"), (2, "en2")]
+
+    body = (await client.get("/anime/9/streams", params={"episode": 2})).json()
+    [stored] = body["resolutions"]
+    assert (stored["episode"], stored["option"]) == (2, "counting:en2")
+    assert stored["resolved"]["streams"][0]["url"].startswith("/api/proxy?t=")
+
+    # Expired resolutions are dropped; a corrected mapping drops the provider's ones too.
+    await client.get("/anime/9/episodes/4/resolve", params={"option": "counting:en4"})
+    with sync_session() as db:
+        db.execute(
+            update(ResolvedSource)
+            .where(ResolvedSource.episode == 4)
+            .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+        db.commit()
+    assert [(r.episode, r.option_id) for r in await source_scan.cached_resolutions(9)] == [
+        (2, "counting:en2")
+    ]
+    await source_scan.forget(9, "counting")
+    assert await source_scan.cached_resolutions(9) == []

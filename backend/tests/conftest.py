@@ -62,10 +62,11 @@ def clean_source_cache(request):
     from sqlalchemy import delete
 
     from app.db.session import sync_session
-    from app.models import EpisodeSource, SourceScan
+    from app.models import EpisodeSource, ResolvedSource, SourceScan
 
     request.getfixturevalue("database")
     with sync_session() as db:
+        db.execute(delete(ResolvedSource))
         db.execute(delete(EpisodeSource))
         db.execute(delete(SourceScan))
         db.commit()

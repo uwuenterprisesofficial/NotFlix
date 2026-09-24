@@ -16,11 +16,12 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.core import cache
 from app.db.session import AsyncSessionLocal
-from app.models import EpisodeSource, SourceScan
+from app.models import EpisodeSource, ResolvedSource, SourceScan
 from app.providers import base as providers_base
 from app.providers.base import (
     AnimeInfo,
     Language,
+    Resolved,
     SourceOption,
     StreamProvider,
     resolved_from_json,
@@ -34,6 +35,9 @@ FINISHED_TTL = timedelta(days=7)
 RUNNING_STALE_AFTER = timedelta(minutes=10)  # a scan lost to an API restart
 FAILED_RETRY_AFTER = timedelta(minutes=2)
 SCAN_TIMEOUT_S = 300
+# Resolved streams: hosters' direct links carry expiring tokens, embed pages stay put.
+RESOLVED_DIRECT_TTL = timedelta(hours=3)
+RESOLVED_EMBED_TTL = timedelta(days=7)
 WINDOW = 60  # episodes per scan
 LOOKBEHIND = 5
 UNKNOWN_COUNT_LOOKAHEAD = 12
@@ -145,7 +149,7 @@ async def ensure_scan(
     anime: AnimeInfo, window: list[int], airing: bool, force: bool = False
 ) -> None:
     """Start a background scan for every provider whose cached data isn't good enough."""
-    ttl = AIRING_TTL if airing else FINISHED_TTL
+    ttl = scan_ttl(airing)
     scans = await _scans(anime.id)
     due = [
         p
@@ -163,6 +167,10 @@ async def ensure_scan(
         task = asyncio.create_task(_scan_provider(p, anime, window))
         _running[key] = (task, window)
         task.add_done_callback(lambda _, key=key: _running.pop(key, None))
+
+
+def scan_ttl(airing: bool) -> timedelta:
+    return AIRING_TTL if airing else FINISHED_TTL
 
 
 def running_scan(anime_id: int, provider: str, episode: int) -> asyncio.Task | None:
@@ -228,6 +236,12 @@ async def forget(anime_id: int, provider: str) -> None:
     await cache.redis().delete(f"{provider}:guess:{anime_id}")
     async with AsyncSessionLocal() as db:
         await db.execute(
+            delete(ResolvedSource).where(
+                ResolvedSource.anime_id == anime_id,
+                ResolvedSource.option_id.startswith(f"{provider}:", autoescape=True),
+            )
+        )
+        await db.execute(
             delete(EpisodeSource).where(
                 EpisodeSource.anime_id == anime_id, EpisodeSource.provider == provider
             )
@@ -272,3 +286,97 @@ async def availability(anime_id: int) -> Availability:
         checked=sorted(checked),
         scans=[scans[name] for name in enabled if name in scans],
     )
+
+
+async def cached_sources(
+    anime_id: int, providers: list[str]
+) -> tuple[dict[str, SourceScan], dict[int, list[SourceOption]]]:
+    """Every cached option of a show, per episode, in provider order: what the player needs."""
+    scans = await _scans(anime_id)
+    async with AsyncSessionLocal() as db:
+        rows = await db.scalars(
+            select(EpisodeSource)
+            .where(EpisodeSource.anime_id == anime_id, EpisodeSource.provider.in_(providers))
+            .order_by(EpisodeSource.episode, EpisodeSource.position)
+        )
+        by_episode: dict[int, list[EpisodeSource]] = {}
+        for r in rows:
+            by_episode.setdefault(r.episode, []).append(r)
+    rank = {name: i for i, name in enumerate(providers)}
+    options = {
+        episode: [
+            SourceOption(
+                id=r.option_id,
+                provider=r.provider,
+                label=r.label,
+                language=cast(Language, r.language),
+                resolved=resolved_from_json(r.resolved) if r.resolved else None,
+            )
+            for r in sorted(found, key=lambda r: (rank[r.provider], r.position))
+        ]
+        for episode, found in by_episode.items()
+    }
+    return scans, options
+
+
+def resolution_ttl(resolved: Resolved) -> timedelta:
+    direct = any(s.kind == "direct" for s in resolved.streams)
+    return RESOLVED_DIRECT_TTL if direct else RESOLVED_EMBED_TTL
+
+
+@dataclass(frozen=True)
+class StoredResolution:
+    episode: int
+    option_id: str
+    resolved: Resolved
+    resolved_at: datetime
+    expires_at: datetime
+
+
+async def store_resolution(
+    anime_id: int, episode: int, option_id: str, resolved: Resolved
+) -> StoredResolution:
+    """Keep a resolution for the next play (also across restarts)."""
+    now = datetime.now(UTC)
+    values = {
+        "data": resolved_to_json(resolved),
+        "resolved_at": now,
+        "expires_at": now + resolution_ttl(resolved),
+    }
+    stmt = insert(ResolvedSource).values(
+        anime_id=anime_id, episode=episode, option_id=option_id, **values
+    )
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            stmt.on_conflict_do_update(
+                index_elements=["anime_id", "episode", "option_id"], set_=values
+            )
+        )
+        await db.commit()
+    return StoredResolution(episode, option_id, resolved, now, values["expires_at"])
+
+
+async def cached_resolutions(
+    anime_id: int, episode: int | None = None, option_id: str | None = None
+) -> list[StoredResolution]:
+    """Unexpired resolutions of a show (or of one episode's option); expired ones are dropped."""
+    now = datetime.now(UTC)
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            delete(ResolvedSource).where(
+                ResolvedSource.anime_id == anime_id, ResolvedSource.expires_at <= now
+            )
+        )
+        query = select(ResolvedSource).where(ResolvedSource.anime_id == anime_id)
+        if episode is not None:
+            query = query.where(ResolvedSource.episode == episode)
+        if option_id is not None:
+            query = query.where(ResolvedSource.option_id == option_id)
+        rows = (await db.scalars(query)).all()
+        await db.commit()
+    return [
+        StoredResolution(
+            r.episode, r.option_id, resolved_from_json(r.data), r.resolved_at, r.expires_at
+        )
+        for r in rows
+    ]

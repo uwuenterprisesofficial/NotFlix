@@ -1,5 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { LANGUAGE_ORDER } from "@/lib/languages";
+import {
+  dropResolution,
+  getShowStreams,
+  isFresh,
+  type ShowStreams,
+  saveEpisodeOptions,
+  loadShowStreams,
+  saveResolution,
+  storedResolution,
+  subscribeStreams,
+} from "@/lib/streamCache";
 import type { Language, Resolved, SourceOption, Stream } from "@/lib/types";
 import { useStoredValue } from "./useStoredValue";
 
@@ -7,84 +18,120 @@ type Resolution = { ok: true; resolved: Resolved } | { ok: false; error: string 
 
 // How long to hold out for a direct stream before settling for an embedded player.
 const DIRECT_PATIENCE_MS = 8000;
+// Resolve the next episode's source once this one has been playing for a moment.
+const PREFETCH_AFTER_MS = 10_000;
+// Links older than this may have expired early when they fail; younger ones are just broken.
+const STALE_LINKS_MS = 10 * 60_000;
 
-async function resolveOption(animeId: number, episode: number, id: string): Promise<Resolution> {
+async function resolveOption(
+  animeId: number,
+  episode: number,
+  id: string,
+  fresh = false,
+): Promise<Resolution> {
   try {
-    const res = await fetch(
-      `/api/anime/${animeId}/episodes/${episode}/resolve?option=${encodeURIComponent(id)}`,
-    );
+    const params = new URLSearchParams({ option: id });
+    if (fresh) params.set("fresh", "true");
+    const res = await fetch(`/api/anime/${animeId}/episodes/${episode}/resolve?${params}`);
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      return {
-        ok: false,
-        error: body?.detail ?? `Source failed (${res.status})`,
-      };
+      return { ok: false, error: body?.detail ?? `Source failed (${res.status})` };
     }
     const resolved: Resolved = await res.json();
-    return resolved.streams.length
-      ? { ok: true, resolved }
-      : { ok: false, error: "No playable stream from this source" };
+    if (!resolved.streams.length)
+      return { ok: false, error: "No playable stream from this source" };
+    saveResolution(animeId, episode, id, resolved);
+    return { ok: true, resolved };
   } catch {
     return { ok: false, error: "Network error" };
   }
 }
 
-export type Continue = {
-  provider: string | null;
-  label: string | null;
-  server: string | null;
-};
+/** Providers that haven't looked at this episode yet (and haven't failed outright). */
+function unsettled(show: ShowStreams, episode: number) {
+  return show.providers
+    .filter((p) => p.status !== "failed" && !p.episodes.includes(episode))
+    .map((p) => p.name);
+}
+
+export type Continue = { provider: string | null; label: string | null; server: string | null };
 
 /**
- * Loads every provider's source options for an episode in parallel, groups them by language and
- * resolves all of the current language's sources. Without an explicit choice it plays a working
- * direct stream (which NotFlix's own player controls), preferring the provider and server the
- * previous episode used; an embedded player is the fallback when no source has one in time.
- * Direct streams that fail to play are skipped. Once something plays, sources answering later
- * never take over.
+ * An episode's sources, grouped by language, from the show's stream data that the browser keeps
+ * (one request per show while it's fresh; none when moving between episodes, switching
+ * language or reloading). Without an explicit choice it plays a working direct stream (which
+ * NotFlix's own player controls), preferring the provider and server the previous episode used;
+ * an embedded player is the fallback when no source has one in time. Direct streams that fail
+ * to play are skipped. Once something plays, sources answering later never take over.
  */
 export function useSources(
   animeId: number,
   episode: number,
   prefer: Continue = { provider: null, label: null, server: null },
 ) {
-  const [providers, setProviders] = useState<string[] | null>(null);
-  const [arrivals, setArrivals] = useState<[string, SourceOption[]][]>([]);
+  const show = useSyncExternalStore(
+    subscribeStreams,
+    () => getShowStreams(animeId),
+    () => null,
+  );
   const [loadError, setLoadError] = useState(false);
+  // Providers whose live lookup for this episode failed; not waited for any longer.
+  const [gaveUp, setGaveUp] = useState<string[]>([]);
   const [resolutions, setResolutions] = useState<Record<string, Resolution>>({});
   const [chosenId, setChosenId] = useState<string | null>(null);
   const [streamChoice, setStreamChoice] = useState<Record<string, string>>({});
   const [failedStreams, setFailedStreams] = useState<Record<string, true>>({});
+  const [refreshed, setRefreshed] = useState<Record<string, true>>({});
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const [search, setSearch] = useState({ round: 0, patient: true });
   const [preferred, setPreferred] = useStoredValue<Language>("notflix:language", "de-dub");
   const inflight = useRef(new Set<string>());
+  const prefetched = useRef(false);
 
+  // The show's stream data: the stored copy while it's fresh, else one request. Providers that
+  // haven't covered this episode yet are asked for just this episode.
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    const arrive = (name: string, found: SourceOption[]) =>
-      setArrivals((current) =>
-        cancelled || current.some(([n]) => n === name) ? current : [...current, [name, found]],
-      );
-    fetch("/api/providers")
-      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-      .then((names: string[]) => {
-        if (cancelled) return;
-        setProviders(names);
-        for (const name of names) {
-          fetch(
-            `/api/anime/${animeId}/episodes/${episode}/sources?provider=${encodeURIComponent(name)}`,
-          )
-            .then((res) => (res.ok ? res.json() : []))
-            .catch(() => [])
-            .then((found: SourceOption[]) => arrive(name, found));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    (async () => {
+      let data = getShowStreams(animeId);
+      if (!data || !isFresh(data.expires_at)) {
+        try {
+          data = await loadShowStreams(animeId, episode);
+        } catch {
+          if (!cancelled && !data) setLoadError(true);
+          if (!data) return;
         }
-      })
-      .catch(() => !cancelled && setLoadError(true));
+        if (cancelled) return;
+      }
+      // Fetched mid-scan: fetch again once the scan should be done, so later episodes find
+      // complete data.
+      if (data.scanning)
+        timer = setTimeout(
+          () => setReload((r) => r + 1),
+          Math.max(1000, Date.parse(data.expires_at) - Date.now() + 500),
+        );
+      for (const name of unsettled(data, episode)) {
+        fetch(
+          `/api/anime/${animeId}/episodes/${episode}/sources?provider=${encodeURIComponent(name)}`,
+        )
+          .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+          .then((found: SourceOption[]) => {
+            if (cancelled) return;
+            // An empty answer may be a provider outage; only keep real finds.
+            if (found.length) saveEpisodeOptions(animeId, name, episode, found);
+            else setGaveUp((g) => [...g, name]);
+          })
+          .catch(() => !cancelled && setGaveUp((g) => [...g, name]));
+      }
+    })();
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [animeId, episode]);
+  }, [animeId, episode, reload]);
 
   const { round } = search;
   useEffect(() => {
@@ -95,16 +142,22 @@ export function useSources(
     return () => clearTimeout(timer);
   }, [round]);
 
-  const pending = providers ? providers.length - arrivals.length : null;
-  const all = arrivals.flatMap(([, found]) => found);
+  const providers = show?.providers.map((p) => p.name) ?? null;
+  const waiting = show ? unsettled(show, episode).filter((name) => !gaveUp.includes(name)) : null;
+  const pending = waiting?.length ?? null;
+  const all = show?.episodes.find((e) => e.episode === episode)?.options ?? [];
   const languages = LANGUAGE_ORDER.filter((lang) => all.some((o) => o.language === lang));
   // While providers are still answering, wait for the preferred language instead of falling back.
   const language =
     languages.includes(preferred) || pending !== 0 ? preferred : (languages[0] ?? preferred);
   const candidates = all.filter((o) => o.language === language);
 
-  const resolutionOf = (o: SourceOption): Resolution | undefined =>
-    o.resolved ? { ok: true, resolved: o.resolved } : resolutions[o.id];
+  const resolutionOf = (o: SourceOption): Resolution | undefined => {
+    if (o.resolved) return { ok: true, resolved: o.resolved };
+    if (o.id in resolutions) return resolutions[o.id];
+    const stored = storedResolution(show, episode, o.id);
+    return stored ? { ok: true, resolved: stored } : undefined;
+  };
   const streamsOf = (o: SourceOption): Stream[] => {
     const r = resolutionOf(o);
     return r?.ok ? r.resolved.streams : [];
@@ -126,17 +179,18 @@ export function useSources(
   const waitForPreferred =
     !!prefer.provider &&
     !!providers?.includes(prefer.provider) &&
-    !arrivals.some(([name]) => name === prefer.provider);
+    !!waiting?.includes(prefer.provider);
   const stillLooking = pending !== 0 || usable.some((o) => !resolutionOf(o));
+  // The previous episode's source is likely direct again; give it the chance to answer first.
+  const preferredResolving = !!usable[0] && rank(usable[0]) < 2 && !resolutionOf(usable[0]);
 
   function autoPick(): SourceOption | null {
     // Stay with what plays, unless its direct streams all failed and another source has one.
     const playing = usable.find((o) => o.id === playingId);
-    if (playing && (hasDirect(playing) || !usable.some(hasDirect))) return playing;
+    if (playing && (hasDirect(playing) || !resolutionOf(playing) || !usable.some(hasDirect)))
+      return playing;
     if (waitForPreferred) return null;
     const direct = usable.find(hasDirect);
-    // The previous episode's source is likely direct again; give it the chance to answer.
-    const preferredResolving = usable[0] && rank(usable[0]) < 2 && !resolutionOf(usable[0]);
     if (direct && !preferredResolving) return direct;
     if (stillLooking && search.patient) return null;
     return usable.find(hasWorking) ?? null;
@@ -154,21 +208,89 @@ export function useSources(
     [...streams].sort((a, b) => streamRank(a) - streamRank(b))[0] ??
     null;
 
-  // Resolve every source of the language at once: the dropdown shows what each one offers, and
-  // the first working direct stream doesn't have to wait for sources ahead of it.
+  // Resolve only what's needed: the active source; while searching for a direct stream, the
+  // previous episode's source first and then the rest of the language; everything once the
+  // stream menu is opened. Stored resolutions make most of these free.
+  let wanted: SourceOption[] = [];
+  if (showAll) wanted = candidates;
+  else if (active) wanted = [active];
+  else if (waitForPreferred) wanted = [];
+  else if (preferredResolving) wanted = [usable[0]];
+  else wanted = candidates;
+  const resolveKey = wanted
+    .filter((o) => !resolutionOf(o))
+    .map((o) => o.id)
+    .join(" ");
   useEffect(() => {
-    for (const o of candidates) {
-      if (o.resolved || inflight.current.has(o.id)) continue;
-      inflight.current.add(o.id);
-      resolveOption(animeId, episode, o.id).then((result) =>
-        setResolutions((current) => ({ ...current, [o.id]: result })),
-      );
+    for (const id of resolveKey ? resolveKey.split(" ") : []) {
+      if (inflight.current.has(id)) continue;
+      inflight.current.add(id);
+      resolveOption(animeId, episode, id).then((result) => {
+        inflight.current.delete(id);
+        setResolutions((current) => ({ ...current, [id]: result }));
+      });
     }
-  }, [candidates, animeId, episode]);
+  }, [resolveKey, animeId, episode]);
+
+  // Once this episode plays, resolve the next episode's matching source, so "Next Episode"
+  // starts right away with the same stream.
+  const playingOption = candidates.find((o) => o.id === playingId);
+  const nextOptions = show?.episodes.find((e) => e.episode === episode + 1)?.options ?? [];
+  const nextMatch = playingOption
+    ? (nextOptions.find(
+        (o) => o.provider === playingOption.provider && o.label === playingOption.label,
+      ) ??
+      nextOptions.find(
+        (o) => o.provider === playingOption.provider && o.language === playingOption.language,
+      ))
+    : undefined;
+  const nextId =
+    nextMatch && !nextMatch.resolved && !storedResolution(show, episode + 1, nextMatch.id)
+      ? nextMatch.id
+      : null;
+  useEffect(() => {
+    if (!nextId || prefetched.current) return;
+    const timer = setTimeout(() => {
+      prefetched.current = true;
+      void resolveOption(animeId, episode + 1, nextId);
+    }, PREFETCH_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [nextId, animeId, episode]);
 
   let error: string | null = null;
   if (activeResolution && !activeResolution.ok) error = activeResolution.error;
   else if (activeResolution && !streams.length) error = "None of its streams would play";
+
+  /** A direct stream that couldn't be played. Stored links may have expired early: when they
+   * aren't brand new, the source's links are fetched fresh once; otherwise the next working
+   * stream takes over. */
+  function failStream(url: string) {
+    const owner = candidates.find((o) => streamsOf(o).some((s) => s.url === url));
+    const r = owner && resolutionOf(owner);
+    const fetchedAt = r?.ok && r.resolved.resolved_at ? Date.parse(r.resolved.resolved_at) : 0;
+    if (
+      owner &&
+      !owner.resolved &&
+      !refreshed[owner.id] &&
+      Date.now() - fetchedAt > STALE_LINKS_MS
+    ) {
+      const id = owner.id;
+      setRefreshed((r) => ({ ...r, [id]: true }));
+      dropResolution(animeId, episode, id);
+      setResolutions((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      inflight.current.add(id);
+      resolveOption(animeId, episode, id, true).then((result) => {
+        inflight.current.delete(id);
+        setResolutions((current) => ({ ...current, [id]: result }));
+      });
+      return;
+    }
+    setFailedStreams((f) => ({ ...f, [url]: true }));
+  }
 
   return {
     loading: !loadError && pending !== 0,
@@ -192,8 +314,9 @@ export function useSources(
       setChosenId(id);
       if (url) setStreamChoice((c) => ({ ...c, [id]: url }));
     },
-    /** A direct stream that couldn't be played; the next working one takes its place. */
-    failStream: (url: string) => setFailedStreams((f) => ({ ...f, [url]: true })),
+    failStream,
+    /** Load every source of the language, e.g. to list them all in the stream menu. */
+    showAll: () => setShowAll(true),
     /** The active source started playing: keep it even if a "better" one answers later. */
     started: () => {
       if (active) setPlayingId(active.id);
