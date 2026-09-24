@@ -107,6 +107,9 @@ export function Player({
                 {LANGUAGE_LABELS[lang]}
               </button>
             ))}
+            {sources.loading && (
+              <span className="self-center text-xs text-muted">Loading more sources…</span>
+            )}
           </div>
           <div className="flex flex-wrap gap-2" aria-label="Source">
             {sources.candidates.map((o) => (

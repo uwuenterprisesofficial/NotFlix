@@ -3,9 +3,11 @@ from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser
 from app.models import ProviderMapping
+from app.providers import base as providers_base
 from app.providers.base import (
     AnimeInfo,
     ProviderError,
+    ProviderUnavailable,
     Resolved,
     Stream,
     list_options,
@@ -25,6 +27,13 @@ from app.services.mappings import delete_mapping, save_mapping
 from app.services.proxy import proxy_url
 
 router = APIRouter(prefix="/anime/{anime_id}", tags=["streams"])
+providers_router = APIRouter(tags=["streams"])
+
+
+@providers_router.get("/providers", response_model=list[str])
+async def providers():
+    """Enabled stream providers; the player loads each one's sources separately."""
+    return [p.name for p in providers_base.enabled_providers()]
 
 
 def stream_out(stream: Stream) -> StreamOut:
@@ -67,9 +76,10 @@ async def _anime_info(db: DB, anime_id: int) -> AnimeInfo:
 
 
 @router.get("/episodes/{episode}/sources", response_model=list[SourceOptionOut])
-async def episode_sources(anime_id: int, episode: int, db: DB):
-    """Every way to watch this episode. Options without `resolved` need a /resolve call."""
-    options = await list_options(await _anime_info(db, anime_id), episode)
+async def episode_sources(anime_id: int, episode: int, db: DB, provider: str | None = None):
+    """Ways to watch this episode (from one provider, or all). Options without `resolved`
+    need a /resolve call."""
+    options = await list_options(await _anime_info(db, anime_id), episode, provider)
     return [
         SourceOptionOut(
             id=o.id,
@@ -86,6 +96,8 @@ async def episode_sources(anime_id: int, episode: int, db: DB):
 async def resolve_source(anime_id: int, episode: int, option: str, db: DB):
     try:
         resolved = await resolve_option(await _anime_info(db, anime_id), episode, option)
+    except ProviderUnavailable as e:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e)) from e
     except ProviderError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
     except TimeoutError as e:

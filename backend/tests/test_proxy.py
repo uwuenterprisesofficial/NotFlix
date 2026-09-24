@@ -171,6 +171,8 @@ async def test_aniworld_mapping_override(client, user):
 
 
 class EmbedOnlyProvider(FakeProvider):
+    name = "embedonly"
+
     async def resolve(self, anime, episode, key):
         return Resolved(streams=[Stream(kind="embed", url="https://embed.example", label="E")])
 
@@ -191,3 +193,15 @@ def test_analyzer_uses_direct_provider_streams(database, monkeypatch, tmp_path):
     monkeypatch.setattr(providers_base, "enabled_providers", lambda: [EmbedOnlyProvider()])
     with pytest.raises(MediaNotFound, match="episode 2"):
         resolve_all(9, [1, 2])
+
+
+async def test_sources_can_be_loaded_per_provider(client, monkeypatch):
+    monkeypatch.setattr(
+        providers_base, "enabled_providers", lambda: [FakeProvider(), EmbedOnlyProvider()]
+    )
+    assert (await client.get("/providers")).json() == ["fake", "embedonly"]
+    only_fake = (
+        await client.get("/anime/9/episodes/1/sources", params={"provider": "fake"})
+    ).json()
+    assert [o["id"] for o in only_fake] == ["fake:hd"]
+    assert len((await client.get("/anime/9/episodes/1/sources")).json()) == 2

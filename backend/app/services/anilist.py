@@ -1,5 +1,7 @@
 """MyAnimeList id -> AniList id, titles and season number (via AniList's public GraphQL API)."""
 
+import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -12,6 +14,15 @@ API_URL = "https://graphql.anilist.co"
 SEASON_FORMATS = {"TV", "TV_SHORT", "ONA"}
 PREQUEL_DEPTH = 6
 RETRY_NOT_FOUND_AFTER = timedelta(days=1)
+UNAVAILABLE_BACKOFF_S = 60
+
+log = logging.getLogger(__name__)
+_down_until = 0.0
+
+
+class AniListUnavailable(RuntimeError):
+    pass
+
 
 _NODE = "id type format title { romaji english } synonyms"
 
@@ -72,15 +83,24 @@ def parse_media(media: dict[str, Any]) -> AniListInfo:
 
 
 async def lookup(mal_id: int, http: httpx.AsyncClient | None = None) -> AniListInfo | None:
-    client = http or httpx.AsyncClient(timeout=15)
+    """None when AniList has no entry; AniListUnavailable when it can't be asked right now."""
+    global _down_until
+    if _down_until > time.monotonic():
+        raise AniListUnavailable("AniList was unreachable a moment ago")
+    client = http or httpx.AsyncClient(timeout=httpx.Timeout(15, connect=5))
     try:
         resp = await client.post(API_URL, json={"query": QUERY, "variables": {"mal": mal_id}})
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        # Unreachable or rate limited: don't make every page load wait for the same failure.
+        _down_until = time.monotonic() + UNAVAILABLE_BACKOFF_S
+        log.warning("AniList request failed (%s); skipping it for %ss", e, UNAVAILABLE_BACKOFF_S)
+        raise AniListUnavailable(str(e)) from e
     finally:
         if http is None:
             await client.aclose()
-    if resp.status_code == 404:
-        return None
-    resp.raise_for_status()
     media = (resp.json().get("data") or {}).get("Media")
     return parse_media(media) if media else None
 

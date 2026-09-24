@@ -1,6 +1,5 @@
 """German dub/sub sources from AniWorld. Hoster links are shown as iframe embeds."""
 
-import contextlib
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -171,8 +170,11 @@ class AniWorldProvider:
             return None
 
         info = None
-        with contextlib.suppress(httpx.HTTPError):  # Fall back to MAL titles and season 1.
+        anilist_ok = True
+        try:
             info = await anilist.lookup(anime.id)
+        except anilist.AniListUnavailable:
+            anilist_ok = False  # Guess from MAL titles and season 1, but don't remember it.
         season = info.season if info else 1
         titles = [*(info.root_titles if info else []), *(info.titles if info else [])]
         titles += [t for t in (anime.title_en, anime.title) if t]
@@ -180,9 +182,11 @@ class AniWorldProvider:
         for slug in slug_candidates(titles):
             html = await self._fetch(self.season_path(slug, season))
             if html and count_episodes(html) > 0:
-                await save_mapping(anime.id, self.name, slug, season)
+                if anilist_ok:
+                    await save_mapping(anime.id, self.name, slug, season)
                 return slug, season, 0
-        await save_mapping(anime.id, self.name, None)
+        if anilist_ok:
+            await save_mapping(anime.id, self.name, None)
         return None
 
     async def episode_links(self, anime: AnimeInfo, episode: int) -> list[EpisodeLink]:

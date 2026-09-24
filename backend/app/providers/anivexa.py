@@ -15,7 +15,7 @@ from app.providers.base import (
     Stream,
     Subtitle,
 )
-from app.services.anilist import anilist_id
+from app.services.anilist import AniListUnavailable, anilist_id
 
 EPISODES_CACHE_TTL = 15 * 60
 LABELS = {
@@ -158,8 +158,14 @@ class AnivexaProvider:
             await set_json(key, data, EPISODES_CACHE_TTL)
         return data
 
+    async def _anilist_id(self, anime: AnimeInfo) -> int | None:
+        try:
+            return await anilist_id(anime.id)
+        except AniListUnavailable as e:
+            raise ProviderError("Anivexa needs AniList ids and AniList is unreachable") from e
+
     async def options(self, anime: AnimeInfo, episode: int) -> list[SourceOption]:
-        al_id = await anilist_id(anime.id)
+        al_id = await self._anilist_id(anime)
         if al_id is None or not self.providers:
             return []
         data = await self._episodes(al_id)
@@ -177,7 +183,7 @@ class AnivexaProvider:
         provider, _, audio = key.partition(":")
         if provider not in self.providers or audio not in AUDIO_LANGUAGE:
             raise ProviderError(f"Unknown Anivexa source {key!r}")
-        al_id = await anilist_id(anime.id)
+        al_id = await self._anilist_id(anime)
         if al_id is None:
             raise ProviderError("No AniList id for this anime")
         data = await self._get(f"/watch/{provider}/{al_id}/{audio}/{provider}-{episode}")

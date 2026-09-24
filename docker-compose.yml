@@ -11,12 +11,17 @@ x-backend: &backend
     FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     # Stream providers; an empty URL disables one. Anivexa must be run separately.
     ANIVEXA_URL: ${ANIVEXA_URL:-}
+    REANIME_URL: ${REANIME_URL:-}
     ANIWORLD_URL: ${ANIWORLD_URL-https://aniworld.to}
     # No default here: Compose before 2.24 cuts ${VAR:-default} at the first '}'.
     ANIWORLD_SERIES_PATH: ${ANIWORLD_SERIES_PATH:-}
     DATABASE_URL: postgresql+psycopg://notflix:notflix@db:5432/notflix
     REDIS_URL: redis://redis:6379/0
     MEDIA_DIR: /media
+  # Lets the containers reach services running on your machine (Anivexa, ReAnime) at
+  # http://host.docker.internal:<port>; "localhost" inside a container is the container itself.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   volumes:
     - ./backend:/app
     - ./media:/media:ro

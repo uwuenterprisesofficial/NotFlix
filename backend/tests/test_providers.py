@@ -301,10 +301,10 @@ async def test_aniworld_remembers_missing_series(database, monkeypatch, memory_c
     from app.services import anilist
     from app.services.mappings import delete_mapping
 
-    async def no_anilist(mal_id):
-        raise httpx.ConnectError("down")
+    async def not_on_anilist(mal_id):
+        return None
 
-    monkeypatch.setattr(anilist, "lookup", no_anilist)
+    monkeypatch.setattr(anilist, "lookup", not_on_anilist)
     await delete_mapping(1, "aniworld")
     requests: list[str] = []
     http = httpx.AsyncClient(transport=httpx.MockTransport(_aniworld_handler(requests)))
@@ -315,3 +315,173 @@ async def test_aniworld_remembers_missing_series(database, monkeypatch, memory_c
     assert requests == ["/anime/unknown-show/staffel-1"]
     assert await provider.options(anime, 1) == []
     assert len(requests) == 1
+
+
+async def test_aniworld_does_not_remember_guesses_made_while_anilist_is_down(
+    database, monkeypatch, memory_cache
+):
+    from app.services import anilist
+    from app.services.mappings import delete_mapping, get_mapping
+
+    async def anilist_down(mal_id):
+        raise anilist.AniListUnavailable("down")
+
+    monkeypatch.setattr(anilist, "lookup", anilist_down)
+    await delete_mapping(2, "aniworld")
+    requests: list[str] = []
+    http = httpx.AsyncClient(transport=httpx.MockTransport(_aniworld_handler(requests)))
+    provider = AniWorldProvider("https://aniworld.example", "anime/{slug}", http=http)
+
+    assert await provider.options(AnimeInfo(id=2, title="Unknown Show"), 1) == []
+    assert await provider.options(AnimeInfo(id=2, title="Unknown Show"), 1) == []
+    assert len(requests) == 2
+    assert await get_mapping(2, "aniworld") is None
+
+
+async def test_anilist_backs_off_after_failures(monkeypatch):
+    from app.services import anilist
+
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        raise httpx.ConnectError("All connection attempts failed")
+
+    monkeypatch.setattr(anilist, "_down_until", 0.0)
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    with pytest.raises(anilist.AniListUnavailable):
+        await anilist.lookup(1, http=http)
+    with pytest.raises(anilist.AniListUnavailable):
+        await anilist.lookup(1, http=http)
+    assert len(calls) == 1
+
+
+# --- ReAnime -----------------------------------------------------------------------------------
+
+SEARCH = {
+    "data": [
+        {
+            "slug": "shingeki-no-kyojin-s3-aaa",
+            "title": {"english": "Attack on Titan Season 3"},
+            "cover_image": {"large": "https://s4.anilist.co/file/bx99147-abc.jpg"},
+        },
+        {
+            "slug": "shingeki-no-kyojin-bbb",
+            "title": {"english": "Attack on Titan"},
+            "anilist": 16498,
+        },
+    ]
+}
+SERVERS = {
+    "sub": [
+        {"serverName": "HD-2", "dataLink": "https://flixcloud.cc/e/abc?v=2", "dataType": "sub"},
+        {"serverName": "HD-1", "dataLink": "javascript:alert(1)", "dataType": "sub"},
+    ],
+    "dub": [
+        {"serverName": "HD-1", "dataLink": "https://flixcloud.cc/e/abc?v=1", "dataType": "dub"}
+    ],
+    "intro_start": 90,
+    "intro_end": 180,
+    "outro_start": None,
+    "outro_end": None,
+}
+
+
+def test_reanime_pick_slug_prefers_anilist_id():
+    from app.providers.reanime import pick_slug
+
+    results = SEARCH["data"]
+    assert pick_slug(results, 99147, ["Attack on Titan"]) == "shingeki-no-kyojin-s3-aaa"
+    assert pick_slug(results, 16498, []) == "shingeki-no-kyojin-bbb"
+    assert pick_slug(results, 1, ["Attack on Titan"]) is None  # ids known: never guess by title
+    untagged = [{"slug": "x", "title": "Steins;Gate"}]
+    assert pick_slug(untagged, 9253, ["Steins Gate"]) == "x"
+
+
+async def test_reanime_provider_lists_embed_servers(database, monkeypatch, memory_cache):
+    from app.providers import reanime
+    from app.providers.reanime import ReAnimeProvider
+    from app.services import anilist
+    from app.services.mappings import delete_mapping
+
+    async def fake_anilist_id(mal_id):
+        return 99147
+
+    monkeypatch.setattr(anilist, "anilist_id", fake_anilist_id)
+    monkeypatch.setattr(reanime, "get_json", lambda key: _async(memory_cache.get(key)))
+    monkeypatch.setattr(reanime, "set_json", lambda key, value, ttl: _async(None))
+    await delete_mapping(38524, "reanime")
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        if request.url.path == "/search":
+            return httpx.Response(200, json=SEARCH)
+        if request.url.path == "/servers/shingeki-no-kyojin-s3-aaa/3":
+            return httpx.Response(200, json=SERVERS)
+        return httpx.Response(404, json={"detail": "Not found"})
+
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = ReAnimeProvider("http://reanime:8000/", http=http)
+    anime = AnimeInfo(id=38524, title="Shingeki no Kyojin Season 3", title_en="Attack on Titan S3")
+
+    options = await provider.options(anime, 3)
+    assert [(o.id, o.label, o.language) for o in options] == [
+        ("reanime:sub:HD-2", "ReAnime HD-2", "en-sub"),
+        ("reanime:dub:HD-1", "ReAnime HD-1", "en-dub"),
+    ]
+    stream = options[0].resolved.streams[0]
+    assert (stream.kind, stream.url) == ("embed", "https://flixcloud.cc/e/abc?v=2")
+    assert [(s.kind, s.start_s, s.end_s) for s in options[0].resolved.segments] == [
+        ("opening", 90, 180)
+    ]
+    assert requests[1] == "http://reanime:8000/servers/shingeki-no-kyojin-s3-aaa/3?anilist_id=99147"
+    assert (await provider.resolve(anime, 3, "dub:HD-1")).streams[0].url.endswith("v=1")
+    assert await provider.options(anime, 99) == []
+
+
+async def _async(value):
+    return value
+
+
+# --- Unreachable providers ---------------------------------------------------------------------
+
+
+class DownProvider:
+    name = "down"
+    base_url = "http://localhost:4000"
+
+    def __init__(self):
+        self.calls = 0
+
+    async def options(self, anime, episode):
+        self.calls += 1
+        raise httpx.ConnectError("All connection attempts failed")
+
+    async def resolve(self, anime, episode, key):
+        raise AssertionError("must not be called while the provider is down")
+
+
+async def test_unreachable_provider_is_skipped_for_a_while(monkeypatch):
+    from app.providers import base
+
+    down = DownProvider()
+    monkeypatch.setattr(base, "enabled_providers", lambda: [down])
+    monkeypatch.setattr(base, "_down_until", {})
+    anime = AnimeInfo(id=1, title="x")
+
+    assert await base.list_options(anime, 1) == []
+    assert await base.list_options(anime, 1) == []
+    assert down.calls == 1
+    with pytest.raises(base.ProviderUnavailable):
+        await base.resolve_option(anime, 1, "down:key")
+
+
+def test_unreachable_hint_mentions_host_docker_internal(monkeypatch):
+    from pathlib import Path
+
+    from app.providers.base import unreachable_hint
+
+    monkeypatch.setattr(Path, "exists", lambda self: str(self) == "/.dockerenv")
+    assert "http://host.docker.internal:4000" in unreachable_hint("http://localhost:4000")
+    assert unreachable_hint("http://anivexa.lan:4000") == ""

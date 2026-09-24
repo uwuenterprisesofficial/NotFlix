@@ -24,11 +24,14 @@ async function resolveOption(animeId: number, episode: number, id: string): Prom
 }
 
 /**
- * Loads every source option for an episode, groups them by language and resolves the active one
- * on demand. Without an explicit choice, the first option that doesn't fail is used.
+ * Loads every provider's source options for an episode in parallel, groups them by language and
+ * resolves the active one on demand. Without an explicit choice, the first option that doesn't
+ * fail is used. Options are kept in arrival order so a slow provider answering late can't take
+ * over from the source already playing.
  */
 export function useSources(animeId: number, episode: number) {
-  const [options, setOptions] = useState<SourceOption[] | null>(null);
+  const [providers, setProviders] = useState<string[] | null>(null);
+  const [arrivals, setArrivals] = useState<[string, SourceOption[]][]>([]);
   const [loadError, setLoadError] = useState(false);
   const [resolutions, setResolutions] = useState<Record<string, Resolution>>({});
   const [chosenId, setChosenId] = useState<string | null>(null);
@@ -36,15 +39,37 @@ export function useSources(animeId: number, episode: number) {
   const inflight = useRef(new Set<string>());
 
   useEffect(() => {
-    fetch(`/api/anime/${animeId}/episodes/${episode}/sources`)
+    let cancelled = false;
+    const arrive = (name: string, found: SourceOption[]) =>
+      setArrivals((current) =>
+        cancelled || current.some(([n]) => n === name) ? current : [...current, [name, found]],
+      );
+    fetch("/api/providers")
       .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-      .then((found: SourceOption[]) => setOptions(found))
-      .catch(() => setLoadError(true));
+      .then((names: string[]) => {
+        if (cancelled) return;
+        setProviders(names);
+        for (const name of names) {
+          fetch(
+            `/api/anime/${animeId}/episodes/${episode}/sources?provider=${encodeURIComponent(name)}`,
+          )
+            .then((res) => (res.ok ? res.json() : []))
+            .catch(() => [])
+            .then((found: SourceOption[]) => arrive(name, found));
+        }
+      })
+      .catch(() => !cancelled && setLoadError(true));
+    return () => {
+      cancelled = true;
+    };
   }, [animeId, episode]);
 
-  const all = options ?? [];
+  const pending = providers ? providers.length - arrivals.length : null;
+  const all = arrivals.flatMap(([, found]) => found);
   const languages = LANGUAGE_ORDER.filter((lang) => all.some((o) => o.language === lang));
-  const language = languages.includes(preferred) ? preferred : (languages[0] ?? preferred);
+  // While providers are still answering, wait for the preferred language instead of falling back.
+  const language =
+    languages.includes(preferred) || pending !== 0 ? preferred : (languages[0] ?? preferred);
   const candidates = all.filter((o) => o.language === language);
 
   const resolutionOf = (o: SourceOption): Resolution | undefined =>
@@ -62,7 +87,7 @@ export function useSources(animeId: number, episode: number) {
   }, [active, animeId, episode]);
 
   return {
-    loading: options === null && !loadError,
+    loading: !loadError && pending !== 0,
     loadError,
     languages,
     language,

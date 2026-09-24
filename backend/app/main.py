@@ -21,6 +21,7 @@ app.include_router(me.router)
 app.include_router(browse.router)
 app.include_router(anime.router)
 app.include_router(streams.router)
+app.include_router(streams.providers_router)
 app.include_router(proxy.router)
 
 
