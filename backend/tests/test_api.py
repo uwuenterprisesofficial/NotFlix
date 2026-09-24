@@ -3,7 +3,14 @@ import pytest
 from sqlalchemy import delete, select
 
 from app.db.session import sync_session
-from app.models import AnalysisJob, JobStatus, SkipSegment, StreamSource
+from app.models import (
+    AnalysisJob,
+    Anime,
+    EpisodeFingerprint,
+    JobStatus,
+    SkipSegment,
+    StreamSource,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -11,7 +18,7 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture(autouse=True)
 def clean_tables(database):
     with sync_session() as db:
-        for model in (AnalysisJob, SkipSegment, StreamSource):
+        for model in (AnalysisJob, SkipSegment, StreamSource, EpisodeFingerprint):
             db.execute(delete(model))
         db.commit()
 
@@ -113,7 +120,7 @@ async def test_analyze_queues_job_and_reuses_finished_episodes(client, user, mon
     assert body["job"]["episodes"] == [1, 3]
 
 
-def test_worker_stores_detected_segments(database, monkeypatch):
+def test_worker_saves_fingerprints_and_matches_new_episodes_against_them(database, monkeypatch):
     from app.analysis.audio import SAMPLE_RATE, AudioDecodeError
     from app.analysis.media import Media
     from app.worker.tasks import run_analysis
@@ -126,13 +133,16 @@ def test_worker_stores_detected_segments(database, monkeypatch):
         pad = lambda s: rng.standard_normal(s * SAMPLE_RATE).astype(np.float32)  # noqa: E731
         return np.concatenate([pad(intro_at), opening, pad(600), ending, pad(30)])
 
-    audio = {"ep1": fake_episode(10), "ep2": fake_episode(70)}
+    audio = {f"ep{n}": fake_episode(at) for n, at in ((1, 10), (2, 70), (3, 40), (4, 25))}
     asked = []
 
-    def fake_resolve_all(anime_id, episodes, language):
-        asked.append(language)
-        # Episode 2's first direct link is dead; the next one is used instead.
-        return {ep: [Media("dead")] * (ep - 1) + [Media(f"ep{ep}")] for ep in episodes}
+    def fake_resolve_all(anime_id, episodes, language, fresh=False):
+        asked.append((episodes, language, fresh))
+        # Episode 2's first direct link is dead; the next one is used instead. Episode 4's
+        # stored links all expired: only fresh ones work.
+        if episodes == [4]:
+            return {4: [Media("ep4")] if fresh else [Media("dead")]}
+        return {ep: [Media("dead")] * (ep == 2) + [Media(f"ep{ep}")] for ep in episodes}
 
     def fake_load_audio(source, headers):
         if source == "dead":
@@ -142,35 +152,58 @@ def test_worker_stores_detected_segments(database, monkeypatch):
     monkeypatch.setattr("app.worker.tasks.resolve_all", fake_resolve_all)
     monkeypatch.setattr("app.worker.tasks.load_audio", fake_load_audio)
 
+    def run(job_id: str, episodes: list[int]):
+        asked.clear()
+        with sync_session() as db:
+            db.add(AnalysisJob(id=job_id, anime_id=7, episodes=episodes, language="de-dub"))
+            db.commit()
+        run_analysis(job_id)
+        with sync_session() as db:
+            assert db.get(AnalysisJob, job_id).status == JobStatus.done
+            segments = {
+                (s.episode, s.kind): s
+                for s in db.scalars(select(SkipSegment).where(SkipSegment.anime_id == 7))
+            }
+            fingerprints = {
+                f.episode: f.compared_with
+                for f in db.scalars(
+                    select(EpisodeFingerprint).where(EpisodeFingerprint.anime_id == 7)
+                )
+            }
+        return segments, fingerprints
+
     with sync_session() as db:
-        db.add(AnalysisJob(id="job-1", anime_id=7, episodes=[1, 2], language="de-dub"))
         db.add(
             SkipSegment(
-                anime_id=7,
-                episode=2,
-                kind="ending",
-                start_s=1,
-                end_s=2,
-                confidence=1,
+                anime_id=7, episode=2, kind="ending", start_s=1, end_s=2, confidence=1,
                 source="manual",
             )
-        )
+        )  # fmt: skip
         db.commit()
 
-    run_analysis("job-1")
-    assert asked == ["de-dub"]
-
-    with sync_session() as db:
-        assert db.get(AnalysisJob, "job-1").status == JobStatus.done
-        rows = {
-            (s.episode, s.kind): s
-            for s in db.scalars(select(SkipSegment).where(SkipSegment.anime_id == 7))
-        }
+    rows, fingerprints = run("job-1", [1, 2])
+    assert asked == [([1], "de-dub", False), ([2], "de-dub", False)]
     assert rows[(1, "opening")].start_s == pytest.approx(10, abs=1.5)
     assert rows[(2, "opening")].start_s == pytest.approx(70, abs=1.5)
     assert rows[(1, "ending")].start_s == pytest.approx(690, abs=1.5)
     assert rows[(2, "ending")].source == "manual"
     assert rows[(2, "ending")].start_s == 1
+    assert fingerprints == {1: [2], 2: [1]}
+
+    # A new episode on its own is matched against the nearest saved fingerprint: only it is
+    # downloaded.
+    rows, fingerprints = run("job-3", [3])
+    assert asked == [([3], "de-dub", False)]
+    assert rows[(3, "opening")].start_s == pytest.approx(40, abs=1.5)
+    assert rows[(3, "ending")].start_s == pytest.approx(720, abs=1.5)
+    assert rows[(2, "opening")].start_s == pytest.approx(70, abs=1.5)  # partner unchanged
+    assert fingerprints == {1: [2], 2: [1, 3], 3: [2]}
+
+    # Stored links that no longer play are replaced by fresh ones once.
+    rows, fingerprints = run("job-4", [4])
+    assert asked == [([4], "de-dub", False), ([4], "de-dub", True)]
+    assert rows[(4, "opening")].start_s == pytest.approx(25, abs=1.5)
+    assert fingerprints[4] == [3]
 
 
 def test_worker_marks_job_failed_when_media_missing(database):
@@ -185,5 +218,58 @@ def test_worker_marks_job_failed_when_media_missing(database):
     with sync_session() as db:
         job = db.get(AnalysisJob, "job-2")
         assert job.status == JobStatus.failed
-        assert "No direct stream for anime 8 episodes 1, 2" in job.error
+        assert "No direct stream for anime 8 episode 1:" in job.error
         assert job.finished_at is not None
+
+
+async def test_auto_analysis_only_queues_what_is_missing(client, user, monkeypatch):
+    queued = []
+
+    class FakeQueue:
+        def enqueue(self, func, *args, **kwargs):
+            queued.append(args)
+
+    monkeypatch.setattr("app.api.anime.analysis_queue", lambda: FakeQueue())
+    with sync_session() as db:
+        db.execute(delete(Anime).where(Anime.id == 5))
+        db.add(Anime(id=5, title="Five", num_episodes=3, genres=[]))
+        db.commit()
+
+    async def auto(episode):
+        body = {"episode": episode, "language": "de-dub"}
+        return (await client.post("/anime/5/analyze/auto", json=body)).json()
+
+    first = await auto(1)
+    assert (first["job"]["episodes"], first["job"]["language"]) == ([1, 2], "de-dub")
+    assert (await auto(1)) == {"cached": True, "job": None}  # already waiting
+
+    fp = {"language": "de-dub", "hashes": b"", "valid": b"", "frames": 0, "hop_seconds": 0.1}
+    with sync_session() as db:
+        db.get(AnalysisJob, first["job"]["id"]).status = JobStatus.done
+        db.add(EpisodeFingerprint(anime_id=5, episode=1, compared_with=[2], **fp))
+        db.add(EpisodeFingerprint(anime_id=5, episode=2, compared_with=[1], **fp))
+        db.add(
+            SkipSegment(
+                anime_id=5, episode=2, kind="opening", start_s=85, end_s=175, confidence=0.9,
+                source="analysis",
+            )
+        )  # fmt: skip
+        db.commit()
+
+    assert (await auto(2))["job"]["episodes"] == [3]  # episode 2 is done, 3 is new
+    overview = (await client.get("/anime/5/analysis")).json()
+    assert [(e["episode"], e["analysed"]) for e in overview["episodes"]] == [(1, True), (2, True)]
+    assert overview["episodes"][1]["segments"][0]["start_s"] == 85
+    assert [j["episodes"] for j in overview["running"]] == [[3]]
+
+    with sync_session() as db:
+        db.add(
+            SkipSegment(
+                anime_id=5, episode=3, kind="ending", start_s=1300, end_s=1390, confidence=1,
+                source="manual",
+            )
+        )  # fmt: skip
+        db.execute(delete(AnalysisJob))
+        db.commit()
+    assert (await auto(3)) == {"cached": True, "job": None}  # last episode, has data
+    assert len(queued) == 2

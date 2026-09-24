@@ -11,6 +11,7 @@ import { DirectVideo } from "./DirectVideo";
 import { LanguageMenu } from "./LanguageMenu";
 import { FullscreenButton, useFrameFullscreen, usePlayerFrame } from "./PlayerFrame";
 import { StreamMenu } from "./StreamMenu";
+import { useAutoAnalysis } from "./useAutoAnalysis";
 import { useAutoSkip } from "./useAutoSkip";
 import { useSources } from "./useSources";
 import { useStoredValue } from "./useStoredValue";
@@ -61,10 +62,12 @@ export function Player({
   }
   if (stream) nextParams.set("server", stream.label);
   const nextHref = `/watch/${animeId}/${episode + 1}${nextParams.size ? `?${nextParams}` : ""}`;
-  // Timestamps from the source itself match its exact cut; analysed ones are the fallback.
+  const analysis = useAutoAnalysis(animeId, episode, signedIn);
+  // Timestamps from the source itself match its exact cut; analysed ones are the fallback
+  // (including ones the analysis started while watching finds).
   const skipSegments = sources.resolved?.skip_segments.length
     ? sources.resolved.skip_segments
-    : segments;
+    : (analysis.segments ?? segments);
 
   async function setWatched(value: boolean) {
     if (!signedIn || savingNow.current) return;
@@ -107,7 +110,11 @@ export function Player({
                 autoNext={autoNext === "1"}
                 next={hasNext ? { label: "Next Episode", go: () => router.push(nextHref) } : null}
                 onNearEnd={autoMarkWatched}
-                onStart={sources.started}
+                onStart={() => {
+                  sources.started();
+                  // Only direct streams can be analysed; this one is known to play.
+                  analysis.start(sources.language);
+                }}
                 onFail={() => sources.failStream(stream.url)}
                 resumeFrom={() => position.current}
                 onPosition={(t) => (position.current = t)}
@@ -219,7 +226,11 @@ export function Player({
         </div>
       </div>
 
-      <SegmentInfo segments={skipSegments} embedded={stream?.kind === "embed"} />
+      <SegmentInfo
+        segments={skipSegments}
+        embedded={stream?.kind === "embed"}
+        detecting={analysis.detecting}
+      />
     </div>
   );
 }
@@ -257,11 +268,21 @@ function PlayerStatus({ sources }: { sources: ReturnType<typeof useSources> }) {
   );
 }
 
-function SegmentInfo({ segments, embedded }: { segments: SkipSegment[]; embedded: boolean }) {
+function SegmentInfo({
+  segments,
+  embedded,
+  detecting,
+}: {
+  segments: SkipSegment[];
+  embedded: boolean;
+  detecting: boolean;
+}) {
   if (segments.length === 0) {
     return (
       <p className="mt-4 text-sm text-muted">
-        Intro/outro not detected yet — run the detection under “More options” on the show’s page.
+        {detecting
+          ? "Detecting intro & outro in the background…"
+          : "Intro/outro not detected yet. It’s detected automatically while a direct stream plays, or under “More options” on the show’s page."}
       </p>
     );
   }

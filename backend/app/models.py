@@ -8,6 +8,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -197,6 +198,26 @@ class SkipSegment(Base):
     end_s: Mapped[float] = mapped_column(Float)
     confidence: Mapped[float] = mapped_column(Float)
     source: Mapped[str] = mapped_column(String(20), default="analysis")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EpisodeFingerprint(Base):
+    """An analysed episode's audio fingerprint: matching a new episode against it needs no
+    second download. `compared_with` lists the episodes it was matched against; non-empty means
+    this episode's intro/outro search is done."""
+
+    __tablename__ = "episode_fingerprints"
+    __table_args__ = (UniqueConstraint("anime_id", "episode"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anime_id: Mapped[int] = mapped_column(Integer, index=True)
+    episode: Mapped[int] = mapped_column(Integer)
+    language: Mapped[str | None] = mapped_column(String(10))  # of the stream it was made from
+    hashes: Mapped[bytes] = mapped_column(LargeBinary)  # little-endian uint32 per frame
+    valid: Mapped[bytes] = mapped_column(LargeBinary)  # np.packbits of the per-frame flags
+    frames: Mapped[int] = mapped_column(Integer)
+    hop_seconds: Mapped[float] = mapped_column(Float)
+    compared_with: Mapped[list[int]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

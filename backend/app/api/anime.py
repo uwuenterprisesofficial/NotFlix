@@ -4,11 +4,21 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser, OptionalUser
-from app.models import AnalysisJob, JobStatus, ListEntry, ListStatus, SkipSegment
+from app.models import (
+    AnalysisJob,
+    EpisodeFingerprint,
+    JobStatus,
+    ListEntry,
+    ListStatus,
+    SkipSegment,
+)
 from app.schemas import (
+    AnalysisOverview,
     AnalyzeRequest,
     AnalyzeResponse,
     AnimeDetail,
+    AutoAnalyzeRequest,
+    EpisodeAnalysisOut,
     EpisodeOut,
     JobOut,
     Progress,
@@ -99,16 +109,98 @@ async def analyze(anime_id: int, body: AnalyzeRequest, user: CurrentUser, db: DB
             pending = sorted([pending[0], reference])
         episodes = pending
 
-    job = AnalysisJob(
-        id=str(uuid.uuid4()), anime_id=anime_id, episodes=episodes, language=body.language
-    )
+    job = await _queue_analysis(db, anime_id, episodes, body.language)
+    return AnalyzeResponse(cached=False, job=JobOut.model_validate(job))
+
+
+async def _queue_analysis(
+    db: DB, anime_id: int, episodes: list[int], language: str | None
+) -> AnalysisJob:
+    job = AnalysisJob(id=str(uuid.uuid4()), anime_id=anime_id, episodes=episodes, language=language)
     db.add(job)
     await db.commit()
     await db.refresh(job)
     analysis_queue().enqueue(
         "app.worker.tasks.run_analysis", job.id, job_id=job.id, job_timeout=3600
     )
+    return job
+
+
+async def _running_jobs(db: DB, anime_id: int) -> list[AnalysisJob]:
+    jobs = await db.scalars(
+        select(AnalysisJob)
+        .where(
+            AnalysisJob.anime_id == anime_id,
+            AnalysisJob.status.in_([JobStatus.queued, JobStatus.running]),
+        )
+        .order_by(AnalysisJob.created_at)
+    )
+    return list(jobs)
+
+
+@router.post("/anime/{anime_id}/analyze/auto", response_model=AnalyzeResponse)
+async def analyze_automatically(anime_id: int, body: AutoAnalyzeRequest, user: CurrentUser, db: DB):
+    """Called while an episode plays: analyse it and the next one, unless they already have
+    intro/outro data or were matched before (or a job for them is already waiting)."""
+    anime = await catalog.get_anime(db, anime_id)
+    if anime is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Anime not found")
+    wanted = [body.episode]
+    if anime.num_episodes is None or body.episode < anime.num_episodes:
+        wanted.append(body.episode + 1)
+
+    with_segments = set(
+        await db.scalars(
+            select(SkipSegment.episode).where(
+                SkipSegment.anime_id == anime_id, SkipSegment.episode.in_(wanted)
+            )
+        )
+    )
+    matched = {
+        fp.episode
+        for fp in await db.scalars(
+            select(EpisodeFingerprint).where(
+                EpisodeFingerprint.anime_id == anime_id, EpisodeFingerprint.episode.in_(wanted)
+            )
+        )
+        if fp.compared_with
+    }
+    queued = {ep for job in await _running_jobs(db, anime_id) for ep in job.episodes}
+    todo = [ep for ep in wanted if ep not in with_segments | matched | queued]
+    if not todo:
+        return AnalyzeResponse(cached=True, job=None)
+    job = await _queue_analysis(db, anime_id, todo, body.language)
     return AnalyzeResponse(cached=False, job=JobOut.model_validate(job))
+
+
+@router.get("/anime/{anime_id}/analysis", response_model=AnalysisOverview)
+async def analysis_overview(anime_id: int, db: DB):
+    """Every episode's intro/outro times, which episodes were analysed, and pending jobs."""
+    segments = await db.scalars(
+        select(SkipSegment)
+        .where(SkipSegment.anime_id == anime_id)
+        .order_by(SkipSegment.episode, SkipSegment.start_s)
+    )
+    by_episode: dict[int, list[SkipSegment]] = {}
+    for seg in segments:
+        by_episode.setdefault(seg.episode, []).append(seg)
+    rows = await db.execute(
+        select(EpisodeFingerprint.episode, EpisodeFingerprint.compared_with).where(
+            EpisodeFingerprint.anime_id == anime_id
+        )
+    )
+    analysed = {episode for episode, compared_with in rows if compared_with}
+    return AnalysisOverview(
+        episodes=[
+            EpisodeAnalysisOut(
+                episode=ep,
+                analysed=ep in analysed or ep in by_episode,
+                segments=[SkipSegmentOut.model_validate(s) for s in by_episode.get(ep, [])],
+            )
+            for ep in sorted(analysed | set(by_episode))
+        ],
+        running=[JobOut.model_validate(j) for j in await _running_jobs(db, anime_id)],
+    )
 
 
 @router.get("/analysis/jobs/{job_id}", response_model=JobOut)

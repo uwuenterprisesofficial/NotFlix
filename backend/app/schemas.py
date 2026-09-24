@@ -201,6 +201,22 @@ class JobOut(ORM):
     finished_at: datetime | None
 
 
+class AutoAnalyzeRequest(BaseModel):
+    episode: int = Field(ge=1)  # the episode being watched; it and the next one are analysed
+    language: Literal["de-dub", "de-sub", "en-sub", "en-dub", "unknown"] | None = None
+
+
+class EpisodeAnalysisOut(BaseModel):
+    episode: int
+    analysed: bool  # matched against another episode (found something or not)
+    segments: list[SkipSegmentOut]
+
+
+class AnalysisOverview(BaseModel):
+    episodes: list[EpisodeAnalysisOut]
+    running: list[JobOut]  # queued or running jobs
+
+
 class AnalyzeResponse(BaseModel):
     cached: bool
     job: JobOut | None

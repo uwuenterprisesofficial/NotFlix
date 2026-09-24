@@ -98,12 +98,16 @@ VALUES (21, 1, 'my-site', 'embed', 'https://example.com/embed/one-piece-1', 'de-
 
 ## Intro/outro detection
 
-On a show's page, open **More options** and press **Analyse**. It analyses the language selected in the episode list and needs at least two episodes available in it. By default it compares two episodes: the 2nd and 3rd available ones (episode 1 often has no opening, or a different cut of it), or the 1st and 2nd when there are only two. You can widen the range. The worker then:
+**While watching.** When a direct stream starts playing (signed in), the player asks the API to analyse that episode and the next one. Episodes that already have intro/outro times, were analysed before, or are waiting in a job are skipped (`POST /api/anime/{id}/analyze/auto`). "Detecting intro & outro…" shows under the player until the job finishes; the current episode's new times are then used right away for Skip Intro and the Next Episode card.
 
-1. Resolves each episode's media: `MEDIA_DIR/<anime_id>/<episode>.{mkv,mp4,…}` (`./media` in docker compose), otherwise the **direct** streams the providers offer in the selected language. Embedded players are never used. If a direct link fails to decode (a dead hoster link, say), the next one is tried. An episode without any direct stream in that language fails the job with a message saying which episodes lack one.
-2. Decodes the audio with ffmpeg to mono 5.5 kHz and computes a 32-bit fingerprint every 100 ms (Haitsma–Kalker: signs of band-energy differences in 300–2000 Hz).
-3. For each pair of neighbouring episodes, votes on time offsets using exact hash matches. At the best offsets it looks for long runs where the bit error rate stays low. A stretch of 20–200 s shared by both episodes is an opening if it sits in the first half, otherwise an ending.
-4. Saves the result to `skip_segments`. Rows with `source = 'manual'` are never overwritten. Episodes that were already analysed are skipped next time, and a single new episode is compared against one that was already analysed.
+**By hand.** On a show's page, open **More options** and press **Analyse**, as before. It analyses the language selected in the episode list and needs at least two episodes available in it. By default it compares two episodes: the 2nd and 3rd available ones (episode 1 often has no opening, or a different cut of it), or the 1st and 2nd when there are only two. You can widen the range. The widget lists every analysed episode as "Episode 2: Intro 1:25 – 2:55 · Outro 21:40 – 23:10" (`GET /api/anime/{id}/analysis`), and which episodes are still being analysed.
+
+What the worker does:
+
+1. Uses the episode's saved fingerprint if there is one. Otherwise it resolves the episode's media: `MEDIA_DIR/<anime_id>/<episode>.{mkv,mp4,…}` (`./media` in docker compose), otherwise the **direct** streams in the selected language. It takes the cached sources and the stored links the player already resolved, so the provider isn't asked again. Embedded players are never used. If a link fails to decode, the next one is tried, and if all stored links fail, fresh ones are fetched once. An episode without any direct stream in that language fails the job with a message saying so.
+2. Decodes the audio with ffmpeg to mono 5.5 kHz and computes a 32-bit fingerprint every 100 ms (Haitsma–Kalker: signs of band-energy differences in 300–2000 Hz). **The fingerprint is saved** (`episode_fingerprints`, about 60 KB per 24-minute episode), so it's never downloaded again for matching.
+3. For each pair of neighbouring episodes, votes on time offsets using exact hash matches. At the best offsets it looks for long runs where the bit error rate stays low. A stretch of 20–200 s shared by both episodes is an opening if it sits in the first half, otherwise an ending. A single episode is matched against the nearest saved fingerprint, so a new episode costs one download. Only if nothing is saved yet is a neighbouring episode downloaded (and saved) as well.
+4. **Saves the times** to `skip_segments`, and records which episodes each one was compared with. Rows with `source = 'manual'` are never overwritten, and an episode that was only used for comparison keeps the times it already had.
 
 ## Development
 

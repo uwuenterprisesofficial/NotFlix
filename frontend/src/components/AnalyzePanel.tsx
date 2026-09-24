@@ -3,7 +3,14 @@
 import { useEffect, useState } from "react";
 import { LanguageFlag } from "@/components/LanguageFlag";
 import { LANGUAGE_LABELS } from "@/lib/languages";
-import type { AnalysisJob, Availability, Language } from "@/lib/types";
+import { formatTime } from "@/lib/format";
+import type {
+  AnalysisJob,
+  AnalysisOverview,
+  Availability,
+  Language,
+  SkipSegment,
+} from "@/lib/types";
 import { SCAN_FINISHED_EVENT } from "./EpisodeBrowser";
 import { useStoredValue } from "./player/useStoredValue";
 
@@ -36,8 +43,25 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
   );
   const [job, setJob] = useState<AnalysisJob | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [overview, setOverview] = useState<AnalysisOverview | null>(null);
 
   const running = job?.status === "queued" || job?.status === "running";
+
+  // The saved results; refreshed when a job ends, and polled while any job (e.g. one started
+  // while watching) is still waiting or running.
+  const jobStatus = job?.status;
+  const othersRunning = (overview?.running.length ?? 0) > 0;
+  useEffect(() => {
+    const load = () =>
+      fetch(`/api/anime/${animeId}/analysis`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((found: AnalysisOverview | null) => found && setOverview(found))
+        .catch(() => {});
+    load();
+    if (!othersRunning) return;
+    const timer = setInterval(load, POLL_MS);
+    return () => clearInterval(timer);
+  }, [animeId, jobStatus, othersRunning]);
 
   useEffect(() => {
     const load = () => fetchAvailability(animeId).then((found) => found && setAvailability(found));
@@ -166,6 +190,54 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
           {job.error && <span className="block text-red-400">{job.error}</span>}
         </p>
       )}
+      {overview && <AnalysisResults overview={overview} />}
     </section>
+  );
+}
+
+function Range({ label, segment }: { label: string; segment: SkipSegment | undefined }) {
+  if (!segment) return <span className="text-muted">{label} not found</span>;
+  return (
+    <span title={segment.source === "manual" ? "Entered manually" : undefined}>
+      {label} {formatTime(segment.start_s)} – {formatTime(segment.end_s)}
+    </span>
+  );
+}
+
+/** Every analysed episode with its intro and outro times, and what's still being analysed. */
+function AnalysisResults({ overview }: { overview: AnalysisOverview }) {
+  const pending = [...new Set(overview.running.flatMap((j) => j.episodes))].sort((a, b) => a - b);
+  if (!overview.episodes.length && !pending.length) return null;
+  return (
+    <div className="mt-5 border-t border-white/10 pt-4 text-sm">
+      <h3 className="font-semibold">Results</h3>
+      {pending.length > 0 && (
+        <p className="mt-1 text-muted">
+          Analysing episode{pending.length > 1 ? "s" : ""} {pending.join(", ")}…
+        </p>
+      )}
+      <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto pr-2">
+        {overview.episodes.map((e) => {
+          const intro = e.segments.find((s) => s.kind === "opening");
+          const outro = e.segments.find((s) => s.kind === "ending");
+          return (
+            <li key={e.episode} className="flex flex-wrap gap-x-3">
+              <span className="w-24 shrink-0 font-semibold">Episode {e.episode}:</span>
+              {intro || outro ? (
+                <>
+                  <Range label="Intro" segment={intro} />
+                  <span aria-hidden className="text-muted">
+                    ·
+                  </span>
+                  <Range label="Outro" segment={outro} />
+                </>
+              ) : (
+                <span className="text-muted">no intro or outro found</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
