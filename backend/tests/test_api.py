@@ -391,3 +391,67 @@ async def test_auto_analysis_only_queues_what_is_missing(client, user, monkeypat
         db.commit()
     assert (await auto(3)) == {"cached": True, "job": None}  # last episode, has data
     assert len(queued) == 2
+
+
+async def test_stopping_an_analysis(client, user, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    stopped = []
+    monkeypatch.setattr("app.api.anime.stop_job", stopped.append)
+    now = datetime.now(UTC)
+    with sync_session() as db:
+        db.add(AnalysisJob(id="stuck", anime_id=5, episodes=[1], status="running", started_at=now))
+        db.add(AnalysisJob(id="waiting", anime_id=5, episodes=[2]))
+        db.add(AnalysisJob(id="finished", anime_id=5, episodes=[3], status="done"))
+        # Its worker died 20 minutes ago (timeout 10): it only looks like it's running.
+        db.add(
+            AnalysisJob(
+                id="dead", anime_id=5, episodes=[4], status="running",
+                started_at=now - timedelta(minutes=20),
+            )
+        )  # fmt: skip
+        db.commit()
+
+    overview = (await client.get("/anime/5/analysis")).json()
+    assert [j["id"] for j in overview["running"]] == ["stuck", "waiting"]
+    dead = (await client.get("/analysis/jobs/dead")).json()
+    assert (dead["status"], dead["error"]) == (
+        "failed",
+        "Stopped after 10 minutes (ANALYSIS_TIMEOUT_MINUTES)",
+    )
+
+    for job_id in ("stuck", "waiting"):
+        body = (await client.post(f"/analysis/jobs/{job_id}/stop")).json()
+        assert (body["status"], body["error"]) == ("failed", "Stopped")
+        assert body["finished_at"] is not None
+    assert (await client.post("/analysis/jobs/finished/stop")).json()["status"] == "done"
+    assert stopped == ["stuck", "waiting"]  # a finished job isn't touched
+    assert (await client.get("/anime/5/analysis")).json()["running"] == []
+    assert (await client.post("/analysis/jobs/nope/stop")).status_code == 404
+
+
+def test_worker_reports_a_timeout_and_skips_stopped_jobs(database, monkeypatch):
+    from rq.timeouts import JobTimeoutException
+
+    from app.worker import tasks
+
+    def hang(*args, **kwargs):
+        raise JobTimeoutException("Task exceeded maximum timeout value (600 seconds)")
+
+    monkeypatch.setattr(tasks, "_decode", hang)
+    with sync_session() as db:
+        db.add(AnalysisJob(id="slow", anime_id=8, episodes=[1, 2]))
+        db.add(
+            AnalysisJob(id="stopped", anime_id=8, episodes=[3], status="failed", error="Stopped")
+        )
+        db.commit()
+
+    tasks.run_analysis("slow")
+    tasks.run_analysis("stopped")  # stopped while it waited: never started
+
+    with sync_session() as db:
+        slow = db.get(AnalysisJob, "slow")
+        assert slow.status == JobStatus.failed and slow.started_at is not None
+        assert slow.error == "Stopped after 10 minutes (ANALYSIS_TIMEOUT_MINUTES)"
+        stopped = db.get(AnalysisJob, "stopped")
+        assert (stopped.status, stopped.started_at) == (JobStatus.failed, None)

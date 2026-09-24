@@ -23,6 +23,8 @@ x-backend: &backend
     DATABASE_URL: postgresql+psycopg://notflix:notflix@db:5432/notflix
     REDIS_URL: redis://redis:6379/0
     MEDIA_DIR: /media
+    # An intro/outro analysis running longer than this is stopped and marked failed.
+    ANALYSIS_TIMEOUT_MINUTES: ${ANALYSIS_TIMEOUT_MINUTES:-10}
   # Lets the containers reach services running on your machine (Anivexa, ReAnime) at
   # http://host.docker.internal:<port>; "localhost" inside a container is the container itself.
   extra_hosts:

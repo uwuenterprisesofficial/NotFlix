@@ -127,6 +127,12 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
     setReload((r) => r + 1);
   }
 
+  async function stop(jobId: string) {
+    const res = await fetch(`/api/analysis/jobs/${jobId}/stop`, { method: "POST" });
+    if (res.ok && job?.id === jobId) setJob(await res.json());
+    setReload((r) => r + 1);
+  }
+
   async function forget(referenceId: number) {
     await fetch(`/api/anime/${animeId}/analysis/references/${referenceId}`, { method: "DELETE" });
     setReload((r) => r + 1);
@@ -223,6 +229,7 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
           overview={overview}
           onRetry={(ep) => submit([ep], { redownload: true })}
           onForget={forget}
+          onStop={stop}
         />
       )}
     </section>
@@ -238,15 +245,21 @@ function Range({ label, segment }: { label: string; segment: SkipSegment | undef
   );
 }
 
+function elapsed(since: string): string {
+  return formatTime((Date.now() - Date.parse(since)) / 1000);
+}
+
 /** Every analysed episode with its intro and outro times, and what's still being analysed. */
 function AnalysisResults({
   overview,
   onRetry,
   onForget,
+  onStop,
 }: {
   overview: AnalysisOverview;
   onRetry: (episode: number) => void;
   onForget: (referenceId: number) => void;
+  onStop: (jobId: string) => void;
 }) {
   const pending = [...new Set(overview.running.flatMap((j) => j.episodes))].sort((a, b) => a - b);
   if (!overview.episodes.length && !pending.length && !overview.references.length) return null;
@@ -278,11 +291,23 @@ function AnalysisResults({
           ))}
         </div>
       )}
-      {pending.length > 0 && (
-        <p className="mt-1 text-muted">
-          Analysing episode{pending.length > 1 ? "s" : ""} {pending.join(", ")}…
+      {overview.running.map((j) => (
+        <p key={j.id} className="mt-1 flex flex-wrap items-center gap-2 text-muted">
+          <span>
+            {j.status === "running" ? "Analysing" : "Waiting to analyse"} episode
+            {j.episodes.length > 1 ? "s" : ""} {j.episodes.join(", ")}…
+            {j.status === "running" && j.started_at && ` (${elapsed(j.started_at)})`}
+          </span>
+          <button
+            onClick={() => onStop(j.id)}
+            aria-label={`Stop analysing episode${j.episodes.length > 1 ? "s" : ""} ${j.episodes.join(", ")}`}
+            title="Stop (it's marked as failed)"
+            className="rounded px-1.5 text-white/80 hover:bg-white/10 hover:text-white"
+          >
+            ✕
+          </button>
         </p>
-      )}
+      ))}
       <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto pr-2">
         {overview.episodes.map((e) => {
           const intro = e.segments.find((s) => s.kind === "opening");

@@ -1,6 +1,7 @@
 import logging
 from datetime import UTC, datetime
 
+from rq.timeouts import JobTimeoutException
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,7 @@ from app.models import (
     SegmentKind,
     SkipSegment,
 )
+from app.worker.queue import timeout_message
 
 log = logging.getLogger(__name__)
 
@@ -161,9 +163,10 @@ def run_analysis(job_id: str) -> None:
     own fingerprint is saved too, so comparing never needs to download it again."""
     with sync_session() as db:
         job = db.get(AnalysisJob, job_id)
-        if job is None:
-            return
+        if job is None or job.status != JobStatus.queued:
+            return  # e.g. stopped before a worker got to it
         job.status = JobStatus.running
+        job.started_at = datetime.now(UTC)
         db.commit()
 
         try:
@@ -255,6 +258,13 @@ def run_analysis(job_id: str) -> None:
                     row.source = "analysis"
 
             job.status = JobStatus.done
+        except JobTimeoutException:
+            # RQ stops a job at its timeout (ANALYSIS_TIMEOUT_MINUTES) by raising this in it.
+            db.rollback()
+            job = db.get(AnalysisJob, job_id)
+            job.status = JobStatus.failed
+            job.error = timeout_message()
+            log.warning("Analysis job %s timed out", job_id)
         except Exception as e:
             db.rollback()
             job = db.get(AnalysisJob, job_id)

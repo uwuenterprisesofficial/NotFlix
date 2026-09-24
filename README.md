@@ -114,6 +114,8 @@ What the worker does:
 
 The widget on the show page lists the saved fingerprints ("Intro from episode 1 (1:30)") above the per-episode results.
 
+**Stopping an analysis.** Every waiting or running job is listed in the widget ("Analysing episodes 2, 3… (1:05)") with a **✕**; the player's "Detecting intro & outro…" has a **Stop** link. A waiting job is taken out of the queue, a running one has its worker process killed (RQ's stop command, which also ends the ffmpeg it started); either way the job is marked failed ("Stopped"). This also clears a job that only looks like it's running because its worker died. A job running longer than `ANALYSIS_TIMEOUT_MINUTES` (default 10, in `.env`) is stopped by RQ and marked failed ("Stopped after 10 minutes"); one whose worker died without reporting is marked the same way a minute after that limit.
+
 ## Development
 
 ```bash

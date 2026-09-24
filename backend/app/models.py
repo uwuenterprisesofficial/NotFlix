@@ -256,4 +256,5 @@ class AnalysisJob(Base):
     status: Mapped[str] = mapped_column(String(10), default=JobStatus.queued)
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

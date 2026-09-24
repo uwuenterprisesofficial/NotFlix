@@ -230,6 +230,7 @@ export function Player({
         segments={skipSegments}
         embedded={stream?.kind === "embed"}
         detecting={analysis.detecting}
+        onStopDetecting={analysis.stop}
       />
     </div>
   );
@@ -272,17 +273,26 @@ function SegmentInfo({
   segments,
   embedded,
   detecting,
+  onStopDetecting,
 }: {
   segments: SkipSegment[];
   embedded: boolean;
   detecting: boolean;
+  onStopDetecting: () => void;
 }) {
   if (segments.length === 0) {
     return (
       <p className="mt-4 text-sm text-muted">
-        {detecting
-          ? "Detecting intro & outro in the background…"
-          : "Intro/outro not detected yet. It’s detected automatically while a direct stream plays, or under “More options” on the show’s page."}
+        {detecting ? (
+          <>
+            Detecting intro &amp; outro in the background…{" "}
+            <button onClick={onStopDetecting} className="underline hover:text-white">
+              Stop
+            </button>
+          </>
+        ) : (
+          "Intro/outro not detected yet. It’s detected automatically while a direct stream plays, or under “More options” on the show’s page."
+        )}
       </p>
     );
   }

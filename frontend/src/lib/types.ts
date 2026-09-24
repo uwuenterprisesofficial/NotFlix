@@ -98,6 +98,9 @@ export type AnalysisJob = {
   redownload: boolean;
   status: "queued" | "running" | "done" | "failed";
   error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
 };
 
 export type EpisodeAnalysis = { episode: number; analysed: boolean; segments: SkipSegment[] };

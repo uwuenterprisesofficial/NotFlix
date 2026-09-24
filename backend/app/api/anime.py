@@ -1,4 +1,6 @@
+import asyncio
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, select
@@ -29,9 +31,11 @@ from app.schemas import (
 )
 from app.services import catalog, mal
 from app.services.sync import access_token
-from app.worker.queue import analysis_queue
+from app.worker.queue import analysis_queue, stop_job, timeout_message, timeout_seconds
 
 router = APIRouter(tags=["anime"])
+# How long past the timeout a running job may go unreported before it counts as dead.
+TIMEOUT_GRACE = timedelta(minutes=1)
 
 
 @router.get("/anime/{anime_id}", response_model=AnimeDetail)
@@ -140,9 +144,25 @@ async def _queue_analysis(
     await db.commit()
     await db.refresh(job)
     analysis_queue().enqueue(
-        "app.worker.tasks.run_analysis", job.id, job_id=job.id, job_timeout=3600
+        "app.worker.tasks.run_analysis", job.id, job_id=job.id, job_timeout=timeout_seconds()
     )
     return job
+
+
+async def _expire(db: DB, jobs: list[AnalysisJob]) -> list[AnalysisJob]:
+    """Mark jobs failed that have been running for longer than the timeout plus a grace period:
+    RQ stops them at the timeout, so their worker died (e.g. restarted) without saying so.
+    Returns the ones still queued or running."""
+    limit = datetime.now(UTC) - timedelta(seconds=timeout_seconds()) - TIMEOUT_GRACE
+    changed = False
+    for job in jobs:
+        if job.status == JobStatus.running and job.started_at and job.started_at < limit:
+            job.status, job.error = JobStatus.failed, timeout_message()
+            job.finished_at = datetime.now(UTC)
+            changed = True
+    if changed:
+        await db.commit()
+    return [j for j in jobs if j.status in (JobStatus.queued, JobStatus.running)]
 
 
 async def _running_jobs(db: DB, anime_id: int) -> list[AnalysisJob]:
@@ -154,7 +174,7 @@ async def _running_jobs(db: DB, anime_id: int) -> list[AnalysisJob]:
         )
         .order_by(AnalysisJob.created_at)
     )
-    return list(jobs)
+    return await _expire(db, list(jobs))
 
 
 @router.post("/anime/{anime_id}/analyze/auto", response_model=AnalyzeResponse)
@@ -243,6 +263,24 @@ async def analysis_job(job_id: str, db: DB):
     job = await db.get(AnalysisJob, job_id)
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    await _expire(db, [job])
+    return job
+
+
+@router.post("/analysis/jobs/{job_id}/stop", response_model=JobOut)
+async def stop_analysis_job(job_id: str, user: CurrentUser, db: DB):
+    """Stop a waiting or running analysis (e.g. one that hangs); it's marked failed. Also
+    works when its worker is gone and the job only looks like it's running."""
+    job = await db.get(AnalysisJob, job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    if job.status in (JobStatus.queued, JobStatus.running):
+        await asyncio.to_thread(stop_job, job_id)
+        await db.refresh(job)  # it may have finished meanwhile
+        if job.status in (JobStatus.queued, JobStatus.running):
+            job.status, job.error = JobStatus.failed, "Stopped"
+            job.finished_at = datetime.now(UTC)
+            await db.commit()
     return job
 
 

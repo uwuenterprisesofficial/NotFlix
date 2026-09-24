@@ -23,6 +23,8 @@ class Settings(BaseSettings):
 
     # Local directory the analyzer reads episode files from: <media_dir>/<anime_id>/<episode>.<ext>
     media_dir: str = "/media"
+    # An intro/outro analysis running longer than this is stopped and marked failed.
+    analysis_timeout_minutes: float = 10
 
     # Where the browser reaches this API (the frontend proxies /api/* here); used for proxy URLs.
     public_api_prefix: str = "/api"

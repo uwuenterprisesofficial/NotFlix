@@ -47,5 +47,13 @@ export function useAutoAnalysis(animeId: number, episode: number, enabled: boole
       .catch(() => {});
   }, [finished, coversEpisode, animeId, episode]);
 
-  return { start, job, segments, detecting: waiting && coversEpisode };
+  async function stop() {
+    if (!jobId) return;
+    const res = await fetch(`/api/analysis/jobs/${jobId}/stop`, { method: "POST" }).catch(
+      () => null,
+    );
+    if (res?.ok) setJob(await res.json());
+  }
+
+  return { start, stop, job, segments, detecting: waiting && coversEpisode };
 }
