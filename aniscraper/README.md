@@ -8,10 +8,10 @@ Small FastAPI service that searches aniworld.to and lists seasons, episodes, lan
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 pip install -r requirements.txt
-uvicorn main:app --reload
+python main.py                  # or: uvicorn main:app --reload --port 9000
 ```
 
-Interactive docs: http://127.0.0.1:8000/docs
+Interactive docs: http://127.0.0.1:9000/docs
 
 ## Endpoints
 
@@ -23,6 +23,18 @@ Interactive docs: http://127.0.0.1:8000/docs
 | GET | `/search/titles?q=naruto` | Just the matching titles/slugs |
 | GET | `/anime/{slug}?season=1&streams=true` | Same as `/search`, but by exact slug |
 | GET | `/anime/{slug}/season/{s}/episode/{e}` | Streams of one episode |
+| GET | `/search?q=naruto&source=animetoast` | animetoast.cc: best match, one entry per language variant (Ger Dub / Ger Sub …) with episodes and hoster links |
+| GET | `/search?q=naruto&source=all` | Both sites side by side (`aniworld` / `animetoast` keys) |
+| GET | `/animetoast/{slug}?streams=true` | One animetoast show page by slug (e.g. `naruto-ger-dub`) |
+
+`/search/titles` also takes `source=` (default `all`).
+
+### animetoast specifics
+
+- animetoast has one page per show *and* language, so the language comes from the title ("Ger Dub", "Ger Sub", "Eng Sub").
+- Episodes are listed per hoster tab; the API merges them per episode.
+- Without `streams=true` the stream `url` is the site's `?link=N` page. With `streams=true` each of those pages is loaded and `url` becomes the hoster embed URL (`page_url` keeps the original).
+- Everything is returned as a single "Season 1"; animetoast puts later seasons on separate pages (they show up in `other_matches`).
 
 ## Example response (shortened)
 
