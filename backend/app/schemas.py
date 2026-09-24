@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -129,6 +129,15 @@ class MappingOut(ORM):
 class AniWorldMappingIn(BaseModel):
     slug: str = Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$", max_length=200)
     season: int = Field(ge=0, le=100)
+    episode_offset: int = Field(default=0, ge=-2000, le=2000)
+
+
+class AnimeToastMappingIn(BaseModel):
+    """animetoast page slugs of one show, one per language (e.g. naruto-ger-dub)."""
+
+    slugs: list[Annotated[str, Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$", max_length=200)]] = Field(
+        min_length=1, max_length=6
+    )
     episode_offset: int = Field(default=0, ge=-2000, le=2000)
 
 

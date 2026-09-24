@@ -424,7 +424,7 @@ def _norm(title: str) -> str:
 class AniScraperProvider(AniWorldApiProvider):
     """AniWorld through the bundled AniScraper service (aniscraper/ in this repo):
 
-    GET /search/titles?q=...                           -> matching series slugs
+    GET /search/titles?q=...&source=aniworld           -> matching series slugs
     GET /anime/{slug}?season=N&streams=false           -> the season's episodes and languages
     GET /anime/{slug}/season/{s}/episode/{e}           -> the episode's play links per language
     """
@@ -439,9 +439,13 @@ class AniScraperProvider(AniWorldApiProvider):
             if len(query) < 2:
                 continue
             try:
-                results = await self._api("/search/titles", {"q": query}) or []
+                data = await self._api("/search/titles", {"q": query, "source": "aniworld"})
             except ProviderError:
                 continue  # search is only a shortcut; the guesses below still get tried
+            # AniScraper answers {"aniworld": [...]} (or {"aniworld": {"error": ...}}).
+            results = data.get("aniworld") if isinstance(data, dict) else data
+            if not isinstance(results, list):
+                continue
             hits = [r for r in results if isinstance(r, dict) and r.get("slug")]
             hits.sort(key=lambda r: _norm(str(r.get("title") or "")) not in wanted)
             found += [str(r["slug"]) for r in hits]

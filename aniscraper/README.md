@@ -26,6 +26,7 @@ Interactive docs: http://127.0.0.1:9000/docs
 | GET | `/search?q=naruto&source=animetoast` | animetoast.cc: best match, one entry per language variant (Ger Dub / Ger Sub …) with episodes and hoster links |
 | GET | `/search?q=naruto&source=all` | Both sites side by side (`aniworld` / `animetoast` keys) |
 | GET | `/animetoast/{slug}?streams=true` | One animetoast show page by slug (e.g. `naruto-ger-dub`) |
+| GET | `/animetoast/{slug}/episode/{e}` | One animetoast episode with its hoster embed URLs resolved (only that episode's links are loaded) |
 
 `/search/titles` also takes `source=` (default `all`).
 

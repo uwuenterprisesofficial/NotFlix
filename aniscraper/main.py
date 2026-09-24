@@ -147,6 +147,16 @@ async def animetoast_show(
     return await _wrap(animetoast.get_show(slug, with_streams=streams), "animetoast.cc")
 
 
+
+@app.get("/animetoast/{slug}/episode/{episode}")
+async def animetoast_episode(slug: str, episode: int):
+    """animetoast: one episode with its hoster embed URLs resolved (only that episode's links)."""
+    data = await _wrap(animetoast.get_episode(slug, episode), "animetoast.cc")
+    if data is None:
+        raise HTTPException(404, f"Episode {episode} not found on '{slug}'")
+    return data
+
+
 if __name__ == "__main__":
     import uvicorn
 

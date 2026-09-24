@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from app.providers import anivexa, aniworld
+from app.providers import animetoast, anivexa, aniworld, reanime
 from app.providers.anivexa import AnivexaProvider, available_options, parse_watch
 from app.providers.aniworld import (
     AniWorldProvider,
@@ -27,7 +27,7 @@ def memory_cache(monkeypatch):
     async def set_json(key, value, ttl):
         store[key] = json.loads(json.dumps(value))
 
-    for module in (anivexa, aniworld):
+    for module in (anivexa, aniworld, animetoast, reanime):
         monkeypatch.setattr(module, "get_json", get_json)
         monkeypatch.setattr(module, "set_json", set_json)
     return store
@@ -409,7 +409,6 @@ def test_reanime_pick_slug_prefers_anilist_id():
 
 
 async def test_reanime_provider_lists_embed_servers(database, monkeypatch, memory_cache):
-    from app.providers import reanime
     from app.providers.reanime import ReAnimeProvider
     from app.services import anilist
     from app.services.mappings import delete_mapping
@@ -418,8 +417,6 @@ async def test_reanime_provider_lists_embed_servers(database, monkeypatch, memor
         return 99147
 
     monkeypatch.setattr(anilist, "anilist_id", fake_anilist_id)
-    monkeypatch.setattr(reanime, "get_json", lambda key: _async(memory_cache.get(key)))
-    monkeypatch.setattr(reanime, "set_json", lambda key, value, ttl: _async(None))
     await delete_mapping(38524, "reanime")
     requests: list[str] = []
 
@@ -742,8 +739,11 @@ def _scraper_handler(requests):
         requests.append(str(request.url).removeprefix("http://aniscraper:8000"))
         path = request.url.path
         if path == "/search/titles":
+            assert request.url.params["source"] == "aniworld"
             q = request.url.params["q"]
-            return httpx.Response(200, json=SCRAPER_SEARCH if "Titan" in q else [])
+            if "Kyojin" in q:  # aniworld.to failing while animetoast answers
+                return httpx.Response(200, json={"aniworld": {"error": "aniworld.to returned 503"}})
+            return httpx.Response(200, json={"aniworld": SCRAPER_SEARCH if "Titan" in q else []})
         if path == "/anime/attack-on-titan" and request.url.params.get("season") == "3":
             return httpx.Response(200, json=SCRAPER_SERIES)
         if path.startswith("/anime/") and path.count("/") == 2:
@@ -785,7 +785,7 @@ async def test_aniscraper_provider(database, monkeypatch, memory_cache):
     ]
     assert [o.language for o in found[2]] == ["de-sub"] and found[3] == []
     # The search hit whose title matches exactly is tried before the other hit.
-    assert requests[0] == "/search/titles?q=Attack+on+Titan"
+    assert requests[0] == "/search/titles?q=Attack+on+Titan&source=aniworld"
     assert [r for r in requests if r.startswith("/anime/")] == [
         "/anime/attack-on-titan?season=3&streams=false"
     ]
@@ -820,3 +820,205 @@ async def test_aniscraper_outage_is_not_remembered(database, monkeypatch, memory
     with pytest.raises(ProviderError, match="lookup failed"):
         await provider.scan(AnimeInfo(id=5, title="Naruto"), [1])
     assert await get_mapping(5, "aniworld") is None
+
+
+# --- AnimeToast (via AniScraper) ---------------------------------------------------------------
+
+TOAST_SEARCH = {
+    "animetoast": [
+        {
+            "slug": "shingeki-no-kyojin-season-3-ger-sub",
+            "title": "Shingeki no Kyojin Season 3 Ger Sub",
+            "language": "German Sub",
+            "url": "https://www.animetoast.cc/shingeki-no-kyojin-season-3-ger-sub/",
+        },
+        {
+            "slug": "shingeki-no-kyojin-season-3-ger-dub",
+            "title": "Shingeki no Kyojin Season 3 Ger Dub",
+            "language": "German Dub",
+            "url": "https://www.animetoast.cc/shingeki-no-kyojin-season-3-ger-dub/",
+        },
+        {
+            "slug": "shingeki-no-kyojin-ger-sub",
+            "title": "Shingeki no Kyojin Ger Sub",
+            "language": "German Sub",
+            "url": "https://www.animetoast.cc/shingeki-no-kyojin-ger-sub/",
+        },
+    ]
+}
+
+
+def _toast_show(slug, language, numbers):
+    return {
+        "source": "animetoast",
+        "slug": slug,
+        "title": slug,
+        "language": language,
+        "url": f"https://www.animetoast.cc/{slug}/",
+        "seasons": [
+            {
+                "season": 1,
+                "name": "Season 1",
+                "episodes": [
+                    {
+                        "episode": n,
+                        "hosters": ["Voe", "Doodstream"],
+                        "languages": [language],
+                        "streams": {
+                            language: [
+                                {
+                                    "hoster": "Voe",
+                                    "url": f"https://www.animetoast.cc/{slug}/?link={n}",
+                                }
+                            ]
+                        },
+                    }
+                    for n in numbers
+                ],
+            }
+        ],
+    }
+
+
+def _toast_handler(requests):
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url).removeprefix("http://aniscraper:8000"))
+        path = request.url.path
+        if path == "/search/titles":
+            assert request.url.params["source"] == "animetoast"
+            q = request.url.params["q"]
+            return httpx.Response(200, json=TOAST_SEARCH if "Kyojin" in q else {"animetoast": []})
+        if path == "/animetoast/shingeki-no-kyojin-season-3-ger-sub":
+            return httpx.Response(200, json=_toast_show("x-sub", "German Sub", [1, 2]))
+        if path == "/animetoast/shingeki-no-kyojin-season-3-ger-dub":
+            return httpx.Response(200, json=_toast_show("x-dub", "German Dub", [1]))
+        if path == "/animetoast/shingeki-no-kyojin-season-3-ger-sub/episode/2":
+            return httpx.Response(
+                200,
+                json={
+                    "source": "animetoast",
+                    "slug": "x",
+                    "language": "German Sub",
+                    "episode": 2,
+                    "hosters": ["Voe", "Doodstream"],
+                    "languages": ["German Sub"],
+                    "streams": {
+                        "German Sub": [
+                            {
+                                "hoster": "Voe",
+                                "url": "https://voe.example/e/2",
+                                "page_url": "https://www.animetoast.cc/x/?link=2",
+                            },
+                            {
+                                "hoster": "Doodstream",
+                                "url": "//dood.example/e/2",
+                                "page_url": "https://www.animetoast.cc/x/?link=5",
+                            },
+                            {
+                                "hoster": "Broken",
+                                "url": "https://www.animetoast.cc/x/?link=9",
+                                "error": "timeout",
+                            },
+                        ]
+                    },
+                },
+            )
+        return httpx.Response(404, json={"detail": "Not found"})
+
+    return handler
+
+
+def test_animetoast_pick_pages():
+    from app.providers.animetoast import pick_pages
+
+    titles = ["Attack on Titan Season 3", "Shingeki no Kyojin Season 3"]
+    assert pick_pages(TOAST_SEARCH["animetoast"], titles) == [
+        "shingeki-no-kyojin-season-3-ger-dub",
+        "shingeki-no-kyojin-season-3-ger-sub",
+    ]
+    assert pick_pages(TOAST_SEARCH["animetoast"], ["Naruto"]) == []  # never a loose guess
+
+
+async def test_animetoast_provider(database, monkeypatch, memory_cache):
+    from app.providers.animetoast import AnimeToastProvider
+    from app.services import anilist
+    from app.services.anilist import AniListInfo
+    from app.services.mappings import delete_mapping, get_mapping
+
+    async def fake_lookup(mal_id):
+        return AniListInfo(
+            id=104578,
+            season=3,
+            titles=["Attack on Titan Season 3", "Shingeki no Kyojin Season 3"],
+            root_titles=["Attack on Titan"],
+        )
+
+    monkeypatch.setattr(anilist, "lookup", fake_lookup)
+    await delete_mapping(35760, "animetoast")
+    requests: list[str] = []
+    http = httpx.AsyncClient(transport=httpx.MockTransport(_toast_handler(requests)))
+    provider = AnimeToastProvider("http://aniscraper:8000", http=http)
+    anime = AnimeInfo(id=35760, title="Shingeki no Kyojin Season 3")
+
+    found = await provider.scan(anime, [1, 2, 3])
+    assert [(o.id, o.label, o.language) for o in found[1]] == [
+        ("animetoast:shingeki-no-kyojin-season-3-ger-dub", "Voe / Doodstream", "de-dub"),
+        ("animetoast:shingeki-no-kyojin-season-3-ger-sub", "Voe / Doodstream", "de-sub"),
+    ]
+    assert [o.language for o in found[2]] == ["de-sub"] and found[3] == []
+    mapping = await get_mapping(35760, "animetoast")
+    assert mapping.external_id == (
+        "shingeki-no-kyojin-season-3-ger-dub,shingeki-no-kyojin-season-3-ger-sub"
+    )
+
+    resolved = await provider.resolve(anime, 2, "shingeki-no-kyojin-season-3-ger-sub")
+    assert [(s.kind, s.url, s.label) for s in resolved.streams] == [
+        ("embed", "https://voe.example/e/2", "Voe"),
+        ("embed", "https://dood.example/e/2", "Doodstream"),
+    ]
+    assert requests[-1] == "/animetoast/shingeki-no-kyojin-season-3-ger-sub/episode/2"
+    with pytest.raises(ProviderError, match="Unknown AnimeToast page"):
+        await provider.resolve(anime, 2, "some-other-show-ger-dub")
+
+
+async def test_animetoast_outage_is_not_remembered(database, monkeypatch, memory_cache):
+    from app.providers.animetoast import AnimeToastProvider
+    from app.services import anilist
+    from app.services.mappings import delete_mapping, get_mapping
+
+    async def not_on_anilist(mal_id):
+        return None
+
+    monkeypatch.setattr(anilist, "lookup", not_on_anilist)
+    await delete_mapping(6, "animetoast")
+    down = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(
+                200, json={"animetoast": {"error": "Could not reach animetoast.cc"}}
+            )
+        )
+    )
+    provider = AnimeToastProvider("http://aniscraper:8000", http=down)
+    with pytest.raises(ProviderError, match="search failed"):
+        await provider.scan(AnimeInfo(id=6, title="Naruto"), [1])
+    assert await get_mapping(6, "animetoast") is None
+
+
+async def test_animetoast_mapping_override(client, user):
+    from app.services import source_scan
+    from app.services.mappings import delete_mapping
+
+    await delete_mapping(9, "animetoast")
+    await source_scan.store_episode(9, "animetoast", 1, [])
+    body = {"slugs": ["naruto-ger-dub", "naruto-ger-sub", "naruto-ger-dub"], "episode_offset": 2}
+    assert (await client.put("/anime/9/mappings/animetoast", json=body)).status_code == 204
+    assert await source_scan.cached_options(9, 1, "animetoast") is None  # cache dropped
+    [mapping] = (await client.get("/anime/9/mappings")).json()
+    assert (mapping["external_id"], mapping["episode_offset"], mapping["manual"]) == (
+        "naruto-ger-dub,naruto-ger-sub",
+        2,
+        True,
+    )
+    bad = await client.put("/anime/9/mappings/animetoast", json={"slugs": ["../etc"]})
+    assert bad.status_code == 422
+    assert (await client.delete("/anime/9/mappings/animetoast")).status_code == 204

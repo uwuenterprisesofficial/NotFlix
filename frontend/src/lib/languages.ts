@@ -20,6 +20,7 @@ export const LANGUAGE_SHORT: Record<Language, string> = {
 
 export const PROVIDER_LABELS: Record<string, string> = {
   aniworld: "AniWorld",
+  animetoast: "AnimeToast",
   anivexa: "Anivexa",
   reanime: "ReAnime",
   database: "Your sources",

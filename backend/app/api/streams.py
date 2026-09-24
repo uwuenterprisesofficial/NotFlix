@@ -19,6 +19,7 @@ from app.providers.base import (
     resolve_option,
 )
 from app.schemas import (
+    AnimeToastMappingIn,
     AniWorldMappingIn,
     AvailabilityOut,
     EpisodeLanguages,
@@ -208,3 +209,17 @@ async def reset_aniworld_mapping(anime_id: int, user: CurrentUser):
     """Forget the mapping so it is detected again on the next request."""
     await delete_mapping(anime_id, "aniworld")
     await source_scan.forget(anime_id, "aniworld")
+
+
+@router.put("/mappings/animetoast", status_code=status.HTTP_204_NO_CONTENT)
+async def set_animetoast_mapping(anime_id: int, body: AnimeToastMappingIn, user: CurrentUser):
+    slugs = ",".join(dict.fromkeys(body.slugs))
+    await save_mapping(anime_id, "animetoast", slugs, None, body.episode_offset, manual=True)
+    await source_scan.forget(anime_id, "animetoast")
+
+
+@router.delete("/mappings/animetoast", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_animetoast_mapping(anime_id: int, user: CurrentUser):
+    """Forget the mapping so the pages are searched again on the next request."""
+    await delete_mapping(anime_id, "animetoast")
+    await source_scan.forget(anime_id, "animetoast")

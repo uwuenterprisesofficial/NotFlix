@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AnalyzePanel } from "@/components/AnalyzePanel";
+import { AnimeToastMapping } from "@/components/AnimeToastMapping";
 import { AniWorldMapping } from "@/components/AniWorldMapping";
 import { EpisodeBrowser } from "@/components/EpisodeBrowser";
 import { apiOrNull } from "@/lib/api";
@@ -81,6 +82,7 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
       />
 
       {me && <AniWorldMapping animeId={anime.id} />}
+      {me && <AnimeToastMapping animeId={anime.id} />}
       <AnalyzePanel animeId={anime.id} episodeCount={count} signedIn={me !== null} />
     </div>
   );

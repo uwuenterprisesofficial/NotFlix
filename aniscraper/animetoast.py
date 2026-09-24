@@ -152,6 +152,15 @@ class AnimeToastScraper:
 
         await asyncio.gather(*(resolve(s) for s in streams))
 
+    async def get_episode(self, slug: str, episode: int) -> dict | None:
+        """One episode of a show page with its hoster embed URLs resolved (None if missing)."""
+        show = await self.get_show(slug)
+        ep = next((e for e in show["seasons"][0]["episodes"] if e["episode"] == episode), None)
+        if ep is None:
+            return None
+        await self._resolve_embeds([ep])
+        return {"source": "animetoast", "slug": slug, "language": show["language"], **ep}
+
     # ----------------------------------------------------------- everything
     async def search_full(self, query: str, with_streams: bool = False) -> dict:
         """Best match plus all its language variants (Ger Dub / Ger Sub / ...)."""
