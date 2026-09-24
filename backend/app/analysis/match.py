@@ -6,12 +6,16 @@ import numpy as np
 
 from app.analysis.fingerprint import Fingerprint
 
-MAX_BUCKET = 20  # ignore hashes this common in episode B; they carry no alignment information
-MIN_VOTES = 5
 TOP_OFFSETS = 8
-NMS_RADIUS = 5  # frames
 SMOOTH_SECONDS = 3.0
 MAX_BER = 0.35
+# Offsets are found by sliding blocks of A over B: a block "is in B" where its bit error rate
+# stays below BLOCK_MAX_BER (unrelated audio averages 0.5).
+BLOCK_SECONDS = 10.0
+BLOCK_MAX_BER = 0.35
+MIN_BLOCK_VOTES = 2
+CLUSTER_FRAMES = 3  # audio off each other's frame grid jitters by a frame
+MAX_SILENT = 0.2  # silence hashes alike everywhere; mostly silent blocks/positions don't count
 
 
 @dataclass(frozen=True)
@@ -28,37 +32,36 @@ class SharedSegment:
 
 
 def _candidate_offsets(a: Fingerprint, b: Fingerprint) -> list[int]:
-    """Vote for offsets d (frame i in A ~ frame i + d in B) using exact hash hits."""
-    b_idx = np.flatnonzero(b.valid)
-    a_idx = np.flatnonzero(a.valid)
-    if len(a_idx) == 0 or len(b_idx) == 0:
+    """Offsets d (frame i in A ~ frame i + d in B) where A and B share audio, best first.
+
+    Every 10 s block of A (in 5 s steps) is slid over B, computing its bit error rate at each
+    position; a block that matches somewhere votes for that offset. Unlike looking up
+    bit-exact hashes, this also finds shared audio that sits between the two episodes' frame
+    grids (bit errors ~0.2-0.3 then, with hardly any exact hashes in common)."""
+    n = max(1, round(BLOCK_SECONDS / a.hop_seconds))
+    if len(a) < n or len(b) < n:
         return []
+    view = np.lib.stride_tricks.sliding_window_view(b.hashes, n)
+    silent_b = np.convolve(~b.valid, np.ones(n), mode="valid") / n > MAX_SILENT
+    limit = BLOCK_MAX_BER * 32 * n
+    votes: list[int] = []
+    for start in range(0, len(a) - n + 1, max(1, n // 2)):
+        if (~a.valid[start : start + n]).mean() > MAX_SILENT:
+            continue
+        errors = np.bitwise_count(view ^ a.hashes[start : start + n]).sum(axis=1, dtype=np.uint16)
+        errors[silent_b] = 32 * n
+        best = int(errors.argmin())
+        if errors[best] < limit:
+            votes.append(best - start)
 
-    b_hashes = b.hashes[b_idx]
-    order = np.argsort(b_hashes, kind="stable")
-    b_sorted, b_pos = b_hashes[order], b_idx[order]
-
-    a_hashes = a.hashes[a_idx]
-    lo = np.searchsorted(b_sorted, a_hashes, "left")
-    counts = np.searchsorted(b_sorted, a_hashes, "right") - lo
-    keep = (counts > 0) & (counts <= MAX_BUCKET)
-    if not keep.any():
-        return []
-
-    a_hit, lo, counts = a_idx[keep], lo[keep], counts[keep]
-    within = np.arange(counts.sum()) - np.repeat(np.cumsum(counts) - counts, counts)
-    offsets = b_pos[np.repeat(lo, counts) + within] - np.repeat(a_hit, counts)
-
-    shift = len(a)
-    votes = np.bincount(offsets + shift, minlength=len(a) + len(b))
-    result: list[int] = []
-    for idx in np.argsort(votes)[::-1]:
-        if votes[idx] < MIN_VOTES or len(result) >= TOP_OFFSETS:
-            break
-        offset = int(idx) - shift
-        if all(abs(offset - o) > NMS_RADIUS for o in result):
-            result.append(offset)
-    return result
+    clusters: list[list[int]] = []
+    for offset in sorted(votes):
+        if clusters and offset - clusters[-1][-1] <= CLUSTER_FRAMES:
+            clusters[-1].append(offset)
+        else:
+            clusters.append([offset])
+    ranked = sorted((c for c in clusters if len(c) >= MIN_BLOCK_VOTES), key=len, reverse=True)
+    return [int(np.median(c)) for c in ranked[:TOP_OFFSETS]]
 
 
 def runs(mask: np.ndarray) -> list[tuple[int, int]]:

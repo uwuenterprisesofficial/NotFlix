@@ -154,3 +154,30 @@ def test_search_windows_reads_the_opening_from_the_start_and_the_ending_from_the
     windows.clear()
     assert set(search_windows(window, duration, {"opening": references["opening"]})) == {"opening"}
     assert len(windows) == 1  # no saved ending: done after the opening
+
+
+def test_comparing_finds_parts_that_sit_between_frames():
+    """Two episodes whose opening/ending sit half a frame apart on their fingerprint grids
+    share almost no bit-exact hashes; comparing still finds both."""
+    rng = np.random.default_rng(11)
+    opening, ending = _noise(rng, 85), _noise(rng, 88)
+    a = np.concatenate([_noise(rng, 12.0), opening, _noise(rng, 900), ending, _noise(rng, 40)])
+    b = np.concatenate([_noise(rng, 47.05), opening, _noise(rng, 870), ending, _noise(rng, 25)])
+    fa, fb = fingerprint(a), fingerprint(b)
+    shared_hashes = len(np.intersect1d(fa.hashes, fb.hashes))
+    assert shared_hashes < 50  # of ~1700 frames of shared audio
+
+    found = detect_segments({1: fa, 2: fb})
+    by_kind = {ep: {s.kind: s for s in segs} for ep, segs in found.items()}
+    assert by_kind[1][SegmentKind.opening].start_s == pytest.approx(12.0, abs=1.5)
+    assert by_kind[2][SegmentKind.opening].start_s == pytest.approx(47.05, abs=1.5)
+    assert by_kind[1][SegmentKind.ending].start_s == pytest.approx(997, abs=1.5)
+    assert by_kind[2][SegmentKind.ending].start_s == pytest.approx(1002.05, abs=1.5)
+
+
+def test_shared_silence_is_not_a_match():
+    rng = np.random.default_rng(12)
+    silence = np.zeros(40 * SAMPLE_RATE, np.float32)
+    a = np.concatenate([_noise(rng, 100), silence, _noise(rng, 300)])
+    b = np.concatenate([_noise(rng, 250), silence, _noise(rng, 150)])
+    assert find_shared_segments(fingerprint(a), fingerprint(b)) == []
