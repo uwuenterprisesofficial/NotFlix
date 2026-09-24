@@ -176,17 +176,21 @@ class ProgressUpdate(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    episodes: list[int] = Field(min_length=2, max_length=50)
+    """A manual analysis: always recalculates these episodes, replacing earlier results (but
+    never manually entered times)."""
+
+    episodes: list[int] = Field(min_length=1, max_length=50)
     # The language whose direct streams are analysed; any language when omitted.
     language: Literal["de-dub", "de-sub", "en-sub", "en-dub", "unknown"] | None = None
-    force: bool = False
+    compare: bool = False  # compare episodes instead of searching the saved fingerprints
+    redownload: bool = False  # e.g. to retry an episode whose result is wrong
 
     @field_validator("episodes")
     @classmethod
     def distinct_positive(cls, value: list[int]) -> list[int]:
         episodes = sorted(set(value))
-        if len(episodes) < 2 or episodes[0] < 1:
-            raise ValueError("need at least two distinct episode numbers >= 1")
+        if episodes[0] < 1:
+            raise ValueError("episode numbers start at 1")
         return episodes
 
 
@@ -195,6 +199,8 @@ class JobOut(ORM):
     anime_id: int
     episodes: list[int]
     language: str | None
+    compare: bool
+    redownload: bool
     status: str
     error: str | None
     created_at: datetime
@@ -213,6 +219,7 @@ class EpisodeAnalysisOut(BaseModel):
 
 
 class ReferenceOut(BaseModel):
+    id: int
     kind: str
     source_episode: int
     duration_s: float

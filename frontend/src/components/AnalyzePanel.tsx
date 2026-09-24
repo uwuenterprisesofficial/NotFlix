@@ -44,6 +44,8 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
   const [job, setJob] = useState<AnalysisJob | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [overview, setOverview] = useState<AnalysisOverview | null>(null);
+  const [reload, setReload] = useState(0);
+  const [compare, setCompare] = useState(false);
 
   const running = job?.status === "queued" || job?.status === "running";
 
@@ -61,7 +63,7 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
     if (!othersRunning) return;
     const timer = setInterval(load, POLL_MS);
     return () => clearInterval(timer);
-  }, [animeId, jobStatus, othersRunning]);
+  }, [animeId, jobStatus, othersRunning, reload]);
 
   useEffect(() => {
     const load = () => fetchAvailability(animeId).then((found) => found && setAvailability(found));
@@ -100,21 +102,34 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
     custom?.language === language ? [custom.from, custom.to] : (fallback ?? [1, 2]);
   const episodes = available.filter((ep) => ep >= from && ep <= to);
   const label = LANGUAGE_LABELS[language];
+  const hasReferences = (overview?.references.length ?? 0) > 0;
+  // One episode is enough once there's something to match it against: a saved intro/outro
+  // fingerprint, or (to compare) an episode analysed before.
+  const minEpisodes =
+    (hasReferences && !compare) || overview?.episodes.some((e) => e.analysed) ? 1 : 2;
 
-  async function analyze() {
+  /** Start a manual analysis; it replaces these episodes' earlier results. */
+  async function submit(eps: number[], options: { redownload?: boolean } = {}) {
     setMessage(null);
     const res = await fetch(`/api/anime/${animeId}/analyze`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ episodes, language }),
+      body: JSON.stringify({ episodes: eps, language, compare, ...options }),
     });
     if (!res.ok) {
-      setMessage(`Could not start analysis (${res.status})`);
+      const body = await res.json().catch(() => null);
+      const detail = typeof body?.detail === "string" ? body.detail : null;
+      setMessage(detail ?? `Could not start analysis (${res.status})`);
       return;
     }
-    const body: { cached: boolean; job: AnalysisJob | null } = await res.json();
-    if (body.cached) setMessage("These episodes are already analysed.");
+    const body: { job: AnalysisJob | null } = await res.json();
     setJob(body.job);
+    setReload((r) => r + 1);
+  }
+
+  async function forget(referenceId: number) {
+    await fetch(`/api/anime/${animeId}/analysis/references/${referenceId}`, { method: "DELETE" });
+    setReload((r) => r + 1);
   }
 
   if (!signedIn) return null;
@@ -124,10 +139,11 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
     hint = "Checking which episodes are available…";
   } else if (!fallback) {
     hint = `Needs at least two episodes in ${label}; ${available.length === 1 ? "only one was" : "none were"} found. Pick another language in the episode list.`;
-  } else if (episodes.length < 2) {
+  } else if (episodes.length < minEpisodes) {
     hint = `Pick a range with at least two ${label} episodes.`;
   } else {
-    hint = `Analyses episode${episodes.length > 1 ? "s" : ""} ${episodes.join(", ")} using their direct ${label} streams.`;
+    const one = episodes.length === 1;
+    hint = `Analyses episode${one ? "" : "s"} ${episodes.join(", ")} using ${one ? "its" : "their"} direct ${label} stream${one ? "" : "s"}${compare ? ", comparing episodes" : ""}, and replaces ${one ? "its" : "their"} earlier times (not ones entered by hand).`;
   }
 
   const setRange = (next: { from?: number; to?: number }) =>
@@ -151,7 +167,7 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
           <input
             type="number"
             min={available[0] ?? 1}
-            max={to - 1}
+            max={to - (minEpisodes - 1)}
             value={from}
             disabled={!fallback}
             onChange={(e) => setRange({ from: Number(e.target.value) })}
@@ -162,7 +178,7 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
           to
           <input
             type="number"
-            min={from + 1}
+            min={from + (minEpisodes - 1)}
             max={available.at(-1) ?? 2}
             value={to}
             disabled={!fallback}
@@ -171,18 +187,30 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
           />
         </label>
         <button
-          onClick={analyze}
-          disabled={running || episodes.length < 2}
+          onClick={() => submit(episodes)}
+          disabled={running || episodes.length < minEpisodes}
           className="rounded bg-brand px-4 py-1.5 font-semibold hover:bg-brand-dark disabled:opacity-50"
         >
           {running ? "Analysing…" : "Analyse"}
         </button>
       </div>
+      {hasReferences && (
+        <label className="mt-3 flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={compare}
+            onChange={(e) => setCompare(e.target.checked)}
+            className="accent-brand"
+          />
+          Compare episodes instead of searching for the saved fingerprints
+        </label>
+      )}
       <p className="mt-3 text-sm text-muted">{hint}</p>
       {message && <p className="mt-3 text-sm text-muted">{message}</p>}
       {job && (
         <p className="mt-3 text-sm">
-          Job for episodes {job.episodes.join(", ")}
+          {job.redownload ? "Retry of" : "Job for"} episode{job.episodes.length > 1 ? "s" : ""}{" "}
+          {job.episodes.join(", ")}
           {job.language && ` (${LANGUAGE_LABELS[job.language]})`}:{" "}
           <span className={job.status === "failed" ? "text-red-400" : "text-green-400"}>
             {job.status}
@@ -190,7 +218,13 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
           {job.error && <span className="block text-red-400">{job.error}</span>}
         </p>
       )}
-      {overview && <AnalysisResults overview={overview} />}
+      {overview && (
+        <AnalysisResults
+          overview={overview}
+          onRetry={(ep) => submit([ep], { redownload: true })}
+          onForget={forget}
+        />
+      )}
     </section>
   );
 }
@@ -205,22 +239,44 @@ function Range({ label, segment }: { label: string; segment: SkipSegment | undef
 }
 
 /** Every analysed episode with its intro and outro times, and what's still being analysed. */
-function AnalysisResults({ overview }: { overview: AnalysisOverview }) {
+function AnalysisResults({
+  overview,
+  onRetry,
+  onForget,
+}: {
+  overview: AnalysisOverview;
+  onRetry: (episode: number) => void;
+  onForget: (referenceId: number) => void;
+}) {
   const pending = [...new Set(overview.running.flatMap((j) => j.episodes))].sort((a, b) => a - b);
-  if (!overview.episodes.length && !pending.length) return null;
+  if (!overview.episodes.length && !pending.length && !overview.references.length) return null;
   return (
     <div className="mt-5 border-t border-white/10 pt-4 text-sm">
       <h3 className="font-semibold">Results</h3>
       {overview.references.length > 0 && (
-        <p className="mt-1 text-muted">
-          Saved fingerprints, searched for in new episodes:{" "}
-          {overview.references
-            .map(
-              (r) =>
-                `${r.kind === "opening" ? "Intro" : "Outro"} from episode ${r.source_episode} (${formatTime(r.duration_s)})`,
-            )
-            .join(" · ")}
-        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-muted">
+          Saved fingerprints, searched for in new episodes:
+          {overview.references.map((r) => (
+            <span
+              key={r.id}
+              className="flex items-center gap-1 rounded bg-neutral-800 py-0.5 pr-1 pl-2 text-white/90"
+            >
+              {r.kind === "opening" ? "Intro" : "Outro"} from episode {r.source_episode} (
+              {formatTime(r.duration_s)})
+              <button
+                onClick={() => {
+                  if (confirm("Remove this fingerprint? Later analyses compare episodes again."))
+                    onForget(r.id);
+                }}
+                aria-label={`Remove the ${r.kind === "opening" ? "intro" : "outro"} fingerprint`}
+                title="Remove (e.g. if it's wrong)"
+                className="rounded px-1 text-muted hover:bg-white/10 hover:text-white"
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
       )}
       {pending.length > 0 && (
         <p className="mt-1 text-muted">
@@ -231,8 +287,9 @@ function AnalysisResults({ overview }: { overview: AnalysisOverview }) {
         {overview.episodes.map((e) => {
           const intro = e.segments.find((s) => s.kind === "opening");
           const outro = e.segments.find((s) => s.kind === "ending");
+          const busy = pending.includes(e.episode);
           return (
-            <li key={e.episode} className="flex flex-wrap gap-x-3">
+            <li key={e.episode} className="group flex flex-wrap items-center gap-x-3">
               <span className="w-24 shrink-0 font-semibold">Episode {e.episode}:</span>
               {intro || outro ? (
                 <>
@@ -245,6 +302,14 @@ function AnalysisResults({ overview }: { overview: AnalysisOverview }) {
               ) : (
                 <span className="text-muted">no intro or outro found</span>
               )}
+              <button
+                onClick={() => onRetry(e.episode)}
+                disabled={busy}
+                title="Download the episode again and recalculate its times"
+                className="ml-auto rounded px-2 py-0.5 text-xs text-muted hover:bg-white/10 hover:text-white disabled:opacity-50"
+              >
+                {busy ? "Analysing…" : "↻ Retry"}
+              </button>
             </li>
           );
         })}

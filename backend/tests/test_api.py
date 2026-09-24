@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from app.db.session import sync_session
 from app.models import (
@@ -88,11 +88,14 @@ async def test_analyze_requires_sign_in(client):
 
 
 async def test_analyze_validates_episodes(client, user):
+    assert (await client.post("/anime/5/analyze", json={"episodes": [0, 1]})).status_code == 422
+    # One episode (here the same one twice) needs a saved fingerprint to match it against.
     resp = await client.post("/anime/5/analyze", json={"episodes": [3, 3]})
     assert resp.status_code == 422
+    assert "Pick two episodes" in resp.json()["detail"]
 
 
-async def test_analyze_queues_job_and_reuses_finished_episodes(client, user, monkeypatch):
+async def test_manual_analysis_always_recalculates(client, user, monkeypatch):
     queued = []
 
     class FakeQueue:
@@ -101,24 +104,41 @@ async def test_analyze_queues_job_and_reuses_finished_episodes(client, user, mon
 
     monkeypatch.setattr("app.api.anime.analysis_queue", lambda: FakeQueue())
 
-    body = (
-        await client.post("/anime/5/analyze", json={"episodes": [2, 1], "language": "de-sub"})
-    ).json()
+    async def analyze(**body):
+        return (await client.post("/anime/5/analyze", json=body)).json()
+
+    body = await analyze(episodes=[2, 1], language="de-sub")
     assert body["cached"] is False
-    assert body["job"]["episodes"] == [1, 2]
-    assert body["job"]["language"] == "de-sub"
-    assert queued == [(body["job"]["id"],)]
+    job = body["job"]
+    assert (job["episodes"], job["language"], job["compare"], job["redownload"]) == (
+        [1, 2], "de-sub", False, False,
+    )  # fmt: skip
+    assert queued == [(job["id"],)]
 
     with sync_session() as db:
-        db.get(AnalysisJob, body["job"]["id"]).status = JobStatus.done
+        db.get(AnalysisJob, job["id"]).status = JobStatus.done
+        db.add(
+            ReferenceSegment(
+                anime_id=5, kind="opening", source_episode=1, hashes=b"", valid=b"", frames=0,
+                hop_seconds=0.1,
+            )
+        )  # fmt: skip
         db.commit()
 
-    cached = (await client.post("/anime/5/analyze", json={"episodes": [1, 2]})).json()
-    assert cached == {"cached": True, "job": None}
+    # Analysed episodes are analysed again when asked (their results are replaced)...
+    assert (await analyze(episodes=[1, 2]))["job"]["episodes"] == [1, 2]
+    # ...and with a saved fingerprint, one episode is enough, e.g. to retry it.
+    retry = (await analyze(episodes=[2], redownload=True))["job"]
+    assert (retry["episodes"], retry["redownload"]) == ([2], True)
+    assert len(queued) == 3
 
-    # Only episode 3 is new; episode 1 is reused as the comparison reference.
-    body = (await client.post("/anime/5/analyze", json={"episodes": [1, 2, 3]})).json()
-    assert body["job"]["episodes"] == [1, 3]
+    overview = (await client.get("/anime/5/analysis")).json()
+    [reference] = overview["references"]
+    assert (reference["kind"], reference["source_episode"]) == ("opening", 1)
+    url = f"/anime/5/analysis/references/{reference['id']}"
+    assert (await client.delete(url)).status_code == 204
+    assert (await client.delete(url)).status_code == 404
+    assert (await client.get("/anime/5/analysis")).json()["references"] == []
 
 
 def test_worker_learns_the_opening_and_ending_once_then_searches_new_episodes(
@@ -151,6 +171,8 @@ def test_worker_learns_the_opening_and_ending_once_then_searches_new_episodes(
         # stored links all expired: only fresh ones work.
         if episodes == [4]:
             return {4: [Media("ep4")] if fresh else [Media("dead")]}
+        if episodes == [3] and fresh:
+            return {3: [Media("ep3-fresh")]}
         return {ep: [Media("dead")] * (ep == 2) + [Media(f"ep{ep}")] for ep in episodes}
 
     def fake_load_audio(source, headers):
@@ -161,10 +183,12 @@ def test_worker_learns_the_opening_and_ending_once_then_searches_new_episodes(
     monkeypatch.setattr("app.worker.tasks.resolve_all", fake_resolve_all)
     monkeypatch.setattr("app.worker.tasks.load_audio", fake_load_audio)
 
-    def run(job_id: str, episodes: list[int]):
+    def run(job_id: str, episodes: list[int], **options):
         asked.clear()
         with sync_session() as db:
-            db.add(AnalysisJob(id=job_id, anime_id=7, episodes=episodes, language="de-dub"))
+            db.add(
+                AnalysisJob(id=job_id, anime_id=7, episodes=episodes, language="de-dub", **options)
+            )
             db.commit()
         run_analysis(job_id)
         with sync_session() as db:
@@ -241,6 +265,28 @@ def test_worker_learns_the_opening_and_ending_once_then_searches_new_episodes(
     assert asked == [([7], "de-dub", False)]
     assert rows[(7, "opening")].start_s == pytest.approx(15, abs=1.5)
     assert compared[7] == []
+
+    # Retrying an episode with a wrong result downloads it again from fresh links and
+    # replaces the result; a wrong time that isn't found again is removed.
+    with sync_session() as db:
+        db.execute(
+            update(SkipSegment)
+            .where(SkipSegment.anime_id == 7, SkipSegment.episode == 3)
+            .values(start_s=5, end_s=6)
+        )
+        db.commit()
+    # (This time the source has a version of episode 3 without the ending.)
+    audio["ep3-fresh"] = np.concatenate([noise(40), opening_a, noise(600)])
+    rows, compared, _ = run("job-8", [3], redownload=True)
+    assert asked == [([3], "de-dub", True)]
+    assert rows[(3, "opening")].start_s == pytest.approx(40, abs=1.5)
+    assert (3, "ending") not in rows
+
+    # Comparing instead of using the saved fingerprints (no download: all are saved).
+    rows, compared, _ = run("job-9", [3], compare=True)
+    assert asked == []
+    assert rows[(3, "opening")].start_s == pytest.approx(40, abs=1.5)
+    assert compared[3] == [4]  # the nearest analysed episode (the next one on a tie)
 
 
 def test_worker_marks_job_failed_when_media_missing(database):

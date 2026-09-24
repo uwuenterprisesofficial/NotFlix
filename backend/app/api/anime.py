@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.deps import DB, CurrentUser, OptionalUser
 from app.models import (
@@ -93,32 +93,49 @@ async def update_progress(anime_id: int, body: ProgressUpdate, user: CurrentUser
 
 @router.post("/anime/{anime_id}/analyze", response_model=AnalyzeResponse)
 async def analyze(anime_id: int, body: AnalyzeRequest, user: CurrentUser, db: DB):
-    """Queue opening/ending detection. Episodes analysed by an earlier job are skipped."""
-    episodes = body.episodes
-    if not body.force:
-        done_jobs = await db.scalars(
-            select(AnalysisJob).where(
-                AnalysisJob.anime_id == anime_id, AnalysisJob.status == JobStatus.done
-            )
+    """Queue opening/ending detection for these episodes, replacing their earlier results.
+    A single episode needs something to be matched against: a saved opening/ending
+    fingerprint, or (to compare) another analysed episode."""
+    if len(body.episodes) == 1:
+        [episode] = body.episodes
+        references = await db.scalar(
+            select(func.count())
+            .select_from(ReferenceSegment)
+            .where(ReferenceSegment.anime_id == anime_id)
         )
-        analysed = {ep for job in done_jobs for ep in job.episodes}
-        pending = [ep for ep in episodes if ep not in analysed]
-        if not pending:
-            return AnalyzeResponse(cached=True, job=None)
-        if len(pending) == 1:
-            # Detection needs a second episode to compare against; reuse an analysed one.
-            reference = next(ep for ep in episodes if ep != pending[0])
-            pending = sorted([pending[0], reference])
-        episodes = pending
-
-    job = await _queue_analysis(db, anime_id, episodes, body.language)
+        others = await db.scalar(
+            select(func.count())
+            .select_from(EpisodeFingerprint)
+            .where(EpisodeFingerprint.anime_id == anime_id, EpisodeFingerprint.episode != episode)
+        )
+        if not others and not (references and not body.compare):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "A single episode can only be analysed once an intro/outro fingerprint is "
+                "saved. Pick two episodes.",
+            )
+    job = await _queue_analysis(
+        db, anime_id, body.episodes, body.language, body.compare, body.redownload
+    )
     return AnalyzeResponse(cached=False, job=JobOut.model_validate(job))
 
 
 async def _queue_analysis(
-    db: DB, anime_id: int, episodes: list[int], language: str | None
+    db: DB,
+    anime_id: int,
+    episodes: list[int],
+    language: str | None,
+    compare: bool = False,
+    redownload: bool = False,
 ) -> AnalysisJob:
-    job = AnalysisJob(id=str(uuid.uuid4()), anime_id=anime_id, episodes=episodes, language=language)
+    job = AnalysisJob(
+        id=str(uuid.uuid4()),
+        anime_id=anime_id,
+        episodes=episodes,
+        language=language,
+        compare=compare,
+        redownload=redownload,
+    )
     db.add(job)
     await db.commit()
     await db.refresh(job)
@@ -194,6 +211,7 @@ async def analysis_overview(anime_id: int, db: DB):
     analysed = {episode for episode, compared_with in rows if compared_with}
     references = await db.execute(
         select(
+            ReferenceSegment.id,
             ReferenceSegment.kind,
             ReferenceSegment.source_episode,
             ReferenceSegment.frames * ReferenceSegment.hop_seconds,
@@ -211,8 +229,10 @@ async def analysis_overview(anime_id: int, db: DB):
             for ep in sorted(analysed | set(by_episode))
         ],
         references=[
-            ReferenceOut(kind=kind, source_episode=episode, duration_s=round(duration, 1))
-            for kind, episode, duration in references
+            ReferenceOut(
+                id=ref_id, kind=kind, source_episode=episode, duration_s=round(duration, 1)
+            )
+            for ref_id, kind, episode, duration in references
         ],
         running=[JobOut.model_validate(j) for j in await _running_jobs(db, anime_id)],
     )
@@ -224,3 +244,16 @@ async def analysis_job(job_id: str, db: DB):
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
     return job
+
+
+@router.delete(
+    "/anime/{anime_id}/analysis/references/{reference_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_reference(anime_id: int, reference_id: int, user: CurrentUser, db: DB):
+    """Forget a saved opening/ending fingerprint (e.g. a wrong one). Later analyses compare
+    episodes again where no other fingerprint matches, and save what they find."""
+    ref = await db.get(ReferenceSegment, reference_id)
+    if ref is None or ref.anime_id != anime_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Fingerprint not found")
+    await db.delete(ref)
+    await db.commit()

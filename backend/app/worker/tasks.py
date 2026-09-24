@@ -2,7 +2,7 @@ import logging
 from datetime import UTC, datetime
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.analysis.audio import AudioDecodeError, load_audio
@@ -46,16 +46,18 @@ def _first_decodable(episode: int, candidates: list[Media]) -> np.ndarray:
     raise AudioDecodeError(f"No stream of episode {episode} could be decoded: {error}")
 
 
-def _decode(anime_id: int, episode: int, language: str | None) -> Fingerprint:
+def _decode(anime_id: int, episode: int, language: str | None, fresh: bool = False) -> Fingerprint:
     """Download and fingerprint one episode. Stored links may have expired: if none of them
-    decodes, the episode's links are fetched fresh once."""
+    decodes, the episode's links are fetched fresh (`fresh` skips the stored ones)."""
     log.info("Fingerprinting anime %s episode %s", anime_id, episode)
-    try:
-        audio = _first_decodable(episode, resolve_all(anime_id, [episode], language)[episode])
-    except AudioDecodeError:
-        fresh = resolve_all(anime_id, [episode], language, fresh=True)[episode]
-        audio = _first_decodable(episode, fresh)
-    return fingerprint(audio)
+    if not fresh:
+        try:
+            stored = resolve_all(anime_id, [episode], language)[episode]
+            return fingerprint(_first_decodable(episode, stored))
+        except AudioDecodeError:
+            pass
+    links = resolve_all(anime_id, [episode], language, fresh=True)[episode]
+    return fingerprint(_first_decodable(episode, links))
 
 
 def _partner(
@@ -164,17 +166,22 @@ def run_analysis(job_id: str) -> None:
             saved = load_fingerprints(db, job.anime_id)
             fingerprints: dict[int, Fingerprint] = {}
             for episode in job.episodes:
-                if episode in saved:
+                if episode in saved and not job.redownload:
                     fingerprints[episode] = to_fingerprint(saved[episode])
                 else:
-                    fingerprints[episode] = _decode(job.anime_id, episode, job.language)
+                    fingerprints[episode] = _decode(
+                        job.anime_id, episode, job.language, fresh=job.redownload
+                    )
                     saved[episode] = save_fingerprint(
                         db, job.anime_id, episode, job.language, fingerprints[episode]
                     )
                     db.commit()  # a download is kept even if a later step fails
 
             references = [(ref, to_fingerprint(ref)) for ref in load_references(db, job.anime_id)]
-            found = {ep: _match_references(fingerprints[ep], references) for ep in job.episodes}
+            found: dict[int, dict[str, DetectedSegment]] = {
+                ep: {} if job.compare else _match_references(fingerprints[ep], references)
+                for ep in job.episodes
+            }
             kinds = {kind.value for kind in SegmentKind}
             unresolved = [ep for ep in job.episodes if set(found[ep]) != kinds]
             detected: dict[int, list[DetectedSegment]] = {}
@@ -184,6 +191,17 @@ def run_analysis(job_id: str) -> None:
             for episode, segments in detected.items():
                 for seg in segments:
                     found.setdefault(episode, {}).setdefault(seg.kind, seg)
+
+            # The job's episodes are recalculated: an earlier result that isn't found again
+            # (e.g. a wrong outro) goes. Manually entered times always stay.
+            db.execute(
+                delete(SkipSegment).where(
+                    SkipSegment.anime_id == job.anime_id,
+                    SkipSegment.episode.in_(job.episodes),
+                    SkipSegment.source != "manual",
+                )
+            )
+            db.flush()
 
             existing = {
                 (s.episode, s.kind): s

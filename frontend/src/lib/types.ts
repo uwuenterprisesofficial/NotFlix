@@ -94,6 +94,8 @@ export type AnalysisJob = {
   anime_id: number;
   episodes: number[];
   language: Language | null;
+  compare: boolean;
+  redownload: boolean;
   status: "queued" | "running" | "done" | "failed";
   error: string | null;
 };
@@ -101,6 +103,7 @@ export type AnalysisJob = {
 export type EpisodeAnalysis = { episode: number; analysed: boolean; segments: SkipSegment[] };
 
 export type ReferenceFingerprint = {
+  id: number;
   kind: "opening" | "ending";
   source_episode: number;
   duration_s: number;
