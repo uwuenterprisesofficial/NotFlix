@@ -87,6 +87,7 @@ export type AnalysisJob = {
   id: string;
   anime_id: number;
   episodes: number[];
+  language: Language | null;
   status: "queued" | "running" | "done" | "failed";
   error: string | null;
 };

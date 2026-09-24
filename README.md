@@ -96,9 +96,9 @@ VALUES (21, 1, 'my-site', 'embed', 'https://example.com/embed/one-piece-1', 'de-
 
 ## Intro/outro detection
 
-On a show's page, open **More options**, pick an episode range and press **Analyse**. The worker then:
+On a show's page, open **More options** and press **Analyse**. It analyses the language selected in the episode list and needs at least two episodes available in it. By default it compares two episodes: the 2nd and 3rd available ones (episode 1 often has no opening, or a different cut of it), or the 1st and 2nd when there are only two. You can widen the range. The worker then:
 
-1. Resolves each episode's media: `MEDIA_DIR/<anime_id>/<episode>.{mkv,mp4,…}` (`./media` in docker compose), otherwise the first direct stream any provider offers.
+1. Resolves each episode's media: `MEDIA_DIR/<anime_id>/<episode>.{mkv,mp4,…}` (`./media` in docker compose), otherwise the **direct** streams the providers offer in the selected language. Embedded players are never used. If a direct link fails to decode (a dead hoster link, say), the next one is tried. An episode without any direct stream in that language fails the job with a message saying which episodes lack one.
 2. Decodes the audio with ffmpeg to mono 5.5 kHz and computes a 32-bit fingerprint every 100 ms (Haitsma–Kalker: signs of band-energy differences in 300–2000 Hz).
 3. For each pair of neighbouring episodes, votes on time offsets using exact hash matches. At the best offsets it looks for long runs where the bit error rate stays low. A stretch of 20–200 s shared by both episodes is an opening if it sits in the first half, otherwise an ending.
 4. Saves the result to `skip_segments`. Rows with `source = 'manual'` are never overwritten. Episodes that were already analysed are skipped next time, and a single new episode is compared against one that was already analysed.

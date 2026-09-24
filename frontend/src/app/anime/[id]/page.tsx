@@ -9,9 +9,6 @@ import { apiOrNull } from "@/lib/api";
 import { displayTitle, nextEpisode } from "@/lib/format";
 import type { AnimeDetail, Me } from "@/lib/types";
 
-// Airing shows have no episode count on MAL yet; analyse within a reasonable default range.
-const UNKNOWN_EPISODE_COUNT = 12;
-
 export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
   const { id } = await params;
   if (!/^\d+$/.test(id)) notFound();
@@ -22,7 +19,6 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
   if (!anime) notFound();
 
   const watched = anime.progress?.episodes_watched ?? 0;
-  const count = anime.num_episodes ?? Math.max(watched + 1, UNKNOWN_EPISODE_COUNT);
   const title = displayTitle(anime);
 
   return (
@@ -95,7 +91,7 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
           </summary>
           <AniWorldMapping animeId={anime.id} />
           <AnimeToastMapping animeId={anime.id} />
-          <AnalyzePanel animeId={anime.id} episodeCount={count} signedIn />
+          <AnalyzePanel animeId={anime.id} signedIn />
         </details>
       )}
     </div>

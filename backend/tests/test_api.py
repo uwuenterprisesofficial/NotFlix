@@ -93,9 +93,12 @@ async def test_analyze_queues_job_and_reuses_finished_episodes(client, user, mon
 
     monkeypatch.setattr("app.api.anime.analysis_queue", lambda: FakeQueue())
 
-    body = (await client.post("/anime/5/analyze", json={"episodes": [2, 1]})).json()
+    body = (
+        await client.post("/anime/5/analyze", json={"episodes": [2, 1], "language": "de-sub"})
+    ).json()
     assert body["cached"] is False
     assert body["job"]["episodes"] == [1, 2]
+    assert body["job"]["language"] == "de-sub"
     assert queued == [(body["job"]["id"],)]
 
     with sync_session() as db:
@@ -111,7 +114,7 @@ async def test_analyze_queues_job_and_reuses_finished_episodes(client, user, mon
 
 
 def test_worker_stores_detected_segments(database, monkeypatch):
-    from app.analysis.audio import SAMPLE_RATE
+    from app.analysis.audio import SAMPLE_RATE, AudioDecodeError
     from app.analysis.media import Media
     from app.worker.tasks import run_analysis
 
@@ -124,14 +127,23 @@ def test_worker_stores_detected_segments(database, monkeypatch):
         return np.concatenate([pad(intro_at), opening, pad(600), ending, pad(30)])
 
     audio = {"ep1": fake_episode(10), "ep2": fake_episode(70)}
-    monkeypatch.setattr(
-        "app.worker.tasks.resolve_all",
-        lambda anime_id, episodes: {ep: Media(f"ep{ep}") for ep in episodes},
-    )
-    monkeypatch.setattr("app.worker.tasks.load_audio", lambda source, headers: audio[source])
+    asked = []
+
+    def fake_resolve_all(anime_id, episodes, language):
+        asked.append(language)
+        # Episode 2's first direct link is dead; the next one is used instead.
+        return {ep: [Media("dead")] * (ep - 1) + [Media(f"ep{ep}")] for ep in episodes}
+
+    def fake_load_audio(source, headers):
+        if source == "dead":
+            raise AudioDecodeError("403 Forbidden")
+        return audio[source]
+
+    monkeypatch.setattr("app.worker.tasks.resolve_all", fake_resolve_all)
+    monkeypatch.setattr("app.worker.tasks.load_audio", fake_load_audio)
 
     with sync_session() as db:
-        db.add(AnalysisJob(id="job-1", anime_id=7, episodes=[1, 2]))
+        db.add(AnalysisJob(id="job-1", anime_id=7, episodes=[1, 2], language="de-dub"))
         db.add(
             SkipSegment(
                 anime_id=7,
@@ -146,6 +158,7 @@ def test_worker_stores_detected_segments(database, monkeypatch):
         db.commit()
 
     run_analysis("job-1")
+    assert asked == ["de-dub"]
 
     with sync_session() as db:
         assert db.get(AnalysisJob, "job-1").status == JobStatus.done
@@ -172,5 +185,5 @@ def test_worker_marks_job_failed_when_media_missing(database):
     with sync_session() as db:
         job = db.get(AnalysisJob, "job-2")
         assert job.status == JobStatus.failed
-        assert "No media for anime 8 episode 1" in job.error
+        assert "No direct stream for anime 8 episodes 1, 2" in job.error
         assert job.finished_at is not None

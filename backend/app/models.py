@@ -191,6 +191,8 @@ class AnalysisJob(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     anime_id: Mapped[int] = mapped_column(Integer, index=True)
     episodes: Mapped[list[int]] = mapped_column(JSON)
+    # Only direct streams in this language are analysed (any language when None).
+    language: Mapped[str | None] = mapped_column(String(10))
     status: Mapped[str] = mapped_column(String(10), default=JobStatus.queued)
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

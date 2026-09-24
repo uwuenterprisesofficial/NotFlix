@@ -30,43 +30,62 @@ def local_media(anime_id: int, episode: int) -> Media | None:
     return None
 
 
-async def provider_media(anime: AnimeInfo, episode: int) -> Media | None:
-    """The first direct (non-iframe) stream any provider offers for this episode."""
+LANGUAGE_LABELS = {
+    "de-dub": "German Dub",
+    "de-sub": "German Sub",
+    "en-sub": "English Sub",
+    "en-dub": "English Dub",
+    "unknown": "other",
+}
+
+
+async def provider_media(anime: AnimeInfo, episode: int, language: str | None) -> list[Media]:
+    """Every direct (non-iframe) stream the providers offer for this episode in `language` (any
+    language when None), best first. Embedded players can't be decoded, so they never count."""
+    found: list[Media] = []
     for option in await list_options(anime, episode):
+        if language is not None and option.language != language:
+            continue
         try:
             resolved = option.resolved or await resolve_option(anime, episode, option.id)
         except Exception:
             continue
-        for stream in resolved.streams:
-            if stream.kind == "direct":
-                return Media(stream.url, stream.headers)
-    return None
+        found += [Media(s.url, s.headers) for s in resolved.streams if s.kind == "direct"]
+    return found
 
 
-async def _provider_media_for(anime_id: int, episodes: list[int]) -> dict[int, Media | None]:
+async def _provider_media_for(
+    anime_id: int, episodes: list[int], language: str | None
+) -> dict[int, list[Media]]:
     try:
         async with AsyncSessionLocal() as db:
             anime = await db.get(Anime, anime_id)
         info = AnimeInfo.from_model(anime) if anime else AnimeInfo(id=anime_id, title="")
-        return {ep: await provider_media(info, ep) for ep in episodes}
+        return {ep: await provider_media(info, ep, language) for ep in episodes}
     finally:
         # Pooled connections belong to this event loop, which asyncio.run is about to close.
         await async_engine.dispose()
         await cache.close()
 
 
-def resolve_all(anime_id: int, episodes: list[int]) -> dict[int, Media]:
-    """Media for each episode: a local file (<MEDIA_DIR>/<anime_id>/<episode>.<ext>) if present,
-    otherwise a direct stream from the providers. Embedded iframes can't be analysed."""
-    found = {ep: m for ep in episodes if (m := local_media(anime_id, ep))}
+def resolve_all(
+    anime_id: int, episodes: list[int], language: str | None = None
+) -> dict[int, list[Media]]:
+    """Candidate media for each episode, to try in order: a local file
+    (<MEDIA_DIR>/<anime_id>/<episode>.<ext>) if present, otherwise the direct streams the
+    providers offer in `language`."""
+    found = {ep: [m] for ep in episodes if (m := local_media(anime_id, ep))}
     missing = [ep for ep in episodes if ep not in found]
     if missing:
-        for ep, media in asyncio.run(_provider_media_for(anime_id, missing)).items():
-            if media is None:
-                folder = Path(get_settings().media_dir) / str(anime_id)
-                raise MediaNotFound(
-                    f"No media for anime {anime_id} episode {ep}: add {folder}/{ep}.mkv "
-                    "or a source with a direct stream"
-                )
-            found[ep] = media
-    return found
+        found.update(asyncio.run(_provider_media_for(anime_id, missing, language)))
+    lacking = [ep for ep in episodes if not found.get(ep)]
+    if lacking:
+        folder = Path(get_settings().media_dir) / str(anime_id)
+        where = f" {LANGUAGE_LABELS.get(language, language)}" if language else ""
+        raise MediaNotFound(
+            f"No direct{where} stream for anime {anime_id} episode"
+            f"{'s' if len(lacking) > 1 else ''} {', '.join(map(str, lacking))}: "
+            f"embedded players can't be analysed. Add {folder}/<episode>.mkv, "
+            "or pick episodes or a language with direct streams."
+        )
+    return {ep: found[ep] for ep in episodes}

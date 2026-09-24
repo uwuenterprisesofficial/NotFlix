@@ -99,7 +99,9 @@ async def analyze(anime_id: int, body: AnalyzeRequest, user: CurrentUser, db: DB
             pending = sorted([pending[0], reference])
         episodes = pending
 
-    job = AnalysisJob(id=str(uuid.uuid4()), anime_id=anime_id, episodes=episodes)
+    job = AnalysisJob(
+        id=str(uuid.uuid4()), anime_id=anime_id, episodes=episodes, language=body.language
+    )
     db.add(job)
     await db.commit()
     await db.refresh(job)

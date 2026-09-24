@@ -147,6 +147,8 @@ class ProgressUpdate(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     episodes: list[int] = Field(min_length=2, max_length=50)
+    # The language whose direct streams are analysed; any language when omitted.
+    language: Literal["de-dub", "de-sub", "en-sub", "en-dub", "unknown"] | None = None
     force: bool = False
 
     @field_validator("episodes")
@@ -162,6 +164,7 @@ class JobOut(ORM):
     id: str
     anime_id: int
     episodes: list[int]
+    language: str | None
     status: str
     error: str | None
     created_at: datetime

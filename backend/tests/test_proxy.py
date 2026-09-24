@@ -188,14 +188,20 @@ def test_analyzer_uses_direct_provider_streams(database, monkeypatch, tmp_path):
     (tmp_path / "9").mkdir()
     (tmp_path / "9" / "1.mkv").write_bytes(b"")
 
-    monkeypatch.setattr(providers_base, "enabled_providers", lambda: [FakeProvider()])
-    media = resolve_all(9, [1, 2])
-    assert media[1].source == str(tmp_path / "9" / "1.mkv")
-    assert (media[2].source, media[2].headers) == ("https://cdn.example/master.m3u8", HEADERS)
-
-    monkeypatch.setattr(providers_base, "enabled_providers", lambda: [EmbedOnlyProvider()])
-    with pytest.raises(MediaNotFound, match="episode 2"):
-        resolve_all(9, [1, 2])
+    monkeypatch.setattr(
+        providers_base, "enabled_providers", lambda: [FakeProvider(), EmbedOnlyProvider()]
+    )
+    media = resolve_all(9, [1, 2], "en-sub")
+    assert [m.source for m in media[1]] == [str(tmp_path / "9" / "1.mkv")]
+    # Every direct stream in the language, to try in order; the embed never counts.
+    assert [(m.source, m.headers) for m in media[2]] == [
+        ("https://cdn.example/master.m3u8", HEADERS),
+        ("https://cdn.example/plain.mp4", {}),
+    ]
+    # Only the selected language: German Dub has nothing but an embedded player.
+    with pytest.raises(MediaNotFound, match=r"No direct German Dub stream .* episode 2:"):
+        resolve_all(9, [1, 2], "de-dub")
+    assert len(resolve_all(9, [1, 2])[2]) == 2  # no language: any
 
 
 async def test_sources_can_be_loaded_per_provider(client, monkeypatch):
