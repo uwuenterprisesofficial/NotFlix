@@ -3,6 +3,7 @@
 import type Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
 import type { SkipSegment, Stream } from "@/lib/types";
+import { FullscreenButton, useFrameFullscreen } from "./PlayerFrame";
 
 function useStream(
   ref: React.RefObject<HTMLVideoElement | null>,
@@ -36,8 +37,23 @@ function useStream(
 const NEXT_COUNTDOWN_S = 10;
 // A stream that hasn't loaded anything by then counts as broken.
 const LOAD_TIMEOUT_MS = 20_000;
-// Without detected credits, the "Next Episode" card shows this long before the end.
-const FALLBACK_CREDITS_S = 30;
+// Without detected credits, the "Next Episode" card shows this long before the end (1:30).
+const FALLBACK_CREDITS_S = 90;
+// Controls drawn over the video hide after the pointer rests this long.
+const IDLE_MS = 2500;
+
+/** When the credits start: the detected ending, else 1:30 before the end (at least halfway). */
+function creditsStart(ending: SkipSegment | undefined, duration: number) {
+  if (ending) return ending.start_s;
+  return duration ? Math.max(duration - FALLBACK_CREDITS_S, duration / 2) : Infinity;
+}
+
+function typingIn(target: EventTarget | null) {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+  );
+}
 
 export type NextEpisode = { label: string; go: () => void };
 
@@ -82,6 +98,24 @@ export function DirectVideo({
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [creditsDismissed, setCreditsDismissed] = useState(false);
+  const [paused, setPaused] = useState(true);
+  const [idle, setIdle] = useState(true);
+  const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const fullscreen = useFrameFullscreen();
+
+  const { toggle: toggleFullscreen, supported: canFullscreen } = fullscreen;
+  useEffect(() => {
+    if (!canFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "f" || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (typingIn(e.target)) return;
+      e.preventDefault();
+      toggleFullscreen();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [canFullscreen, toggleFullscreen]);
+  useEffect(() => () => clearTimeout(idleTimer.current), []);
   useStream(ref, stream.url, stream.format === "hls", fail);
 
   useEffect(() => {
@@ -92,7 +126,7 @@ export function DirectVideo({
   const opening = segments.find((s) => s.kind === "opening");
   const ending = segments.find((s) => s.kind === "ending");
   const inIntro = !!opening && time >= opening.start_s && time < opening.end_s - 0.5;
-  const creditsAt = ending?.start_s ?? (duration ? duration - FALLBACK_CREDITS_S : Infinity);
+  const creditsAt = creditsStart(ending, duration);
   const inCredits = time >= creditsAt;
 
   function onTimeUpdate() {
@@ -106,14 +140,34 @@ export function DirectVideo({
       autoSkipped.current = true;
       video.currentTime = opening.end_s;
     }
-    if (t >= (ending?.start_s ?? video.duration * 0.9)) onNearEnd();
+    if (t >= creditsStart(ending, video.duration)) onNearEnd();
+  }
+
+  function wake() {
+    setIdle(false);
+    clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => setIdle(true), IDLE_MS);
   }
 
   return (
-    <>
+    <div
+      className={`absolute inset-0 ${fullscreen.active && idle && !paused ? "cursor-none" : ""}`}
+      onPointerMove={wake}
+      onPointerLeave={() => setIdle(true)}
+    >
       <video
         ref={ref}
         controls
+        // Fullscreen goes to the player frame instead (button, double-click, "f"), so Skip Intro
+        // and Next Episode stay visible; the <video>'s own fullscreen would hide them.
+        controlsList={fullscreen.supported ? "nofullscreen" : undefined}
+        onDoubleClick={(e) => {
+          if (!fullscreen.supported) return;
+          e.preventDefault();
+          fullscreen.toggle();
+        }}
+        onPlay={() => setPaused(false)}
+        onPause={() => setPaused(true)}
         autoPlay
         playsInline
         onTimeUpdate={onTimeUpdate}
@@ -166,7 +220,11 @@ export function DirectVideo({
           Skip Credits
         </button>
       )}
-    </>
+      <FullscreenButton
+        fullscreen={fullscreen}
+        className={`top-4 right-4 ${idle && !paused ? "pointer-events-none opacity-0" : ""}`}
+      />
+    </div>
   );
 }
 

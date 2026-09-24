@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { formatTime } from "@/lib/format";
 import { LANGUAGE_LABELS } from "@/lib/languages";
 import type { Progress, SkipSegment } from "@/lib/types";
 import { DirectVideo } from "./DirectVideo";
 import { LanguageMenu } from "./LanguageMenu";
+import { FullscreenButton, useFrameFullscreen, usePlayerFrame } from "./PlayerFrame";
 import { StreamMenu } from "./StreamMenu";
 import { useAutoSkip } from "./useAutoSkip";
 import { useSources } from "./useSources";
@@ -47,6 +49,9 @@ export function Player({
   // Where playback is, so a replacement for a stream that broke continues from there.
   const position = useRef(0);
   const { stream } = sources;
+  // The video area renders into the layout's frame, which survives moving to the next episode.
+  const frame = usePlayerFrame();
+  const fullscreen = useFrameFullscreen();
 
   // The next episode starts with the same provider, source and server when it has them.
   const nextParams = new URLSearchParams();
@@ -90,47 +95,57 @@ export function Player({
 
   return (
     <div>
-      <div className="group relative aspect-video w-full overflow-hidden rounded-lg bg-black">
-        {stream?.kind === "direct" && (
-          <DirectVideo
-            key={stream.url}
-            stream={stream}
-            segments={skipSegments}
-            autoSkip={autoSkip}
-            autoNext={autoNext === "1"}
-            next={hasNext ? { label: "Next Episode", go: () => router.push(nextHref) } : null}
-            onNearEnd={autoMarkWatched}
-            onStart={sources.started}
-            onFail={() => sources.failStream(stream.url)}
-            resumeFrom={() => position.current}
-            onPosition={(t) => (position.current = t)}
-          />
+      {frame &&
+        createPortal(
+          <>
+            {stream?.kind === "direct" && (
+              <DirectVideo
+                key={stream.url}
+                stream={stream}
+                segments={skipSegments}
+                autoSkip={autoSkip}
+                autoNext={autoNext === "1"}
+                next={hasNext ? { label: "Next Episode", go: () => router.push(nextHref) } : null}
+                onNearEnd={autoMarkWatched}
+                onStart={sources.started}
+                onFail={() => sources.failStream(stream.url)}
+                resumeFrom={() => position.current}
+                onPosition={(t) => (position.current = t)}
+              />
+            )}
+            {stream?.kind === "embed" && (
+              <iframe
+                key={stream.url}
+                src={stream.url}
+                title={`Episode ${episode}`}
+                // No sandbox: hosters (VOE, Doodstream, ...) detect it and refuse to play. Browsers
+                // already block top-level redirects from cross-origin frames without a user click.
+                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                allowFullScreen
+                onLoad={sources.started}
+                className="h-full w-full border-0"
+              />
+            )}
+            {stream?.kind === "embed" && hasNext && (
+              // An embedded player's position can't be read, so this can't appear by itself at the
+              // credits; it shows while the pointer is over the player instead.
+              <Link
+                href={nextHref}
+                className="absolute top-4 right-4 rounded bg-white/90 px-4 py-2 font-semibold text-black opacity-0 shadow-lg transition-opacity group-hover:opacity-100 focus:opacity-100"
+              >
+                ▶ Next Episode
+              </Link>
+            )}
+            {stream?.kind === "embed" && (
+              <FullscreenButton
+                fullscreen={fullscreen}
+                className="top-4 left-4 opacity-0 group-hover:opacity-100 focus:opacity-100"
+              />
+            )}
+            {!stream && <PlayerStatus sources={sources} />}
+          </>,
+          frame,
         )}
-        {stream?.kind === "embed" && (
-          <iframe
-            key={stream.url}
-            src={stream.url}
-            title={`Episode ${episode}`}
-            // No sandbox: hosters (VOE, Doodstream, ...) detect it and refuse to play. Browsers
-            // already block top-level redirects from cross-origin frames without a user click.
-            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-            allowFullScreen
-            onLoad={sources.started}
-            className="h-full w-full border-0"
-          />
-        )}
-        {stream?.kind === "embed" && hasNext && (
-          // An embedded player's position can't be read, so this can't appear by itself at the
-          // credits; it shows while the pointer is over the player instead.
-          <Link
-            href={nextHref}
-            className="absolute top-4 right-4 rounded bg-white/90 px-4 py-2 font-semibold text-black opacity-0 shadow-lg transition-opacity group-hover:opacity-100 focus:opacity-100"
-          >
-            ▶ Next Episode
-          </Link>
-        )}
-        {!stream && <PlayerStatus sources={sources} />}
-      </div>
 
       {sources.languages.length > 0 && (
         <div className="mt-4 flex flex-wrap items-start gap-3 text-sm">
