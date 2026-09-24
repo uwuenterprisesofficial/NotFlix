@@ -11,7 +11,7 @@ from app.providers.aniworld import (
     parse_episode_links,
     slug_candidates,
 )
-from app.providers.base import AnimeInfo, ProviderError
+from app.providers.base import AnimeInfo, ProviderError, Stream
 from app.services.anilist import parse_media
 
 pytestmark = pytest.mark.anyio
@@ -724,8 +724,18 @@ SCRAPER_EPISODE = {
     "languages": ["English Sub", "German Sub"],
     "streams": {
         "German Sub": [
-            {"hoster": "VOE", "url": "https://aniworld.to/redirect/456", "link_id": "456"},
-            {"hoster": "Filemoon", "url": "https://aniworld.to/redirect/457", "link_id": "457"},
+            {
+                "hoster": "VOE",
+                "url": "https://aniworld.to/redirect/456",
+                "link_id": "456",
+                "direct_url": None,
+            },
+            {
+                "hoster": "Filemoon",
+                "url": "https://aniworld.to/redirect/457",
+                "link_id": "457",
+                "direct_url": "https://cdn.example/hls/457/master.m3u8?t=1",
+            },
         ],
         "English Sub": [
             {"hoster": "VOE", "url": "https://aniworld.to/redirect/789", "link_id": "789"}
@@ -749,6 +759,7 @@ def _scraper_handler(requests):
         if path.startswith("/anime/") and path.count("/") == 2:
             return httpx.Response(200, json={**SCRAPER_SERIES, "seasons": []})
         if path == "/anime/attack-on-titan/season/3/episode/2":
+            assert request.url.params["direct"] == "true"
             return httpx.Response(200, json=SCRAPER_EPISODE)
         if request.url.host == "aniworld.to":
             return httpx.Response(302, headers={"location": f"https://voe.example{path}"})
@@ -791,11 +802,14 @@ async def test_aniscraper_provider(database, monkeypatch, memory_cache):
     ]
     assert (await get_mapping(35760, "aniworld")).external_id == "attack-on-titan"
 
+    requests.clear()
     resolved = await provider.resolve(anime, 2, "de-sub")
-    assert [(s.url, s.label) for s in resolved.streams] == [
-        ("https://voe.example/redirect/456", "VOE"),
-        ("https://voe.example/redirect/457", "Filemoon"),
+    # Filemoon's direct file replaces its embed and comes first; VOE has none and stays embedded.
+    assert [(s.kind, s.format, s.url, s.label) for s in resolved.streams] == [
+        ("direct", "hls", "https://cdn.example/hls/457/master.m3u8?t=1", "Filemoon"),
+        ("embed", None, "https://voe.example/redirect/456", "VOE"),
     ]
+    assert "https://aniworld.to/redirect/457" not in requests  # no redirect to follow
     assert len((await provider.resolve(anime, 2, "en-sub")).streams) == 1
     with pytest.raises(ProviderError, match="No de-dub stream"):
         await provider.resolve(anime, 2, "de-dub")
@@ -893,6 +907,7 @@ def _toast_handler(requests):
         if path == "/animetoast/shingeki-no-kyojin-season-3-ger-dub":
             return httpx.Response(200, json=_toast_show("x-dub", "German Dub", [1]))
         if path == "/animetoast/shingeki-no-kyojin-season-3-ger-sub/episode/2":
+            assert request.url.params["direct"] == "true"
             return httpx.Response(
                 200,
                 json={
@@ -908,11 +923,13 @@ def _toast_handler(requests):
                                 "hoster": "Voe",
                                 "url": "https://voe.example/e/2",
                                 "page_url": "https://www.animetoast.cc/x/?link=2",
+                                "direct_url": None,
                             },
                             {
                                 "hoster": "Doodstream",
                                 "url": "//dood.example/e/2",
                                 "page_url": "https://www.animetoast.cc/x/?link=5",
+                                "direct_url": "https://cdn.example/v/2.mp4",
                             },
                             {
                                 "hoster": "Broken",
@@ -972,11 +989,11 @@ async def test_animetoast_provider(database, monkeypatch, memory_cache):
     )
 
     resolved = await provider.resolve(anime, 2, "shingeki-no-kyojin-season-3-ger-sub")
-    assert [(s.kind, s.url, s.label) for s in resolved.streams] == [
-        ("embed", "https://voe.example/e/2", "Voe"),
-        ("embed", "https://dood.example/e/2", "Doodstream"),
+    assert [(s.kind, s.format, s.url, s.label) for s in resolved.streams] == [
+        ("direct", "file", "https://cdn.example/v/2.mp4", "Doodstream"),
+        ("embed", None, "https://voe.example/e/2", "Voe"),
     ]
-    assert requests[-1] == "/animetoast/shingeki-no-kyojin-season-3-ger-sub/episode/2"
+    assert requests[-1] == "/animetoast/shingeki-no-kyojin-season-3-ger-sub/episode/2?direct=true"
     with pytest.raises(ProviderError, match="Unknown AnimeToast page"):
         await provider.resolve(anime, 2, "some-other-show-ger-dub")
 
@@ -1022,3 +1039,25 @@ async def test_animetoast_mapping_override(client, user):
     bad = await client.put("/anime/9/mappings/animetoast", json={"slugs": ["../etc"]})
     assert bad.status_code == 422
     assert (await client.delete("/anime/9/mappings/animetoast")).status_code == 204
+
+
+def test_hoster_direct():
+    from app.api.streams import stream_out
+    from app.providers.base import Resolved, hoster_direct, resolved_from_json, resolved_to_json
+
+    assert hoster_direct({"direct_url": None}, "VOE") is None
+    assert hoster_direct({}, "VOE") is None
+    assert hoster_direct({"direct_url": "javascript:alert(1)"}, "VOE") is None
+    hls = hoster_direct({"direct_url": "//cdn.example/x/Master.M3U8"}, "VOE")
+    assert hls == Stream(
+        kind="direct",
+        url="https://cdn.example/x/Master.M3U8",
+        label="VOE",
+        format="hls",
+        relay=True,
+    )
+    mp4 = hoster_direct({"direct_url": "https://cdn.example/v.mp4?m3u8=1"}, "D")
+    assert mp4.format == "file"
+    # Played through the proxy: the link belongs to the IP AniScraper extracted it from.
+    assert stream_out(mp4).url.startswith("/api/proxy?t=")
+    assert resolved_from_json(resolved_to_json(Resolved([mp4]))).streams == [mp4]

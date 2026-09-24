@@ -51,14 +51,16 @@ npm run dev                                 # UI on :3000
 
 ## Streams
 
-The player lists every source it finds for an episode, grouped by language: German Dub, German Sub, English Sub, English Dub. The language you pick is remembered per browser, and German Dub is the default. If a source fails, the next one in the same language is tried automatically.
+The player lists every source it finds for an episode, grouped by language: German Dub, German Sub, English Sub, English Dub. The language you pick is remembered per browser, and German Dub is the default.
+
+It resolves all sources of the language at once and plays the first **direct** stream that works (NotFlix's own player, so Skip Intro and Next Episode work). A direct stream that errors or loads nothing within 20 s is skipped, and the next one continues from the same position. When no source has a direct stream (it waits up to 8 s for one), the embedded player is the fallback. Every source and stream, marked *Direct · MP4*, *Direct · HLS* or *Embed*, is in the dropdown on the right under the video. When you continue with **Next Episode**, the same provider and hoster are preferred.
 
 Sources come from providers in `backend/app/providers/`:
 
 | Provider | Languages | Playback | Setting |
 |----------|-----------|----------|---------|
-| `aniworld` | German dub/sub, some English sub | iframe embed (VOE, Doodstream, …) | via the bundled AniScraper service (`ANISCRAPER_URL`), on by default |
-| `animetoast` | German dub/sub (some English) | iframe embed (Voe, Doodstream, …) | via AniScraper (`ANISCRAPER_URL`), on by default |
+| `aniworld` | German dub/sub, some English sub | direct when AniScraper reports a `direct_url`, else iframe embed (VOE, Doodstream, …) | via the bundled AniScraper service (`ANISCRAPER_URL`), on by default |
+| `animetoast` | German dub/sub (some English) | direct when AniScraper reports a `direct_url`, else iframe embed | via AniScraper (`ANISCRAPER_URL`), on by default |
 | `reanime` | English sub/dub | iframe embed (flixcloud) | `REANIME_URL`, off by default |
 | `anivexa` | English sub/dub | direct HLS/MP4 through the NotFlix proxy, embed fallback | `ANIVEXA_URL`, off by default |
 | `database` | any | whatever you store | always on |
@@ -66,6 +68,8 @@ Sources come from providers in `backend/app/providers/`:
 > **Legal note.** AniWorld and the sites Anivexa aggregates are not licensed distributors. In the EU, watching streams you know come from an obviously illegal source is itself infringement. Enabling these providers is your decision and your responsibility.
 
 **AniScraper (default AniWorld source).** `aniscraper/` is a small FastAPI service that scrapes aniworld.to; docker compose builds and starts it next to the backend (API docs at <http://localhost:8001/docs>), and the backend uses it through `ANISCRAPER_URL=http://aniscraper:8000`. NotFlix finds a show's series with its title search (`/search/titles`), lists a season's episodes and languages in one request (`/anime/{slug}?season=N&streams=false`), and only asks for an episode's links (`/anime/{slug}/season/{s}/episode/{e}`) when you play it; the `/redirect/…` links are followed to the hoster's embed page. A 502 from AniScraper (aniworld.to unreachable) is treated as an outage, not as "series not found". AniScraper also scrapes **animetoast.cc**, which NotFlix uses as the separate `animetoast` provider. animetoast has one page per show, season *and* language ("Naruto Ger Dub", "Naruto Ger Sub"), so a show maps to a set of page slugs: NotFlix searches (`/search/titles?source=animetoast`), groups the hits by title without the language tag, and only accepts a group whose title closely matches the show's own (season-specific) title. Scans read each language page once (`/animetoast/{slug}`); playing loads just that episode's hoster embeds (`/animetoast/{slug}/episode/{e}`). If the match is wrong or missing, set the pages under **AnimeToast pages** on the show page. To use another AniWorld source and drop animetoast, set `ANISCRAPER_URL=` (empty) in `.env`.
+
+Both episode endpoints are called with `?direct=true`. Each hoster link may carry a `direct_url` (an mp4 or m3u8 URL); when it's set, NotFlix plays that file instead of the hoster's embed, and when it's `null` the embed is used. Direct URLs are fetched fresh on every play (they expire) and always go through the NotFlix proxy, because hosters tie them to the IP that asked for them, which is the same machine as the backend.
 
 **AniWorld through your own API.** When `ANISCRAPER_URL` is empty, set `ANIWORLD_API_URL` to a service with `GET /api/series/{title}/episodes/{season}` (episodes with `hosters` and `languages`) and `GET /api/series/{title}/episodes/{season}/{episode}` (the episode's `streams`), and NotFlix uses it instead of scraping. `{title}` is the AniWorld slug, e.g. `attack-on-titan`. Scans need one request per season; the episode endpoint is only called when you play something, and its hosters become the player's server buttons. Languages map as: German audio → German Dub, German subtitles → German Sub, English subtitles → English Sub, English audio without subtitles → English Dub. A 404 (or an empty list) means "series not found"; a 5xx is treated as an outage and retried later.
 

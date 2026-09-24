@@ -20,6 +20,7 @@ from app.providers.base import (
     Resolved,
     SourceOption,
     Stream,
+    hoster_direct,
 )
 from app.services import anilist
 from app.services.mappings import get_mapping, save_mapping
@@ -426,7 +427,9 @@ class AniScraperProvider(AniWorldApiProvider):
 
     GET /search/titles?q=...&source=aniworld           -> matching series slugs
     GET /anime/{slug}?season=N&streams=false           -> the season's episodes and languages
-    GET /anime/{slug}/season/{s}/episode/{e}           -> the episode's play links per language
+    GET /anime/{slug}/season/{s}/episode/{e}?direct=true
+                                                       -> the episode's play links per language,
+                                                          with the hoster's `direct_url` if known
     """
 
     SEARCH_QUERIES = 3
@@ -480,20 +483,28 @@ class AniScraperProvider(AniWorldApiProvider):
         if located is None:
             raise ProviderError("This anime isn't mapped to an AniWorld series")
         slug, season, offset = located
-        data = await self._api(f"/anime/{quote(slug)}/season/{season}/episode/{episode + offset}")
+        data = await self._api(
+            f"/anime/{quote(slug)}/season/{season}/episode/{episode + offset}", {"direct": "true"}
+        )
         links = [
             link
             for label, group in ((data or {}).get("streams") or {}).items()
             if SCRAPER_LANGUAGES.get(str(label).lower(), "unknown") == key
             for link in group
-            if urlsplit(str(link.get("url") or "")).scheme in ("http", "https")
+            if isinstance(link, dict)
         ]
-        if not links:
+        # A hoster's direct file replaces its embed; hosters without one stay embedded.
+        directs = [hoster_direct(link, str(link.get("hoster") or "AniWorld")) for link in links]
+        embeds = [
+            link
+            for link, direct in zip(links, directs, strict=True)
+            if direct is None and urlsplit(str(link.get("url") or "")).scheme in ("http", "https")
+        ]
+        targets = await asyncio.gather(*(self.follow_redirect(link["url"]) for link in embeds))
+        streams = [d for d in directs if d] + [
+            Stream(kind="embed", url=target, label=str(link.get("hoster") or "AniWorld"))
+            for link, target in zip(embeds, targets, strict=True)
+        ]
+        if not streams:
             raise ProviderError(f"No {key} stream for this episode")
-        targets = await asyncio.gather(*(self.follow_redirect(link["url"]) for link in links))
-        return Resolved(
-            streams=[
-                Stream(kind="embed", url=target, label=str(link.get("hoster") or "AniWorld"))
-                for link, target in zip(links, targets, strict=True)
-            ]
-        )
+        return Resolved(streams=streams)

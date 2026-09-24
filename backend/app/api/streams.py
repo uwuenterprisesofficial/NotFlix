@@ -48,8 +48,9 @@ async def providers():
 
 def stream_out(stream: Stream) -> StreamOut:
     url = stream.url
-    # hls.js needs CORS on every request and some hosts need a Referer; relay those.
-    if stream.kind == "direct" and (stream.format == "hls" or stream.headers):
+    # hls.js needs CORS on every request and some hosts need a Referer or the extracting IP;
+    # relay those.
+    if stream.kind == "direct" and (stream.format == "hls" or stream.headers or stream.relay):
         url = proxy_url(stream.url, stream.headers)
     return StreamOut(
         kind=stream.kind,

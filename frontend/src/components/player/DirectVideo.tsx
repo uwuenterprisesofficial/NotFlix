@@ -4,7 +4,12 @@ import type Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
 import type { SkipSegment, Stream } from "@/lib/types";
 
-function useStream(ref: React.RefObject<HTMLVideoElement | null>, url: string, isHls: boolean) {
+function useStream(
+  ref: React.RefObject<HTMLVideoElement | null>,
+  url: string,
+  isHls: boolean,
+  onFatal: React.RefObject<() => void>,
+) {
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
@@ -17,6 +22,7 @@ function useStream(ref: React.RefObject<HTMLVideoElement | null>, url: string, i
     import("hls.js").then(({ default: HlsClass }) => {
       if (cancelled || !HlsClass.isSupported()) return;
       hls = new HlsClass();
+      hls.on(HlsClass.Events.ERROR, (_event, data) => data.fatal && onFatal.current());
       hls.loadSource(url);
       hls.attachMedia(video);
     });
@@ -24,10 +30,12 @@ function useStream(ref: React.RefObject<HTMLVideoElement | null>, url: string, i
       cancelled = true;
       hls?.destroy();
     };
-  }, [ref, url, isHls]);
+  }, [ref, url, isHls, onFatal]);
 }
 
 const NEXT_COUNTDOWN_S = 10;
+// A stream that hasn't loaded anything by then counts as broken.
+const LOAD_TIMEOUT_MS = 20_000;
 // Without detected credits, the "Next Episode" card shows this long before the end.
 const FALLBACK_CREDITS_S = 30;
 
@@ -45,6 +53,10 @@ export function DirectVideo({
   autoNext,
   next,
   onNearEnd,
+  onStart,
+  onFail,
+  resumeFrom,
+  onPosition,
 }: {
   stream: Stream;
   segments: SkipSegment[];
@@ -52,13 +64,30 @@ export function DirectVideo({
   autoNext: boolean;
   next: NextEpisode | null;
   onNearEnd: () => void;
+  /** Playback started. */
+  onStart?: () => void;
+  /** The stream can't be played (error, or nothing loaded in time). */
+  onFail?: () => void;
+  /** Where to start, e.g. the position of a stream that failed mid-episode. */
+  resumeFrom?: () => number;
+  onPosition?: (seconds: number) => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const autoSkipped = useRef(false);
+  const loaded = useRef(false);
+  const fail = useRef(() => {});
+  useEffect(() => {
+    fail.current = () => onFail?.();
+  }, [onFail]);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [creditsDismissed, setCreditsDismissed] = useState(false);
-  useStream(ref, stream.url, stream.format === "hls");
+  useStream(ref, stream.url, stream.format === "hls", fail);
+
+  useEffect(() => {
+    const timer = setTimeout(() => loaded.current || fail.current(), LOAD_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   const opening = segments.find((s) => s.kind === "opening");
   const ending = segments.find((s) => s.kind === "ending");
@@ -71,6 +100,7 @@ export function DirectVideo({
     if (!video) return;
     const t = video.currentTime;
     setTime(t);
+    onPosition?.(t);
     // Auto-skip the intro once; seeking back into it afterwards plays it normally.
     if (opening && autoSkip && !autoSkipped.current && t >= opening.start_s && t < opening.end_s) {
       autoSkipped.current = true;
@@ -87,6 +117,14 @@ export function DirectVideo({
         autoPlay
         playsInline
         onTimeUpdate={onTimeUpdate}
+        onLoadedMetadata={() => {
+          loaded.current = true;
+          const at = resumeFrom?.() ?? 0;
+          if (ref.current && at > 5) ref.current.currentTime = at;
+        }}
+        onPlaying={onStart}
+        // Only the video's own errors; a subtitle track failing isn't the stream failing.
+        onError={(e) => e.target === e.currentTarget && fail.current()}
         onDurationChange={() => setDuration(ref.current?.duration || 0)}
         onEnded={() => next && autoNext && next.go()}
         className="h-full w-full bg-black"

@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { formatTime } from "@/lib/format";
 import { LANGUAGE_LABELS } from "@/lib/languages";
-import type { SkipSegment, Stream } from "@/lib/types";
+import type { SkipSegment } from "@/lib/types";
 import { DirectVideo } from "./DirectVideo";
+import { StreamMenu } from "./StreamMenu";
 import { useAutoSkip } from "./useAutoSkip";
 import { useSources } from "./useSources";
 import { useStoredValue } from "./useStoredValue";
@@ -34,20 +35,15 @@ export function Player({
   server: string | null;
 }) {
   const router = useRouter();
-  const sources = useSources(animeId, episode, via);
-  const [streamChoice, setStreamChoice] = useState<Record<string, number>>({});
+  const sources = useSources(animeId, episode, { ...via, server });
   const [autoSkip, setAutoSkip] = useAutoSkip();
   const [autoNext, setAutoNext] = useStoredValue<"0" | "1">("notflix:autonext", "1");
   const [saveState, setSaveState] = useState<SaveState>(episode <= watched ? "saved" : "idle");
   const saving = useRef(false);
   const autoMarked = useRef(false);
-
-  const streams = sources.resolved?.streams ?? [];
-  const serverIndex = server ? streams.findIndex((s) => s.label === server) : -1;
-  const streamIndex = sources.active
-    ? (streamChoice[sources.active.id] ?? Math.max(serverIndex, 0))
-    : 0;
-  const stream: Stream | undefined = streams[streamIndex] ?? streams[0];
+  // Where playback is, so a replacement for a stream that broke continues from there.
+  const position = useRef(0);
+  const { stream } = sources;
 
   // The next episode starts with the same provider, source and server when it has them.
   const nextParams = new URLSearchParams();
@@ -93,6 +89,10 @@ export function Player({
             autoNext={autoNext === "1"}
             next={hasNext ? { label: "Next Episode", go: () => router.push(nextHref) } : null}
             onNearEnd={autoMarkWatched}
+            onStart={sources.started}
+            onFail={() => sources.failStream(stream.url)}
+            resumeFrom={() => position.current}
+            onPosition={(t) => (position.current = t)}
           />
         )}
         {stream?.kind === "embed" && (
@@ -104,6 +104,7 @@ export function Player({
             // already block top-level redirects from cross-origin frames without a user click.
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
             allowFullScreen
+            onLoad={sources.started}
             className="h-full w-full border-0"
           />
         )}
@@ -121,7 +122,7 @@ export function Player({
       </div>
 
       {sources.languages.length > 0 && (
-        <div className="mt-4 space-y-3 text-sm">
+        <div className="mt-4 flex flex-wrap items-start gap-3 text-sm">
           <div className="flex flex-wrap gap-2" role="tablist" aria-label="Language">
             {sources.languages.map((lang) => (
               <button
@@ -138,29 +139,8 @@ export function Player({
               <span className="self-center text-xs text-muted">Loading more sources…</span>
             )}
           </div>
-          <div className="flex flex-wrap gap-2" aria-label="Source">
-            {sources.candidates.map((o) => (
-              <button
-                key={o.id}
-                onClick={() => sources.choose(o.id)}
-                title={sources.failed(o) ? "This source failed" : undefined}
-                className={`rounded px-3 py-1 ${o.id === sources.active?.id ? "bg-brand" : "bg-surface-raised hover:bg-neutral-700"} ${sources.failed(o) ? "line-through opacity-50" : ""}`}
-              >
-                {o.label}
-              </button>
-            ))}
-            {streams.length > 1 &&
-              streams.map((s, i) => (
-                <button
-                  key={s.url}
-                  onClick={() =>
-                    sources.active && setStreamChoice((c) => ({ ...c, [sources.active!.id]: i }))
-                  }
-                  className={`rounded border px-3 py-1 ${s === stream ? "border-white" : "border-white/20 text-muted hover:text-white"}`}
-                >
-                  {s.label}
-                </button>
-              ))}
+          <div className="ml-auto">
+            <StreamMenu sources={sources} />
           </div>
         </div>
       )}
@@ -228,6 +208,10 @@ function PlayerStatus({ sources }: { sources: ReturnType<typeof useSources> }) {
     title = "No source for this episode yet";
     detail =
       "No provider has this episode. For German sources, check the AniWorld mapping on the show’s page.";
+  } else if (sources.searching) {
+    title = "Looking for a direct stream…";
+    const checked = sources.candidates.filter((o) => sources.resolutionOf(o)).length;
+    detail = `${checked} of ${sources.candidates.length} sources checked`;
   } else if (sources.resolving) {
     title = `Loading ${sources.active?.label}…`;
   } else if (sources.error) {

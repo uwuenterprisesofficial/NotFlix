@@ -26,6 +26,7 @@ from app.providers.base import (
     Resolved,
     SourceOption,
     Stream,
+    hoster_direct,
 )
 from app.services import anilist
 from app.services.mappings import get_mapping, save_mapping
@@ -183,19 +184,29 @@ class AnimeToastProvider:
         located = await self.locate(anime)
         if located is None or key not in located[0]:
             raise ProviderError(f"Unknown AnimeToast page {key!r}")
-        data = await self._api(f"/animetoast/{quote(key)}/episode/{episode + located[1]}")
+        data = await self._api(
+            f"/animetoast/{quote(key)}/episode/{episode + located[1]}", {"direct": "true"}
+        )
         if not data:
             raise ProviderError("This episode isn't on AnimeToast")
-        streams = []
+        directs, embeds = [], []
         for group in (data.get("streams") or {}).values():
             for link in group:
+                if not isinstance(link, dict):
+                    continue
                 url = str(link.get("url") or "")
                 url = f"https:{url}" if url.startswith("//") else url
                 parts = urlsplit(url)
+                label = str(link.get("hoster") or parts.hostname or "AnimeToast")
+                # A hoster's direct file replaces its embed; hosters without one stay embedded.
+                if direct := hoster_direct(link, label):
+                    directs.append(direct)
                 # Unresolved links still point at animetoast's own ?link= page; skip those.
-                if parts.scheme in ("http", "https") and "animetoast" not in (parts.hostname or ""):
-                    label = str(link.get("hoster") or parts.hostname)
-                    streams.append(Stream(kind="embed", url=url, label=label))
+                elif parts.scheme in ("http", "https") and "animetoast" not in (
+                    parts.hostname or ""
+                ):
+                    embeds.append(Stream(kind="embed", url=url, label=label))
+        streams = directs + embeds
         if not streams:
             raise ProviderError("No playable AnimeToast stream for this episode")
         return Resolved(streams=streams)

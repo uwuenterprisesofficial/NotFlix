@@ -62,6 +62,24 @@ class Stream:
     format: Literal["hls", "file"] | None = None  # only for direct streams
     headers: dict[str, str] = field(default_factory=dict)  # required by the upstream host
     subtitles: tuple[Subtitle, ...] = ()
+    # Played through the NotFlix proxy even without headers, e.g. because the link only works
+    # from the IP that extracted it.
+    relay: bool = False
+
+
+def hoster_direct(link: dict[str, Any], label: str) -> Stream | None:
+    """The video file behind a hoster link, when the scraper reports one as `direct_url`
+    (AniScraper does with ?direct=true; it's null for hosters it has none for)."""
+    url = link.get("direct_url")
+    if not isinstance(url, str):
+        return None
+    url = f"https:{url}" if url.startswith("//") else url
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    fmt: Literal["hls", "file"] = "hls" if ".m3u8" in parts.path.lower() else "file"
+    # Hosters tie these links to the IP that asked for them: AniScraper's, which the proxy shares.
+    return Stream(kind="direct", url=url, label=label, format=fmt, relay=True)
 
 
 @dataclass(frozen=True)
