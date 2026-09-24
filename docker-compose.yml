@@ -12,6 +12,7 @@ x-backend: &backend
     # Stream providers; an empty URL disables one. Anivexa must be run separately.
     ANIVEXA_URL: ${ANIVEXA_URL:-}
     REANIME_URL: ${REANIME_URL:-}
+    ANIWORLD_API_URL: ${ANIWORLD_API_URL:-}
     ANIWORLD_URL: ${ANIWORLD_URL-https://aniworld.to}
     # No default here: Compose before 2.24 cuts ${VAR:-default} at the first '}'.
     ANIWORLD_SERIES_PATH: ${ANIWORLD_SERIES_PATH:-}

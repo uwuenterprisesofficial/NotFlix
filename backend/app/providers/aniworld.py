@@ -5,7 +5,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from urllib.parse import urlsplit
+from typing import Any
+from urllib.parse import quote, urlsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -175,6 +176,14 @@ class AniWorldProvider:
     def season_path(self, slug: str, season: int) -> str:
         return f"/{self.series_path.replace('{slug}', slug)}/staffel-{season}"
 
+    async def season_episodes(self, slug: str, season: int) -> set[int] | None:
+        """Episode numbers of a season; None if the series/season doesn't exist. An empty set
+        means it exists but the numbers couldn't be read."""
+        html = await self._fetch(self.season_path(slug, season))
+        if not html or count_episodes(html) == 0:
+            return None
+        return season_episode_numbers(html)
+
     async def locate(self, anime: AnimeInfo) -> tuple[str, int, int] | None:
         """(slug, season, episode offset) of this MAL entry on AniWorld, cached per anime."""
         mapping = await get_mapping(anime.id, self.name)
@@ -199,14 +208,21 @@ class AniWorldProvider:
         titles = [*(info.root_titles if info else []), *(info.titles if info else [])]
         titles += [t for t in (anime.title_en, anime.title) if t]
 
+        failures = 0
         for slug in slug_candidates(titles):
-            html = await self._fetch(self.season_path(slug, season))
-            if html and count_episodes(html) > 0:
+            try:
+                found = await self.season_episodes(slug, season)
+            except ProviderError:
+                failures += 1  # A server error isn't evidence that the series doesn't exist.
+                continue
+            if found is not None:
                 if anilist_ok:
                     await save_mapping(anime.id, self.name, slug, season)
                 else:  # Not persisted, but don't redo the search for every episode.
                     await set_json(guess_key, [slug, season], GUESS_CACHE_TTL)
                 return slug, season, 0
+        if failures:
+            raise ProviderError("AniWorld lookup failed; not remembering the series as missing")
         if anilist_ok:
             await save_mapping(anime.id, self.name, None)
         return None
@@ -247,8 +263,7 @@ class AniWorldProvider:
         if located is None:
             return found
         slug, season, offset = located
-        html = await self._fetch(self.season_path(slug, season))
-        listed = season_episode_numbers(html) if html else set()
+        listed = await self.season_episodes(slug, season) or set()
         wanted = [ep for ep in episodes if not listed or ep + offset in listed]
         limit = asyncio.Semaphore(SCAN_CONCURRENCY)
 
@@ -259,12 +274,9 @@ class AniWorldProvider:
         await asyncio.gather(*(one(ep) for ep in wanted))
         return found
 
-    async def resolve(self, anime: AnimeInfo, episode: int, key: str) -> Resolved:
-        if not key.startswith("/") or key.startswith("//"):
-            raise ProviderError("Invalid AniWorld link")
-        url = f"{self.base_url}{key}"
-        # The play link redirects to the hoster's embed page. Resolving it here avoids loading
-        # AniWorld inside the iframe; if that fails the iframe can still follow the redirect.
+    async def follow_redirect(self, url: str) -> str:
+        """Play links redirect to the hoster's embed page. Resolving that here avoids loading
+        AniWorld inside the iframe; if it fails the iframe can still follow the redirect."""
         client = self._client()
         try:
             resp = await client.get(url, follow_redirects=False)
@@ -274,6 +286,117 @@ class AniWorldProvider:
         finally:
             if self._http is None:
                 await client.aclose()
-        target = location if location.startswith("https://") else url
+        return location if location.startswith("https://") else url
+
+    async def resolve(self, anime: AnimeInfo, episode: int, key: str) -> Resolved:
+        if not key.startswith("/") or key.startswith("//"):
+            raise ProviderError("Invalid AniWorld link")
+        target = await self.follow_redirect(f"{self.base_url}{key}")
         hoster = urlsplit(target).hostname or "AniWorld"
         return Resolved(streams=[Stream(kind="embed", url=target, label=hoster)])
+
+
+def api_language(language: dict | None) -> Language:
+    """{"audio": "English", "subtitle": "German"} -> "de-sub" (what counts is the German part)."""
+    audio = str((language or {}).get("audio") or "").lower()
+    subtitle = str((language or {}).get("subtitle") or "").lower()
+    if audio == "german":
+        return "de-dub"
+    if subtitle == "german":
+        return "de-sub"
+    if subtitle == "english":
+        return "en-sub"
+    if audio == "english":
+        return "en-dub"
+    return "unknown"
+
+
+class AniWorldApiProvider(AniWorldProvider):
+    """AniWorld through a self-hosted API (e.g. one built on SerienStreamAPI) instead of scraping:
+
+    GET /api/series/{title}/episodes/{season}            -> episodes with hosters and languages
+    GET /api/series/{title}/episodes/{season}/{episode}  -> the episode's play links
+
+    Scans need one request per season. Options are one per language; the episode's hosters
+    (VOE, Doodstream, ...) become that option's streams when it is played.
+    """
+
+    def __init__(self, api_url: str, http: httpx.AsyncClient | None = None):
+        super().__init__(api_url, "", http)
+
+    async def _api(self, path: str) -> Any:
+        """Parsed JSON, or None when the API says the series/episode doesn't exist (4xx)."""
+        client = self._client()
+        try:
+            resp = await client.get(f"{self.base_url}{path}")
+        finally:
+            if self._http is None:
+                await client.aclose()
+        if 400 <= resp.status_code < 500:
+            return None
+        if resp.status_code >= 500:
+            raise ProviderError(f"AniWorld API {resp.status_code} for {path}: {resp.text[:200]}")
+        return resp.json()
+
+    async def _season(self, slug: str, season: int) -> list[dict[str, Any]] | None:
+        key = f"aniworld:api:season:{slug}:{season}"
+        cached = await get_json(key)
+        if cached is not None:
+            return cached
+        data = await self._api(f"/api/series/{quote(slug)}/episodes/{season}")
+        episodes = [
+            e for e in (data if isinstance(data, list) else []) if isinstance(e, dict)
+            and isinstance(e.get("number"), int)
+        ]  # fmt: skip
+        if not episodes:
+            return None
+        await set_json(key, episodes, LINKS_CACHE_TTL)
+        return episodes
+
+    async def season_episodes(self, slug: str, season: int) -> set[int] | None:
+        episodes = await self._season(slug, season)
+        return {e["number"] for e in episodes} if episodes else None
+
+    def _episode_options(self, entry: dict[str, Any]) -> list[SourceOption]:
+        languages = dict.fromkeys(api_language(lang) for lang in entry.get("languages") or [])
+        label = " / ".join(str(h) for h in entry.get("hosters") or []) or "AniWorld"
+        return [
+            SourceOption(id=f"{self.name}:{lang}", provider=self.name, label=label, language=lang)
+            for lang in languages
+        ]
+
+    async def scan(self, anime: AnimeInfo, episodes: list[int]) -> dict[int, list[SourceOption]]:
+        found: dict[int, list[SourceOption]] = {ep: [] for ep in episodes}
+        located = await self.locate(anime)
+        if located is None:
+            return found
+        slug, season, offset = located
+        by_number = {e["number"]: e for e in await self._season(slug, season) or []}
+        for ep in episodes:
+            if entry := by_number.get(ep + offset):
+                found[ep] = self._episode_options(entry)
+        return found
+
+    async def options(self, anime: AnimeInfo, episode: int) -> list[SourceOption]:
+        return (await self.scan(anime, [episode]))[episode]
+
+    async def resolve(self, anime: AnimeInfo, episode: int, key: str) -> Resolved:
+        located = await self.locate(anime)
+        if located is None:
+            raise ProviderError("This anime isn't mapped to an AniWorld series")
+        slug, season, offset = located
+        data = await self._api(f"/api/series/{quote(slug)}/episodes/{season}/{episode + offset}")
+        streams = [
+            s for s in (data or {}).get("streams") or []
+            if api_language(s.get("language")) == key
+            and urlsplit(str(s.get("videoUrl") or "")).scheme in ("http", "https")
+        ]  # fmt: skip
+        if not streams:
+            raise ProviderError(f"No {key} stream for this episode")
+        targets = await asyncio.gather(*(self.follow_redirect(s["videoUrl"]) for s in streams))
+        return Resolved(
+            streams=[
+                Stream(kind="embed", url=target, label=str(s.get("hoster") or "AniWorld"))
+                for s, target in zip(streams, targets, strict=True)
+            ]
+        )

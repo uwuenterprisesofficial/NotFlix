@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # Self-hosted ReAnime.to API (English sources, embeds only). Empty disables the provider.
     reanime_url: str = ""
 
+    # Self-hosted AniWorld API; when set it replaces scraping ANIWORLD_URL directly.
+    aniworld_api_url: str = ""
+
     # AniWorld (German dub/sub). Empty disables the provider. The series path changes with site
     # redesigns, so it is configurable.
     aniworld_url: str = "https://aniworld.to"

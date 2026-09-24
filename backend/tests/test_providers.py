@@ -541,3 +541,141 @@ def test_season_episode_numbers():
     assert season_episode_numbers(SEASON_PAGE) == {1, 2}
     old = '<table class="seasonEpisodesList"><meta itemprop="episodeNumber" content="7"></table>'
     assert season_episode_numbers(old) == {7}
+
+
+# --- AniWorld through a self-hosted API ---------------------------------------------------------
+
+API_SEASON = [
+    {
+        "number": n,
+        "title": "",
+        "originalTitle": f"Episode {n}",
+        "hosters": ["VOE", "Doodstream"],
+        "languages": [{"audio": "English", "subtitle": "German"}],
+    }
+    for n in range(1, 12)
+]
+API_SEASON[0]["languages"].append({"audio": "German", "subtitle": None})
+API_EPISODE = {
+    "number": 5,
+    "season": 1,
+    "title": "",
+    "originalTitle": "Episode 5",
+    "description": "",
+    "streams": [
+        {
+            "videoUrl": "http://186.2.175.5/r?t=voe",
+            "hoster": "VOE",
+            "language": {"audio": "English", "subtitle": "German"},
+        },
+        {
+            "videoUrl": "http://186.2.175.5/r?t=dood",
+            "hoster": "Doodstream",
+            "language": {"audio": "English", "subtitle": "German"},
+        },
+        {
+            "videoUrl": "http://186.2.175.5/r?t=dub",
+            "hoster": "VOE",
+            "language": {"audio": "German", "subtitle": None},
+        },
+    ],
+}
+
+
+def test_api_language():
+    from app.providers.aniworld import api_language
+
+    assert api_language({"audio": "English", "subtitle": "German"}) == "de-sub"
+    assert api_language({"audio": "Japanese", "subtitle": "German"}) == "de-sub"
+    assert api_language({"audio": "German", "subtitle": None}) == "de-dub"
+    assert api_language({"audio": "German", "subtitle": "German"}) == "de-dub"
+    assert api_language({"audio": "Japanese", "subtitle": "English"}) == "en-sub"
+    assert api_language({"audio": "English"}) == "en-dub"
+    assert api_language(None) == "unknown"
+
+
+def _api_handler(requests):
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.raw_path.decode())
+        path = request.url.path
+        if path == "/api/series/dress-up-darling/episodes/1":
+            return httpx.Response(200, json=API_SEASON)
+        if path == "/api/series/dress-up-darling/episodes/1/5":
+            return httpx.Response(200, json=API_EPISODE)
+        if path == "/api/series/broken/episodes/1":
+            return httpx.Response(500, text="SerienStream is down")
+        if request.url.host == "186.2.175.5":
+            return httpx.Response(
+                302, headers={"location": f"https://voe.example/e/{request.url.query.decode()}"}
+            )
+        return httpx.Response(404, json={"error": "Series not found"})
+
+    return handler
+
+
+async def test_aniworld_api_provider(database, monkeypatch, memory_cache):
+    from app.providers.aniworld import AniWorldApiProvider
+    from app.services import anilist
+    from app.services.anilist import AniListInfo
+    from app.services.mappings import delete_mapping, get_mapping
+
+    async def fake_lookup(mal_id):
+        return AniListInfo(
+            id=1, season=1, titles=["My Dress-Up Darling"], root_titles=["Dress-Up Darling"]
+        )
+
+    monkeypatch.setattr(anilist, "lookup", fake_lookup)
+    await delete_mapping(48736, "aniworld")
+    requests: list[str] = []
+    http = httpx.AsyncClient(transport=httpx.MockTransport(_api_handler(requests)))
+    provider = AniWorldApiProvider("http://aniworld-api:5000/", http=http)
+    anime = AnimeInfo(id=48736, title="Sono Bisque Doll wa Koi wo Suru")
+
+    found = await provider.scan(anime, list(range(1, 14)))
+    assert [(o.id, o.label, o.language) for o in found[1]] == [
+        ("aniworld:de-sub", "VOE / Doodstream", "de-sub"),
+        ("aniworld:de-dub", "VOE / Doodstream", "de-dub"),
+    ]
+    assert [o.language for o in found[5]] == ["de-sub"]
+    assert found[12] == [] and found[13] == []
+    assert requests == [
+        "/api/series/dress-up-darling/episodes/1",  # the first-season title is tried first
+    ]
+    assert (await get_mapping(48736, "aniworld")).external_id == "dress-up-darling"
+
+    requests.clear()
+    await provider.scan(anime, [1, 2])
+    assert requests == []  # season list cached
+
+    resolved = await provider.resolve(anime, 5, "de-sub")
+    assert [(s.kind, s.url, s.label) for s in resolved.streams] == [
+        ("embed", "https://voe.example/e/t=voe", "VOE"),
+        ("embed", "https://voe.example/e/t=dood", "Doodstream"),
+    ]
+    assert (await provider.resolve(anime, 5, "de-dub")).streams[0].url.endswith("t=dub")
+    with pytest.raises(ProviderError, match="No en-sub stream"):
+        await provider.resolve(anime, 5, "en-sub")
+
+
+async def test_aniworld_api_errors_are_not_remembered_as_missing(
+    database, monkeypatch, memory_cache
+):
+    from app.providers.aniworld import AniWorldApiProvider
+    from app.services import anilist
+    from app.services.mappings import delete_mapping, get_mapping
+
+    async def not_on_anilist(mal_id):
+        return None
+
+    monkeypatch.setattr(anilist, "lookup", not_on_anilist)
+    await delete_mapping(4, "aniworld")
+    http = httpx.AsyncClient(transport=httpx.MockTransport(_api_handler([])))
+    provider = AniWorldApiProvider("http://aniworld-api:5000", http=http)
+
+    with pytest.raises(ProviderError, match="lookup failed"):
+        await provider.scan(AnimeInfo(id=4, title="Broken"), [1])
+    assert await get_mapping(4, "aniworld") is None
+
+    # A plain 404 is a real "not found" and is remembered.
+    assert await provider.scan(AnimeInfo(id=4, title="Unknown Show"), [1]) == {1: []}
+    assert (await get_mapping(4, "aniworld")).external_id is None
