@@ -4,11 +4,6 @@ import type Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
 import type { SkipSegment, Stream } from "@/lib/types";
 
-const LABELS: Record<SkipSegment["kind"], string> = {
-  opening: "Skip Intro",
-  ending: "Skip Outro",
-};
-
 function useStream(ref: React.RefObject<HTMLVideoElement | null>, url: string, isHls: boolean) {
   useEffect(() => {
     const video = ref.current;
@@ -32,54 +27,57 @@ function useStream(ref: React.RefObject<HTMLVideoElement | null>, url: string, i
   }, [ref, url, isHls]);
 }
 
-/** A <video> we fully control, so intro/outro skipping works (unlike cross-origin iframes). */
+const NEXT_COUNTDOWN_S = 10;
+// Without detected credits, the "Next Episode" card shows this long before the end.
+const FALLBACK_CREDITS_S = 30;
+
+export type NextEpisode = { label: string; go: () => void };
+
+/**
+ * A <video> we fully control, so the Netflix-style controls work (unlike cross-origin iframes):
+ * "Skip Intro" while the opening plays, and a "Next Episode" card during the credits that starts
+ * the next episode after a countdown.
+ */
 export function DirectVideo({
   stream,
   segments,
   autoSkip,
-  nextEpisodeLabel,
-  onSkipEnding,
+  autoNext,
+  next,
   onNearEnd,
 }: {
   stream: Stream;
   segments: SkipSegment[];
   autoSkip: boolean;
-  nextEpisodeLabel: string | null;
-  onSkipEnding: (() => void) | null;
+  autoNext: boolean;
+  next: NextEpisode | null;
   onNearEnd: () => void;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
-  const autoSkipped = useRef(new Set<SkipSegment["kind"]>());
-  const [active, setActive] = useState<SkipSegment | null>(null);
+  const autoSkipped = useRef(false);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [creditsDismissed, setCreditsDismissed] = useState(false);
   useStream(ref, stream.url, stream.format === "hls");
 
-  function skip(segment: SkipSegment) {
-    if (segment.kind === "ending" && onSkipEnding) onSkipEnding();
-    else if (ref.current) ref.current.currentTime = segment.end_s;
-  }
+  const opening = segments.find((s) => s.kind === "opening");
+  const ending = segments.find((s) => s.kind === "ending");
+  const inIntro = !!opening && time >= opening.start_s && time < opening.end_s - 0.5;
+  const creditsAt = ending?.start_s ?? (duration ? duration - FALLBACK_CREDITS_S : Infinity);
+  const inCredits = time >= creditsAt;
 
   function onTimeUpdate() {
     const video = ref.current;
     if (!video) return;
     const t = video.currentTime;
-    const current = segments.find((s) => t >= s.start_s && t < s.end_s - 0.5) ?? null;
-    if (current?.kind !== active?.kind) setActive(current);
-
-    // Auto-skip each segment once; seeking back into it afterwards plays it normally.
-    if (current && autoSkip && !autoSkipped.current.has(current.kind)) {
-      autoSkipped.current.add(current.kind);
-      skip(current);
+    setTime(t);
+    // Auto-skip the intro once; seeking back into it afterwards plays it normally.
+    if (opening && autoSkip && !autoSkipped.current && t >= opening.start_s && t < opening.end_s) {
+      autoSkipped.current = true;
+      video.currentTime = opening.end_s;
     }
-
-    const ending = segments.find((s) => s.kind === "ending");
-    const nearEnd = ending ? t >= ending.start_s : video.duration && t >= video.duration * 0.9;
-    if (nearEnd) onNearEnd();
+    if (t >= (ending?.start_s ?? video.duration * 0.9)) onNearEnd();
   }
-
-  const label =
-    active?.kind === "ending" && onSkipEnding && nextEpisodeLabel
-      ? nextEpisodeLabel
-      : active && LABELS[active.kind];
 
   return (
     <>
@@ -89,7 +87,8 @@ export function DirectVideo({
         autoPlay
         playsInline
         onTimeUpdate={onTimeUpdate}
-        onEnded={() => onSkipEnding?.()}
+        onDurationChange={() => setDuration(ref.current?.duration || 0)}
+        onEnded={() => next && autoNext && next.go()}
         className="h-full w-full bg-black"
       >
         {stream.subtitles.map((sub, i) => (
@@ -103,14 +102,90 @@ export function DirectVideo({
           />
         ))}
       </video>
-      {active && (
+
+      {inIntro && (
         <button
-          onClick={() => skip(active)}
-          className="absolute right-6 bottom-20 rounded border border-white/70 bg-black/70 px-5 py-2 font-semibold backdrop-blur hover:bg-white hover:text-black"
+          onClick={() => ref.current && (ref.current.currentTime = opening.end_s)}
+          className="absolute right-8 bottom-24 rounded border-2 border-white/80 bg-black/60 px-6 py-2.5 text-lg font-semibold tracking-wide backdrop-blur transition-colors hover:bg-white hover:text-black"
         >
-          {label}
+          Skip Intro
+        </button>
+      )}
+
+      {inCredits && next && !creditsDismissed && (
+        <NextEpisodeCard
+          next={next}
+          countdown={autoNext}
+          video={ref}
+          onDismiss={() => setCreditsDismissed(true)}
+        />
+      )}
+      {inCredits && !next && ending && time < ending.end_s - 0.5 && (
+        <button
+          onClick={() => ref.current && (ref.current.currentTime = ending.end_s)}
+          className="absolute right-8 bottom-24 rounded border-2 border-white/80 bg-black/60 px-6 py-2.5 text-lg font-semibold backdrop-blur hover:bg-white hover:text-black"
+        >
+          Skip Credits
         </button>
       )}
     </>
+  );
+}
+
+function NextEpisodeCard({
+  next,
+  countdown,
+  video,
+  onDismiss,
+}: {
+  next: NextEpisode;
+  countdown: boolean;
+  video: React.RefObject<HTMLVideoElement | null>;
+  onDismiss: () => void;
+}) {
+  const [left, setLeft] = useState(NEXT_COUNTDOWN_S);
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (!countdown) return;
+    // Like Netflix, the countdown only runs while the video plays.
+    const timer = setInterval(() => {
+      if (video.current && !video.current.paused) setLeft((l) => Math.max(0, l - 0.25));
+    }, 250);
+    return () => clearInterval(timer);
+  }, [countdown, video]);
+
+  useEffect(() => {
+    if (countdown && left <= 0 && !started.current) {
+      started.current = true;
+      next.go();
+    }
+  }, [countdown, left, next]);
+
+  const progress = countdown ? (1 - left / NEXT_COUNTDOWN_S) * 100 : 0;
+
+  return (
+    <div className="absolute right-8 bottom-24 flex flex-col items-end gap-2">
+      <button
+        onClick={next.go}
+        className="relative overflow-hidden rounded bg-white px-6 py-2.5 text-lg font-semibold text-black shadow-lg"
+      >
+        <span
+          aria-hidden
+          className="absolute inset-y-0 left-0 bg-neutral-300 transition-[width] duration-200 ease-linear"
+          style={{ width: `${progress}%` }}
+        />
+        <span className="relative">
+          ▶ {next.label}
+          {countdown && <span className="ml-2 text-sm font-normal">in {Math.ceil(left)}s</span>}
+        </span>
+      </button>
+      <button
+        onClick={onDismiss}
+        className="rounded bg-black/60 px-3 py-1 text-sm text-white/80 backdrop-blur hover:text-white"
+      >
+        Watch credits
+      </button>
+    </div>
   );
 }

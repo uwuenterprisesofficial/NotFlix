@@ -5,8 +5,13 @@ import { api, apiOrNull } from "@/lib/api";
 import { displayTitle } from "@/lib/format";
 import type { AnimeDetail, Episode, Me } from "@/lib/types";
 
-export default async function WatchPage({ params }: PageProps<"/watch/[id]/[episode]">) {
+export default async function WatchPage({
+  params,
+  searchParams,
+}: PageProps<"/watch/[id]/[episode]">) {
   const { id, episode: episodeParam } = await params;
+  const query = await searchParams;
+  const param = (name: string) => (typeof query[name] === "string" ? query[name] : null);
   const episode = Number(episodeParam);
   if (!/^\d+$/.test(id) || !Number.isInteger(episode) || episode < 1) notFound();
 
@@ -33,6 +38,8 @@ export default async function WatchPage({ params }: PageProps<"/watch/[id]/[epis
         hasNext={!anime.num_episodes || episode < anime.num_episodes}
         signedIn={me !== null}
         watched={anime.progress?.episodes_watched ?? 0}
+        via={{ provider: param("via"), label: param("option") }}
+        server={param("server")}
       />
     </div>
   );

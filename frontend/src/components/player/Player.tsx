@@ -9,6 +9,7 @@ import type { SkipSegment, Stream } from "@/lib/types";
 import { DirectVideo } from "./DirectVideo";
 import { useAutoSkip } from "./useAutoSkip";
 import { useSources } from "./useSources";
+import { useStoredValue } from "./useStoredValue";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -19,6 +20,8 @@ export function Player({
   hasNext,
   signedIn,
   watched,
+  via,
+  server,
 }: {
   animeId: number;
   episode: number;
@@ -26,19 +29,34 @@ export function Player({
   hasNext: boolean;
   signedIn: boolean;
   watched: number;
+  /** Provider and server the previous episode used; preferred for this one. */
+  via: { provider: string | null; label: string | null };
+  server: string | null;
 }) {
   const router = useRouter();
-  const sources = useSources(animeId, episode);
+  const sources = useSources(animeId, episode, via);
   const [streamChoice, setStreamChoice] = useState<Record<string, number>>({});
   const [autoSkip, setAutoSkip] = useAutoSkip();
+  const [autoNext, setAutoNext] = useStoredValue<"0" | "1">("notflix:autonext", "1");
   const [saveState, setSaveState] = useState<SaveState>(episode <= watched ? "saved" : "idle");
   const saving = useRef(false);
   const autoMarked = useRef(false);
-  const nextHref = `/watch/${animeId}/${episode + 1}`;
 
   const streams = sources.resolved?.streams ?? [];
-  const streamIndex = sources.active ? (streamChoice[sources.active.id] ?? 0) : 0;
+  const serverIndex = server ? streams.findIndex((s) => s.label === server) : -1;
+  const streamIndex = sources.active
+    ? (streamChoice[sources.active.id] ?? Math.max(serverIndex, 0))
+    : 0;
   const stream: Stream | undefined = streams[streamIndex] ?? streams[0];
+
+  // The next episode starts with the same provider, source and server when it has them.
+  const nextParams = new URLSearchParams();
+  if (sources.active) {
+    nextParams.set("via", sources.active.provider);
+    nextParams.set("option", sources.active.label);
+  }
+  if (stream) nextParams.set("server", stream.label);
+  const nextHref = `/watch/${animeId}/${episode + 1}${nextParams.size ? `?${nextParams}` : ""}`;
   // Timestamps from the source itself match its exact cut; analysed ones are the fallback.
   const skipSegments = sources.resolved?.skip_segments.length
     ? sources.resolved.skip_segments
@@ -65,15 +83,15 @@ export function Player({
 
   return (
     <div>
-      <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+      <div className="group relative aspect-video w-full overflow-hidden rounded-lg bg-black">
         {stream?.kind === "direct" && (
           <DirectVideo
             key={stream.url}
             stream={stream}
             segments={skipSegments}
             autoSkip={autoSkip}
-            nextEpisodeLabel={hasNext ? "Next Episode ›" : null}
-            onSkipEnding={hasNext ? () => router.push(nextHref) : null}
+            autoNext={autoNext === "1"}
+            next={hasNext ? { label: "Next Episode", go: () => router.push(nextHref) } : null}
             onNearEnd={autoMarkWatched}
           />
         )}
@@ -89,6 +107,16 @@ export function Player({
             referrerPolicy="no-referrer"
             className="h-full w-full border-0"
           />
+        )}
+        {stream?.kind === "embed" && hasNext && (
+          // An embedded player's position can't be read, so this can't appear by itself at the
+          // credits; it shows while the pointer is over the player instead.
+          <Link
+            href={nextHref}
+            className="absolute top-4 right-4 rounded bg-white/90 px-4 py-2 font-semibold text-black opacity-0 shadow-lg transition-opacity group-hover:opacity-100 focus:opacity-100"
+          >
+            ▶ Next Episode
+          </Link>
         )}
         {!stream && <PlayerStatus sources={sources} />}
       </div>
@@ -147,7 +175,18 @@ export function Player({
               onChange={(e) => setAutoSkip(e.target.checked)}
               className="accent-brand"
             />
-            Auto-skip intro &amp; outro
+            Auto-skip intro
+          </label>
+        )}
+        {stream?.kind === "direct" && hasNext && (
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={autoNext === "1"}
+              onChange={(e) => setAutoNext(e.target.checked ? "1" : "0")}
+              className="accent-brand"
+            />
+            Autoplay next episode
           </label>
         )}
         <div className="ml-auto flex gap-2">
@@ -228,8 +267,8 @@ function SegmentInfo({ segments, embedded }: { segments: SkipSegment[]; embedded
       </div>
       {embedded && (
         <p className="mt-2">
-          Embedded players can’t be controlled from NotFlix, so skip buttons only work with direct
-          sources.
+          Embedded players can’t be read or controlled from NotFlix, so “Skip Intro” and starting
+          the next episode automatically only work with direct sources.
         </p>
       )}
     </div>

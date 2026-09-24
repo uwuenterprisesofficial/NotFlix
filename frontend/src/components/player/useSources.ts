@@ -29,7 +29,11 @@ async function resolveOption(animeId: number, episode: number, id: string): Prom
  * fail is used. Options are kept in arrival order so a slow provider answering late can't take
  * over from the source already playing.
  */
-export function useSources(animeId: number, episode: number) {
+export function useSources(
+  animeId: number,
+  episode: number,
+  prefer: { provider: string | null; label: string | null } = { provider: null, label: null },
+) {
   const [providers, setProviders] = useState<string[] | null>(null);
   const [arrivals, setArrivals] = useState<[string, SourceOption[]][]>([]);
   const [loadError, setLoadError] = useState(false);
@@ -75,7 +79,15 @@ export function useSources(animeId: number, episode: number) {
   const resolutionOf = (o: SourceOption): Resolution | undefined =>
     o.resolved ? { ok: true, resolved: o.resolved } : resolutions[o.id];
   const chosen = candidates.find((o) => o.id === chosenId);
-  const active = chosen ?? candidates.find((o) => resolutionOf(o)?.ok !== false) ?? null;
+  const usable = candidates.filter((o) => resolutionOf(o)?.ok !== false);
+  // Continue with the provider the previous episode played from (e.g. after "Next Episode"),
+  // waiting for its sources rather than starting with whichever provider answers first.
+  const preferredArrived = arrivals.some(([name]) => name === prefer.provider);
+  const waitForPreferred =
+    !!prefer.provider && !!providers?.includes(prefer.provider) && !preferredArrived;
+  const fromPreferred = usable.filter((o) => o.provider === prefer.provider);
+  const continued = fromPreferred.find((o) => o.label === prefer.label) ?? fromPreferred[0];
+  const active = chosen ?? continued ?? (waitForPreferred ? null : usable[0]) ?? null;
   const activeResolution = active ? resolutionOf(active) : undefined;
 
   useEffect(() => {
