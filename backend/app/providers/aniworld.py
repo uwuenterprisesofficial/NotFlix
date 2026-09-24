@@ -158,7 +158,7 @@ class AniWorldProvider:
         return resp.text
 
     def season_path(self, slug: str, season: int) -> str:
-        return f"/{self.series_path.format(slug=slug)}/staffel-{season}"
+        return f"/{self.series_path.replace('{slug}', slug)}/staffel-{season}"
 
     async def locate(self, anime: AnimeInfo) -> tuple[str, int, int] | None:
         """(slug, season, episode offset) of this MAL entry on AniWorld, cached per anime."""

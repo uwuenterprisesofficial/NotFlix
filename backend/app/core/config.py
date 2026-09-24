@@ -1,6 +1,9 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_ANIWORLD_SERIES_PATH = "anime/{slug}"
 
 
 class Settings(BaseSettings):
@@ -34,7 +37,19 @@ class Settings(BaseSettings):
     # AniWorld (German dub/sub). Empty disables the provider. The series path changes with site
     # redesigns, so it is configurable.
     aniworld_url: str = "https://aniworld.to"
-    aniworld_series_path: str = "anime/{slug}"
+    aniworld_series_path: str = DEFAULT_ANIWORLD_SERIES_PATH
+
+    @field_validator("aniworld_series_path")
+    @classmethod
+    def _series_path(cls, value: str) -> str:
+        """Empty means the default; a bare prefix like "anime/stream" gets "/{slug}" appended."""
+        value = value.strip().strip("/") or DEFAULT_ANIWORLD_SERIES_PATH
+        if "{slug}" not in value:
+            value = f"{value}/{{slug}}"
+        rest = value.replace("{slug}", "")
+        if "{" in rest or "}" in rest:
+            raise ValueError(f"ANIWORLD_SERIES_PATH must look like anime/{{slug}}, got {value!r}")
+        return value
 
 
 @lru_cache

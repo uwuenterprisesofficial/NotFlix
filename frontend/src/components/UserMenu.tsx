@@ -2,10 +2,19 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState, useSyncExternalStore, useTransition } from "react";
 import type { Me } from "@/lib/types";
 
+const noop = () => () => {};
+
 export function UserMenu({ me }: { me: Me }) {
+  // The server doesn't know the viewer's locale or timezone, so the local sync time is only
+  // rendered after hydration.
+  const hydrated = useSyncExternalStore(
+    noop,
+    () => true,
+    () => false,
+  );
   const router = useRouter();
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -38,9 +47,11 @@ export function UserMenu({ me }: { me: Me }) {
         disabled={syncing}
         className="rounded border border-white/30 px-3 py-1 hover:bg-white/10 disabled:opacity-50"
         title={
-          me.last_synced_at
-            ? `Last synced ${new Date(me.last_synced_at).toLocaleString()}`
-            : "Never synced"
+          !me.last_synced_at
+            ? "Never synced"
+            : hydrated
+              ? `Last synced ${new Date(me.last_synced_at).toLocaleString()}`
+              : "Last synced"
         }
       >
         {syncing ? "Syncing…" : "Sync MAL"}
