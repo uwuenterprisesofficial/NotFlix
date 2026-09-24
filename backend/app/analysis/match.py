@@ -61,7 +61,7 @@ def _candidate_offsets(a: Fingerprint, b: Fingerprint) -> list[int]:
     return result
 
 
-def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
+def runs(mask: np.ndarray) -> list[tuple[int, int]]:
     padded = np.concatenate(([False], mask, [False]))
     changes = np.flatnonzero(padded[1:] != padded[:-1])
     return list(zip(changes[::2].tolist(), changes[1::2].tolist(), strict=True))
@@ -87,7 +87,7 @@ def find_shared_segments(
         ber[~(a.valid[a_slice] & b.valid[b_slice])] = 0.5
         smoothed = np.convolve(ber, kernel, mode="same")
 
-        for run_start, run_end in _runs(smoothed < MAX_BER):
+        for run_start, run_end in runs(smoothed < MAX_BER):
             if (run_end - run_start) * hop < min_duration:
                 continue
             i0, i1 = start_a + run_start, start_a + run_end

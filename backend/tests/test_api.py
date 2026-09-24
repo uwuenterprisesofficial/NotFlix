@@ -175,16 +175,27 @@ def test_worker_learns_the_opening_and_ending_once_then_searches_new_episodes(
             return {3: [Media("ep3-fresh")]}
         return {ep: [Media("dead")] * (ep == 2) + [Media(f"ep{ep}")] for ep in episodes}
 
-    def fake_load_audio(source, headers):
+    decoded = []  # (source, start, length) of every decode
+
+    def fake_load_audio(source, headers, start_s=None, duration_s=None):
         if source == "dead":
             raise AudioDecodeError("403 Forbidden")
-        return audio[source]
+        samples = audio[source]
+        start = round((start_s or 0) * SAMPLE_RATE)
+        end = len(samples) if duration_s is None else start + round(duration_s * SAMPLE_RATE)
+        decoded.append((source, start_s or 0, duration_s))
+        return samples[start:end]
 
-    monkeypatch.setattr("app.worker.tasks.resolve_all", fake_resolve_all)
-    monkeypatch.setattr("app.worker.tasks.load_audio", fake_load_audio)
+    def fake_probe(source, headers):
+        return None if source == "dead" else len(audio[source]) / SAMPLE_RATE
+
+    monkeypatch.setattr("app.analysis.episode.resolve_all", fake_resolve_all)
+    monkeypatch.setattr("app.analysis.episode.load_audio", fake_load_audio)
+    monkeypatch.setattr("app.analysis.episode.probe_duration", fake_probe)
 
     def run(job_id: str, episodes: list[int], **options):
         asked.clear()
+        decoded.clear()
         with sync_session() as db:
             db.add(
                 AnalysisJob(id=job_id, anime_id=7, episodes=episodes, language="de-dub", **options)
@@ -231,19 +242,26 @@ def test_worker_learns_the_opening_and_ending_once_then_searches_new_episodes(
     assert [kind for kind, _ in references] == ["ending", "opening"]
 
     # Next episodes are searched for the saved opening/ending: nothing is compared, and only
-    # the new episode is downloaded.
+    # the parts of the new episode where they play are decoded: the opening from the start,
+    # the ending from the end.
     rows, compared, _ = run("job-3", [3])
     assert asked == [([3], "de-dub", False)]
     assert rows[(3, "opening")].start_s == pytest.approx(40, abs=1.5)
     assert rows[(3, "opening")].end_s == pytest.approx(120, abs=1.5)
     assert rows[(3, "ending")].start_s == pytest.approx(720, abs=1.5)
-    assert compared == {1: [2], 2: [1], 3: []}
+    assert rows[(3, "ending")].end_s == pytest.approx(800, abs=1.5)
+    assert compared == {1: [2], 2: [1]}  # episode 3 needed no comparison
+    length = len(audio["ep3"]) / SAMPLE_RATE  # 830 s
+    [(_, head, head_len), (_, tail, tail_len)] = decoded
+    assert head == 0 and head_len < 300
+    assert tail == pytest.approx(length - tail_len) and tail_len < 300
+    assert head_len + tail_len < 0.7 * length
 
     # Stored links that no longer play are replaced by fresh ones once.
     rows, compared, _ = run("job-4", [4])
     assert asked == [([4], "de-dub", False), ([4], "de-dub", True)]
     assert rows[(4, "opening")].start_s == pytest.approx(25, abs=1.5)
-    assert compared[4] == []
+    assert rows[(4, "ending")].start_s == pytest.approx(705, abs=1.5)
 
     # A new opening isn't found by the saved one: the episode is compared with the nearest
     # analysed one (no download), which only shares the ending.
@@ -264,7 +282,8 @@ def test_worker_learns_the_opening_and_ending_once_then_searches_new_episodes(
     rows, compared, _ = run("job-7", [7])
     assert asked == [([7], "de-dub", False)]
     assert rows[(7, "opening")].start_s == pytest.approx(15, abs=1.5)
-    assert compared[7] == []
+    assert 7 not in compared  # found by the saved fingerprints, from two short windows
+    assert len(decoded) == 2
 
     # Retrying an episode with a wrong result downloads it again from fresh links and
     # replaces the result; a wrong time that isn't found again is removed.
@@ -287,6 +306,22 @@ def test_worker_learns_the_opening_and_ending_once_then_searches_new_episodes(
     assert asked == []
     assert rows[(3, "opening")].start_s == pytest.approx(40, abs=1.5)
     assert compared[3] == [4]  # the nearest analysed episode (the next one on a tie)
+
+    # Without a saved ending, finding the opening is all there is to do: one window from the
+    # start is decoded, and nothing is compared.
+    with sync_session() as db:
+        db.execute(
+            delete(ReferenceSegment).where(
+                ReferenceSegment.anime_id == 7, ReferenceSegment.kind == "ending"
+            )
+        )
+        db.commit()
+    audio["ep8"] = fake_episode(20, opening_b)
+    rows, compared, _ = run("job-10", [8])
+    assert rows[(8, "opening")].start_s == pytest.approx(20, abs=1.5)
+    assert (8, "ending") not in rows
+    assert 8 not in compared
+    assert [(start, length < 300) for _, start, length in decoded] == [(0, True)]
 
 
 def test_worker_marks_job_failed_when_media_missing(database):

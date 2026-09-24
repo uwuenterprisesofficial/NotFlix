@@ -1,15 +1,15 @@
 import logging
 from datetime import UTC, datetime
 
-import numpy as np
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.analysis.audio import AudioDecodeError, load_audio
+from app.analysis.audio import AudioDecodeError
 from app.analysis.detect import DetectedSegment, detect_segments
-from app.analysis.fingerprint import Fingerprint, fingerprint
-from app.analysis.media import Media, MediaNotFound, resolve_all
-from app.analysis.reference import cut, locate
+from app.analysis.episode import EpisodeAudio
+from app.analysis.fingerprint import Fingerprint
+from app.analysis.media import MediaNotFound
+from app.analysis.reference import cut, locate, search_windows
 from app.analysis.store import (
     load_fingerprints,
     load_references,
@@ -34,30 +34,10 @@ log = logging.getLogger(__name__)
 PARTNER_OFFSETS = (1, -1, 2, -2)
 
 
-def _first_decodable(episode: int, candidates: list[Media]) -> np.ndarray:
-    """Audio of the first candidate that decodes; a hoster's direct link may be dead."""
-    error: AudioDecodeError | None = None
-    for media in candidates:
-        try:
-            return load_audio(media.source, media.headers)
-        except AudioDecodeError as e:
-            log.warning("Episode %s: %s failed to decode: %s", episode, media.source, e)
-            error = e
-    raise AudioDecodeError(f"No stream of episode {episode} could be decoded: {error}")
-
-
 def _decode(anime_id: int, episode: int, language: str | None, fresh: bool = False) -> Fingerprint:
-    """Download and fingerprint one episode. Stored links may have expired: if none of them
-    decodes, the episode's links are fetched fresh (`fresh` skips the stored ones)."""
+    """Download and fingerprint a whole episode."""
     log.info("Fingerprinting anime %s episode %s", anime_id, episode)
-    if not fresh:
-        try:
-            stored = resolve_all(anime_id, [episode], language)[episode]
-            return fingerprint(_first_decodable(episode, stored))
-        except AudioDecodeError:
-            pass
-    links = resolve_all(anime_id, [episode], language, fresh=True)[episode]
-    return fingerprint(_first_decodable(episode, links))
+    return EpisodeAudio(anime_id, episode, language, fresh).full()
 
 
 def _partner(
@@ -97,6 +77,30 @@ def _match_references(
                 SegmentKind(ref.kind), hit.start_s, hit.end_s, hit.confidence
             )
     return found
+
+
+def _search(
+    audio: EpisodeAudio, references: list[tuple[ReferenceSegment, Fingerprint]]
+) -> tuple[dict[str, DetectedSegment], Fingerprint | None]:
+    """Search a new episode for the saved openings/endings, decoding only the parts where they
+    play (see search_windows). Returns what was found, and the whole episode's fingerprint if
+    it had to be decoded after all (its length couldn't be told)."""
+    duration = audio.duration()
+    if duration is None:
+        fp = audio.full()
+        return _match_references(fp, references), fp
+    by_kind: dict[str, list[Fingerprint]] = {}
+    for ref, ref_fp in references:
+        by_kind.setdefault(ref.kind, []).append(ref_fp)
+    found = search_windows(audio.window, duration, by_kind)
+    log.info(
+        "Episode %s: searched %.0f of %.0f s for the saved opening/ending, found %s",
+        audio.episode, audio.decoded_s, duration, sorted(found) or "nothing",
+    )  # fmt: skip
+    return {
+        kind: DetectedSegment(SegmentKind(kind), hit.start_s, hit.end_s, hit.confidence)
+        for kind, hit in found.items()
+    }, None
 
 
 def _compare(
@@ -164,26 +168,47 @@ def run_analysis(job_id: str) -> None:
 
         try:
             saved = load_fingerprints(db, job.anime_id)
-            fingerprints: dict[int, Fingerprint] = {}
-            for episode in job.episodes:
-                if episode in saved and not job.redownload:
-                    fingerprints[episode] = to_fingerprint(saved[episode])
-                else:
-                    fingerprints[episode] = _decode(
-                        job.anime_id, episode, job.language, fresh=job.redownload
-                    )
-                    saved[episode] = save_fingerprint(
-                        db, job.anime_id, episode, job.language, fingerprints[episode]
-                    )
-                    db.commit()  # a download is kept even if a later step fails
-
             references = [(ref, to_fingerprint(ref)) for ref in load_references(db, job.anime_id)]
-            found: dict[int, dict[str, DetectedSegment]] = {
-                ep: {} if job.compare else _match_references(fingerprints[ep], references)
-                for ep in job.episodes
-            }
-            kinds = {kind.value for kind in SegmentKind}
-            unresolved = [ep for ep in job.episodes if set(found[ep]) != kinds]
+            known_kinds = {ref.kind for ref, _ in references}
+            fingerprints: dict[int, Fingerprint] = {}
+            found: dict[int, dict[str, DetectedSegment]] = {}
+            unresolved: list[int] = []
+
+            def keep(episode: int, fp: Fingerprint) -> None:
+                """A whole episode's fingerprint: used now and saved for later comparisons."""
+                fingerprints[episode] = fp
+                saved[episode] = save_fingerprint(db, job.anime_id, episode, job.language, fp)
+                db.commit()  # a download is kept even if a later step fails
+
+            for episode in job.episodes:
+                use_saved = episode in saved and not job.redownload
+                if job.compare or not references:
+                    # Compare episodes: asked for, or nothing saved yet (a show's first time).
+                    if use_saved:
+                        fingerprints[episode] = to_fingerprint(saved[episode])
+                    else:
+                        keep(episode, _decode(job.anime_id, episode, job.language, job.redownload))
+                    found[episode] = {}
+                    unresolved.append(episode)
+                    continue
+
+                audio = None
+                if use_saved:
+                    fingerprints[episode] = to_fingerprint(saved[episode])
+                    found[episode] = _match_references(fingerprints[episode], references)
+                else:
+                    audio = EpisodeAudio(job.anime_id, episode, job.language, job.redownload)
+                    found[episode], whole = _search(audio, references)
+                    if whole is not None:
+                        keep(episode, whole)
+                # A saved opening/ending that isn't found may have changed (e.g. a new opening
+                # in the second cour): compare episodes to learn it. Kinds nothing is saved for
+                # aren't looked for.
+                if known_kinds - set(found[episode]):
+                    if episode not in fingerprints:
+                        keep(episode, audio.full())
+                    unresolved.append(episode)
+
             detected: dict[int, list[DetectedSegment]] = {}
             if unresolved:
                 detected = _compare(db, job, unresolved, fingerprints, saved)

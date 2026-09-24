@@ -84,3 +84,73 @@ def test_empty_audio():
     empty = fingerprint(np.zeros(100, np.float32))
     assert len(empty) == 0
     assert detect_segments({1: empty, 2: empty}) == {1: [], 2: []}
+
+
+def _noise(rng, seconds: float) -> np.ndarray:
+    return rng.standard_normal(round(seconds * SAMPLE_RATE)).astype(np.float32)
+
+
+def test_locate_finds_a_reference_between_frames():
+    """A saved opening sitting half a frame off the episode's fingerprint grid shares no exact
+    hashes with it; the sliding search still finds it, with its edges."""
+    from app.analysis.reference import cut, locate
+
+    rng = np.random.default_rng(7)
+    opening = _noise(rng, 60)
+    first = fingerprint(np.concatenate([_noise(rng, 10), opening, _noise(rng, 300)]))
+    reference = cut(first, 10, 70)
+    # 37.05 s: half of the 0.1 s hop away from the grid the reference was cut on.
+    episode = fingerprint(np.concatenate([_noise(rng, 37.05), opening, _noise(rng, 500)]))
+
+    hit = locate(episode, reference)
+    assert hit is not None
+    assert hit.start_s == pytest.approx(37.05, abs=0.3)
+    assert hit.end_s == pytest.approx(97.05, abs=0.3)
+    assert locate(fingerprint(_noise(rng, 400)), reference) is None  # unrelated audio
+
+
+def test_locate_keeps_a_shortened_opening_short():
+    from app.analysis.reference import cut, locate
+
+    rng = np.random.default_rng(8)
+    opening = _noise(rng, 90)
+    reference = cut(fingerprint(np.concatenate([_noise(rng, 5), opening, _noise(rng, 60)])), 5, 95)
+    # Only the first 60 s of the opening, straight into the episode.
+    episode = fingerprint(
+        np.concatenate([_noise(rng, 20), opening[: 60 * SAMPLE_RATE], _noise(rng, 600)])
+    )
+
+    hit = locate(episode, reference)
+    assert hit.start_s == pytest.approx(20, abs=0.5)
+    assert hit.end_s == pytest.approx(80, abs=3.5)  # not widened to the reference's 90 s
+
+
+def test_search_windows_reads_the_opening_from_the_start_and_the_ending_from_the_end():
+    from app.analysis.reference import cut, search_windows
+
+    rng = np.random.default_rng(9)
+    opening, ending = _noise(rng, 80), _noise(rng, 80)
+    source = np.concatenate([_noise(rng, 30), opening, _noise(rng, 1100), ending, _noise(rng, 60)])
+    saved = fingerprint(source)
+    references = {"opening": [cut(saved, 30, 110)], "ending": [cut(saved, 1210, 1290)]}
+    episode = np.concatenate([_noise(rng, 45), opening, _noise(rng, 1150), ending, _noise(rng, 45)])
+    duration = len(episode) / SAMPLE_RATE
+    windows = []
+
+    def window(start, length):
+        windows.append((start, length))
+        return fingerprint(
+            episode[round(start * SAMPLE_RATE) : round((start + length) * SAMPLE_RATE)]
+        )
+
+    found = search_windows(window, duration, references)
+    assert found["opening"].start_s == pytest.approx(45, abs=0.5)
+    assert found["ending"].start_s == pytest.approx(1275, abs=0.5)
+    # Two windows: one from the start, one ending at the end; most of the episode unread.
+    [(head, head_len), (tail, tail_len)] = windows
+    assert head == 0 and tail + tail_len == pytest.approx(duration)
+    assert head_len + tail_len < 0.4 * duration
+
+    windows.clear()
+    assert set(search_windows(window, duration, {"opening": references["opening"]})) == {"opening"}
+    assert len(windows) == 1  # no saved ending: done after the opening
