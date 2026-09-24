@@ -163,7 +163,8 @@ async def test_anivexa_does_not_cache_total_failures(monkeypatch, memory_cache):
 
     monkeypatch.setattr(anivexa, "anilist_id", fake_anilist_id)
     provider = AnivexaProvider("http://anivexa:4000", ["anizone"], http=http)
-    assert await provider.options(AnimeInfo(id=1, title="x"), 1) == []
+    with pytest.raises(ProviderError, match="Every Anivexa provider failed"):
+        await provider.options(AnimeInfo(id=1, title="x"), 1)
     assert memory_cache == {}
 
 
@@ -237,7 +238,7 @@ def _aniworld_handler(requests):
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request.url.raw_path.decode())
         path = request.url.path
-        if path == "/anime/attack-on-titan/staffel-3":
+        if path in ("/anime/attack-on-titan/staffel-3", "/anime/attack-on-titan/staffel-1"):
             return httpx.Response(200, text=SEASON_PAGE)
         if path == "/anime/attack-on-titan/staffel-3/episode-2":
             return httpx.Response(200, text=NEW_STYLE_EPISODE)
@@ -336,6 +337,15 @@ async def test_aniworld_does_not_remember_guesses_made_while_anilist_is_down(
     assert await provider.options(AnimeInfo(id=2, title="Unknown Show"), 1) == []
     assert len(requests) == 2
     assert await get_mapping(2, "aniworld") is None
+
+    # A successful guess isn't persisted either, but is reused for a while.
+    titan = AnimeInfo(id=3, title="Attack on Titan")
+    await delete_mapping(3, "aniworld")
+    requests.clear()
+    await provider.options(titan, 1)
+    await provider.options(titan, 2)
+    assert requests.count("/anime/attack-on-titan/staffel-1") == 1
+    assert await get_mapping(3, "aniworld") is None
 
 
 async def test_anilist_backs_off_after_failures(monkeypatch):
@@ -485,3 +495,49 @@ def test_unreachable_hint_mentions_host_docker_internal(monkeypatch):
     monkeypatch.setattr(Path, "exists", lambda self: str(self) == "/.dockerenv")
     assert "http://host.docker.internal:4000" in unreachable_hint("http://localhost:4000")
     assert unreachable_hint("http://anivexa.lan:4000") == ""
+
+
+async def test_anivexa_scan_uses_one_request(monkeypatch, memory_cache):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json=EPISODES)
+
+    async def fake_anilist_id(mal_id):
+        return 16498
+
+    monkeypatch.setattr(anivexa, "anilist_id", fake_anilist_id)
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = AnivexaProvider("http://anivexa:4000", ["anizone", "kaa"], http=http)
+    found = await provider.scan(AnimeInfo(id=16498, title="x"), [1, 2, 3])
+    assert [len(found[ep]) for ep in (1, 2, 3)] == [2, 2, 0]
+    assert len(requests) == 1
+
+
+async def test_aniworld_scan_only_fetches_listed_episodes(database, monkeypatch, memory_cache):
+    from app.services import anilist
+    from app.services.mappings import save_mapping
+
+    await save_mapping(35760, "aniworld", "attack-on-titan", 3)
+    requests: list[str] = []
+    http = httpx.AsyncClient(transport=httpx.MockTransport(_aniworld_handler(requests)))
+    provider = AniWorldProvider("https://aniworld.example", "anime/{slug}", http=http)
+    monkeypatch.setattr(anilist, "lookup", lambda mal_id: pytest.fail("mapping is cached"))
+
+    found = await provider.scan(AnimeInfo(id=35760, title="x"), [1, 2, 3, 4])
+    assert [len(found[ep]) for ep in (1, 2, 3, 4)] == [0, 3, 0, 0]
+    # SEASON_PAGE lists episodes 1 and 2; episodes 3 and 4 are never requested.
+    assert sorted(requests) == [
+        "/anime/attack-on-titan/staffel-3",
+        "/anime/attack-on-titan/staffel-3/episode-1",
+        "/anime/attack-on-titan/staffel-3/episode-2",
+    ]
+
+
+def test_season_episode_numbers():
+    from app.providers.aniworld import season_episode_numbers
+
+    assert season_episode_numbers(SEASON_PAGE) == {1, 2}
+    old = '<table class="seasonEpisodesList"><meta itemprop="episodeNumber" content="7"></table>'
+    assert season_episode_numbers(old) == {7}

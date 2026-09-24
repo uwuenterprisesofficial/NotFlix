@@ -40,14 +40,35 @@ def database():
 async def client(database):
     from httpx import ASGITransport, AsyncClient
 
+    from app.core import cache
     from app.db.session import async_engine
     from app.main import app
+    from app.services import source_scan
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
+    await source_scan.wait_idle()
     app.dependency_overrides.clear()
-    # Pooled async connections are bound to this test's event loop.
+    # Pooled async connections (Postgres and Redis) are bound to this test's event loop.
     await async_engine.dispose()
+    await cache.close()
+
+
+@pytest.fixture(autouse=True)
+def clean_source_cache(request):
+    """Each test that touches the database starts without cached sources or scans."""
+    if "database" not in request.fixturenames:
+        return
+    from sqlalchemy import delete
+
+    from app.db.session import sync_session
+    from app.models import EpisodeSource, SourceScan
+
+    request.getfixturevalue("database")
+    with sync_session() as db:
+        db.execute(delete(EpisodeSource))
+        db.execute(delete(SourceScan))
+        db.commit()
 
 
 @pytest.fixture

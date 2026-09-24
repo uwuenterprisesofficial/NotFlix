@@ -164,20 +164,34 @@ class AnivexaProvider:
         except AniListUnavailable as e:
             raise ProviderError("Anivexa needs AniList ids and AniList is unreachable") from e
 
-    async def options(self, anime: AnimeInfo, episode: int) -> list[SourceOption]:
+    async def scan(self, anime: AnimeInfo, episodes: list[int]) -> dict[int, list[SourceOption]]:
+        """One /episodes request lists every episode of every Anivexa provider."""
         al_id = await self._anilist_id(anime)
         if al_id is None or not self.providers:
-            return []
+            return {ep: [] for ep in episodes}
         data = await self._episodes(al_id)
-        return [
-            SourceOption(
-                id=f"{self.name}:{provider}:{audio}",
-                provider=self.name,
-                label=LABELS.get(provider, provider),
-                language=AUDIO_LANGUAGE[audio],
-            )
-            for provider, audio in available_options(data, episode)
-        ]
+        if not any(
+            isinstance(v, dict) and "error" not in v
+            for k, v in data.items()
+            if k not in RESERVED_KEYS
+        ):
+            # Every provider failed: that's an outage, not "no episodes"; don't cache it as such.
+            raise ProviderError("Every Anivexa provider failed for this anime")
+        return {
+            ep: [
+                SourceOption(
+                    id=f"{self.name}:{provider}:{audio}",
+                    provider=self.name,
+                    label=LABELS.get(provider, provider),
+                    language=AUDIO_LANGUAGE[audio],
+                )
+                for provider, audio in available_options(data, ep)
+            ]
+            for ep in episodes
+        }
+
+    async def options(self, anime: AnimeInfo, episode: int) -> list[SourceOption]:
+        return (await self.scan(anime, [episode]))[episode]
 
     async def resolve(self, anime: AnimeInfo, episode: int, key: str) -> Resolved:
         provider, _, audio = key.partition(":")

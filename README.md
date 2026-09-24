@@ -81,6 +81,8 @@ VALUES (21, 1, 'my-site', 'embed', 'https://example.com/embed/one-piece-1', 'de-
 
 `anime_id` is the MyAnimeList id. `kind` is `embed` (shown in an iframe) or `direct` (an mp4/m3u8 URL played by NotFlix itself).
 
+**Source cache.** Opening a show's page starts a background scan, run inside the API process, of every enabled provider. It covers all episodes of a short show, or the 60 around your progress in a long one. Results are stored in the `episode_sources` and `source_scans` tables. The show page and the player read that cache first; a provider is only asked again when its data is older than 6 hours (airing shows) or 7 days (finished shows), when it doesn't cover the episodes you're near, or when you press **Refresh sources**. Anivexa and AniWorld each list many episodes in one request, so only ReAnime is asked episode by episode. The show page shows how many episodes each language has, and for each episode whether it's available in your language, only in other languages, or has no stream at all.
+
 **Direct vs. embed.** Direct streams are played by NotFlix's own player, so Skip Intro, auto-skip, subtitles and the analyzer all work. HLS and header-protected streams are relayed through `/api/proxy` using signed URLs, so the proxy only fetches URLs the backend issued. An embedded third-party player is cross-origin and can't be controlled from outside, so for embeds the intro/outro times are only displayed. When a source reports its own intro/outro times (some Anivexa providers do), those are used for that stream instead of the analysed ones.
 
 ## Intro/outro detection

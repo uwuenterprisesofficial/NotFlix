@@ -90,3 +90,17 @@ export type AnalysisJob = {
   status: "queued" | "running" | "done" | "failed";
   error: string | null;
 };
+
+export type ProviderScan = {
+  provider: string;
+  status: "running" | "done" | "failed";
+  error: string | null;
+  finished_at: string | null;
+};
+
+export type Availability = {
+  episodes: { episode: number; languages: Language[] }[];
+  checked: number[];
+  scans: ProviderScan[];
+  scanning: boolean;
+};

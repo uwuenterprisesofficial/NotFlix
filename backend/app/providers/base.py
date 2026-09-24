@@ -2,9 +2,9 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Coroutine
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Literal, Protocol, TypeVar
+from typing import Any, Literal, Protocol, TypeVar
 from urllib.parse import urlsplit
 
 import httpx
@@ -100,6 +100,46 @@ class StreamProvider(Protocol):
     async def resolve(self, anime: AnimeInfo, episode: int, key: str) -> Resolved: ...
 
 
+SCAN_CONCURRENCY = 4
+
+
+async def scan_each_episode(
+    provider: StreamProvider, anime: AnimeInfo, episodes: list[int]
+) -> dict[int, list[SourceOption]]:
+    """Default scan: ask for every episode, a few at a time. Providers that can list many
+    episodes in one request implement `scan` themselves."""
+    limit = asyncio.Semaphore(SCAN_CONCURRENCY)
+
+    async def one(episode: int) -> tuple[int, list[SourceOption]]:
+        async with limit:
+            return episode, await provider.options(anime, episode)
+
+    return dict(await asyncio.gather(*(one(ep) for ep in episodes)))
+
+
+async def scan(
+    provider: StreamProvider, anime: AnimeInfo, episodes: list[int]
+) -> dict[int, list[SourceOption]]:
+    custom = getattr(provider, "scan", None)
+    return await (
+        custom(anime, episodes) if custom else scan_each_episode(provider, anime, episodes)
+    )
+
+
+def resolved_to_json(resolved: Resolved) -> dict[str, Any]:
+    return asdict(resolved)
+
+
+def resolved_from_json(data: dict[str, Any]) -> Resolved:
+    return Resolved(
+        streams=[
+            Stream(**{**s, "subtitles": tuple(Subtitle(**sub) for sub in s["subtitles"])})
+            for s in data["streams"]
+        ],
+        segments=[Segment(**seg) for seg in data.get("segments", [])],
+    )
+
+
 def enabled_providers() -> list[StreamProvider]:
     from app.core.config import get_settings
     from app.providers.anivexa import AnivexaProvider
@@ -129,7 +169,7 @@ def unreachable_hint(url: str) -> str:
     return ""
 
 
-async def _guarded(provider: StreamProvider, call: Awaitable[T], timeout: float) -> T:
+async def guarded(provider: StreamProvider, call: Awaitable[T], timeout: float) -> T:
     """Run a provider call; after a connection failure the provider is skipped for a while
     instead of making every page wait for the same failure again."""
     if _down_until.get(provider.name, 0) > time.monotonic():
@@ -160,7 +200,7 @@ async def list_options(
 
     async def run(provider: StreamProvider) -> list[SourceOption]:
         try:
-            return await _guarded(provider, provider.options(anime, episode), OPTIONS_TIMEOUT_S)
+            return await guarded(provider, provider.options(anime, episode), OPTIONS_TIMEOUT_S)
         except ProviderUnavailable:
             return []
         except ProviderError as e:
@@ -177,9 +217,17 @@ async def list_options(
     return [option for found in results for option in found]
 
 
+async def provider_options(anime: AnimeInfo, episode: int, name: str) -> list[SourceOption]:
+    """One provider's options for an episode; raises instead of returning [] on failure."""
+    provider = next((p for p in enabled_providers() if p.name == name), None)
+    if provider is None:
+        raise ProviderError(f"Unknown provider {name!r}")
+    return await guarded(provider, provider.options(anime, episode), OPTIONS_TIMEOUT_S)
+
+
 async def resolve_option(anime: AnimeInfo, episode: int, option_id: str) -> Resolved:
     name, _, key = option_id.partition(":")
     provider = next((p for p in enabled_providers() if p.name == name), None)
     if provider is None or not key:
         raise ProviderError(f"Unknown source {option_id!r}")
-    return await _guarded(provider, provider.resolve(anime, episode, key), RESOLVE_TIMEOUT_S)
+    return await guarded(provider, provider.resolve(anime, episode, key), RESOLVE_TIMEOUT_S)

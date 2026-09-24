@@ -3,11 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { AniWorldMapping } from "@/components/AniWorldMapping";
+import { EpisodeBrowser } from "@/components/EpisodeBrowser";
 import { apiOrNull } from "@/lib/api";
 import { displayTitle, nextEpisode } from "@/lib/format";
 import type { AnimeDetail, Me } from "@/lib/types";
 
-// Airing shows have no episode count on MAL yet; show a reasonable default grid.
+// Airing shows have no episode count on MAL yet; analyse within a reasonable default range.
 const UNKNOWN_EPISODE_COUNT = 12;
 
 export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
@@ -21,7 +22,6 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
 
   const watched = anime.progress?.episodes_watched ?? 0;
   const count = anime.num_episodes ?? Math.max(watched + 1, UNKNOWN_EPISODE_COUNT);
-  const episodes = Array.from({ length: count }, (_, i) => i + 1);
   const title = displayTitle(anime);
 
   return (
@@ -45,7 +45,9 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
             {anime.mean && <span className="font-semibold text-green-400">★ {anime.mean}</span>}
             {anime.media_type && <span className="uppercase">{anime.media_type}</span>}
             {anime.start_season && <span className="capitalize">{anime.start_season}</span>}
-            {anime.status && <span className="capitalize">{anime.status.replaceAll("_", " ")}</span>}
+            {anime.status && (
+              <span className="capitalize">{anime.status.replaceAll("_", " ")}</span>
+            )}
             {anime.progress && (
               <span className="text-brand capitalize">
                 {anime.progress.status.replaceAll("_", " ")} · {watched}/{anime.num_episodes ?? "?"}
@@ -71,21 +73,12 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
         </div>
       </div>
 
-      <h2 className="mt-12 mb-4 text-xl font-semibold">Episodes</h2>
-      <div className="grid grid-cols-4 gap-2 sm:grid-cols-8 lg:grid-cols-12">
-        {episodes.map((ep) => (
-          <Link
-            key={ep}
-            href={`/watch/${anime.id}/${ep}`}
-            className={`rounded py-3 text-center text-sm font-semibold transition-colors hover:bg-brand ${
-              ep <= watched ? "bg-surface-raised text-muted" : "bg-neutral-700"
-            }`}
-          >
-            {ep <= watched ? "✓ " : ""}
-            {ep}
-          </Link>
-        ))}
-      </div>
+      <EpisodeBrowser
+        animeId={anime.id}
+        numEpisodes={anime.num_episodes}
+        watched={watched}
+        signedIn={me !== null}
+      />
 
       {me && <AniWorldMapping animeId={anime.id} />}
       <AnalyzePanel animeId={anime.id} episodeCount={count} signedIn={me !== null} />

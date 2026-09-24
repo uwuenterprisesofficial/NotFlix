@@ -99,6 +99,25 @@ class SourceOptionOut(BaseModel):
     resolved: ResolvedOut | None
 
 
+class ProviderScanOut(ORM):
+    provider: str
+    status: str
+    error: str | None
+    finished_at: datetime | None
+
+
+class EpisodeLanguages(BaseModel):
+    episode: int
+    languages: list[str]
+
+
+class AvailabilityOut(BaseModel):
+    episodes: list[EpisodeLanguages]  # only episodes with at least one source
+    checked: list[int]  # episodes every reachable provider has looked at
+    scans: list[ProviderScanOut]
+    scanning: bool
+
+
 class MappingOut(ORM):
     provider: str
     external_id: str | None

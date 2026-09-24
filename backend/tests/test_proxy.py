@@ -173,6 +173,9 @@ async def test_aniworld_mapping_override(client, user):
 class EmbedOnlyProvider(FakeProvider):
     name = "embedonly"
 
+    async def options(self, anime, episode):
+        return [SourceOption(id="embedonly:e", provider="embedonly", label="E", language="de-dub")]
+
     async def resolve(self, anime, episode, key):
         return Resolved(streams=[Stream(kind="embed", url="https://embed.example", label="E")])
 

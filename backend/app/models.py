@@ -117,6 +117,39 @@ class StreamSource(Base):
     language: Mapped[str | None] = mapped_column(String(10))  # e.g. "de-dub", "en-sub"
 
 
+class EpisodeSource(Base):
+    """A cached source option for one episode, as found by a provider scan."""
+
+    __tablename__ = "episode_sources"
+    __table_args__ = (UniqueConstraint("anime_id", "episode", "option_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anime_id: Mapped[int] = mapped_column(Integer, index=True)
+    episode: Mapped[int] = mapped_column(Integer)
+    provider: Mapped[str] = mapped_column(String(20))
+    option_id: Mapped[str] = mapped_column(Text)
+    label: Mapped[str] = mapped_column(Text)
+    language: Mapped[str] = mapped_column(String(10))
+    resolved: Mapped[dict | None] = mapped_column(JSON)  # set when no /resolve call is needed
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class SourceScan(Base):
+    """Which episodes of an anime a provider was last checked for, and how that went."""
+
+    __tablename__ = "source_scans"
+    __table_args__ = (UniqueConstraint("anime_id", "provider"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anime_id: Mapped[int] = mapped_column(Integer, index=True)
+    provider: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(10))  # running | done | failed
+    episodes: Mapped[list[int]] = mapped_column(JSON, default=list)  # covered by stored rows
+    error: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ProviderMapping(Base):
     """How a MAL anime is identified on another service (AniList id, AniWorld slug + season)."""
 

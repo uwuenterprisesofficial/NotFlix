@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ProviderMapping } from "@/lib/types";
+import { SCAN_FINISHED_EVENT, SOURCES_CHANGED_EVENT } from "./EpisodeBrowser";
 
 /** Shows which AniWorld series/season feeds the German sources and lets the user correct it. */
 export function AniWorldMapping({ animeId }: { animeId: number }) {
@@ -19,10 +20,14 @@ export function AniWorldMapping({ animeId }: { animeId: number }) {
   }
 
   useEffect(() => {
-    fetch(`/api/anime/${animeId}/mappings`)
-      .then((res) => (res.ok ? res.json() : []))
-      .then((all: ProviderMapping[]) => apply(all.find((m) => m.provider === "aniworld") ?? null))
-      .catch(() => apply(null));
+    const load = () =>
+      fetch(`/api/anime/${animeId}/mappings`)
+        .then((res) => (res.ok ? res.json() : []))
+        .then((all: ProviderMapping[]) => apply(all.find((m) => m.provider === "aniworld") ?? null))
+        .catch(() => apply(null));
+    load();
+    window.addEventListener(SCAN_FINISHED_EVENT, load);
+    return () => window.removeEventListener(SCAN_FINISHED_EVENT, load);
   }, [animeId]);
 
   async function save() {
@@ -39,7 +44,8 @@ export function AniWorldMapping({ animeId }: { animeId: number }) {
         episode_offset: offset,
         manual: true,
       });
-      setMessage("Saved. Open an episode to see the German sources.");
+      setMessage("Saved. Looking for German sources with this mapping…");
+      window.dispatchEvent(new Event(SOURCES_CHANGED_EVENT));
     } else {
       setMessage(
         res.status === 422
@@ -52,7 +58,8 @@ export function AniWorldMapping({ animeId }: { animeId: number }) {
   async function reset() {
     await fetch(`/api/anime/${animeId}/mappings/aniworld`, { method: "DELETE" });
     apply(null);
-    setMessage("Reset. It will be detected again the next time you open an episode.");
+    setMessage("Reset. Detecting the series again…");
+    window.dispatchEvent(new Event(SOURCES_CHANGED_EVENT));
   }
 
   if (mapping === undefined) return null;
@@ -61,7 +68,7 @@ export function AniWorldMapping({ animeId }: { animeId: number }) {
     ? `${mapping.manual ? "Set manually" : "Detected"}: ${mapping.external_id}, season ${mapping.season}${mapping.episode_offset ? `, episode offset ${mapping.episode_offset}` : ""}`
     : mapping
       ? "Not found on AniWorld automatically."
-      : "Not detected yet. It is looked up the first time you open an episode.";
+      : "Not detected yet. It is looked up while the episode list loads.";
 
   return (
     <section className="mt-6 max-w-2xl rounded-lg bg-surface-raised p-6">

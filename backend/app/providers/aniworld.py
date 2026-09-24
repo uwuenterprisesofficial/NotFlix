@@ -1,5 +1,6 @@
 """German dub/sub sources from AniWorld. Hoster links are shown as iframe embeds."""
 
+import asyncio
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from bs4 import BeautifulSoup
 
 from app.core.cache import get_json, set_json
 from app.providers.base import (
+    SCAN_CONCURRENCY,
     AnimeInfo,
     Language,
     ProviderError,
@@ -26,6 +28,7 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 LINKS_CACHE_TTL = 10 * 60
+GUESS_CACHE_TTL = 10 * 60
 RETRY_NOT_FOUND_AFTER = timedelta(days=1)
 MAX_SLUG_CANDIDATES = 8
 
@@ -129,6 +132,19 @@ def count_episodes(html: str) -> int:
     )
 
 
+def season_episode_numbers(html: str) -> set[int]:
+    """Episode numbers listed on a season page (empty if the layout isn't recognised)."""
+    soup = BeautifulSoup(html, "html.parser")
+    cells = [
+        c.get_text(" ", strip=True) for c in soup.select("tr.episode-row .episode-number-cell")
+    ]
+    cells += [
+        str(m.get("content") or "")
+        for m in soup.select("table.seasonEpisodesList meta[itemprop=episodeNumber]")
+    ]
+    return {int(m.group()) for text in cells if (m := re.search(r"\d+", text))}
+
+
 class AniWorldProvider:
     name = "aniworld"
 
@@ -169,6 +185,10 @@ class AniWorldProvider:
         ):
             return None
 
+        guess_key = f"aniworld:guess:{anime.id}"
+        if guess := await get_json(guess_key):
+            return guess[0], guess[1], 0
+
         info = None
         anilist_ok = True
         try:
@@ -184,6 +204,8 @@ class AniWorldProvider:
             if html and count_episodes(html) > 0:
                 if anilist_ok:
                     await save_mapping(anime.id, self.name, slug, season)
+                else:  # Not persisted, but don't redo the search for every episode.
+                    await set_json(guess_key, [slug, season], GUESS_CACHE_TTL)
                 return slug, season, 0
         if anilist_ok:
             await save_mapping(anime.id, self.name, None)
@@ -204,7 +226,7 @@ class AniWorldProvider:
         await set_json(key, [link.__dict__ for link in links], LINKS_CACHE_TTL)
         return links
 
-    async def options(self, anime: AnimeInfo, episode: int) -> list[SourceOption]:
+    def _options(self, links: list[EpisodeLink]) -> list[SourceOption]:
         return [
             SourceOption(
                 id=f"{self.name}:{link.path}",
@@ -212,8 +234,30 @@ class AniWorldProvider:
                 label=link.hoster,
                 language=link.language,
             )
-            for link in await self.episode_links(anime, episode)
+            for link in links
         ]
+
+    async def options(self, anime: AnimeInfo, episode: int) -> list[SourceOption]:
+        return self._options(await self.episode_links(anime, episode))
+
+    async def scan(self, anime: AnimeInfo, episodes: list[int]) -> dict[int, list[SourceOption]]:
+        """The season page says which episodes exist, so only those episode pages are fetched."""
+        found: dict[int, list[SourceOption]] = {ep: [] for ep in episodes}
+        located = await self.locate(anime)
+        if located is None:
+            return found
+        slug, season, offset = located
+        html = await self._fetch(self.season_path(slug, season))
+        listed = season_episode_numbers(html) if html else set()
+        wanted = [ep for ep in episodes if not listed or ep + offset in listed]
+        limit = asyncio.Semaphore(SCAN_CONCURRENCY)
+
+        async def one(ep: int) -> None:
+            async with limit:
+                found[ep] = self._options(await self.episode_links(anime, ep))
+
+        await asyncio.gather(*(one(ep) for ep in wanted))
+        return found
 
     async def resolve(self, anime: AnimeInfo, episode: int, key: str) -> Resolved:
         if not key.startswith("/") or key.startswith("//"):
