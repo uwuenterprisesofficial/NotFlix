@@ -1,0 +1,92 @@
+import Image from "next/image";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { AnalyzePanel } from "@/components/AnalyzePanel";
+import { apiOrNull } from "@/lib/api";
+import { displayTitle, nextEpisode } from "@/lib/format";
+import type { AnimeDetail, Me } from "@/lib/types";
+
+// Airing shows have no episode count on MAL yet; show a reasonable default grid.
+const UNKNOWN_EPISODE_COUNT = 12;
+
+export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
+  const { id } = await params;
+  if (!/^\d+$/.test(id)) notFound();
+  const [anime, me] = await Promise.all([
+    apiOrNull<AnimeDetail>(`/anime/${id}`),
+    apiOrNull<Me>("/me"),
+  ]);
+  if (!anime) notFound();
+
+  const watched = anime.progress?.episodes_watched ?? 0;
+  const count = anime.num_episodes ?? Math.max(watched + 1, UNKNOWN_EPISODE_COUNT);
+  const episodes = Array.from({ length: count }, (_, i) => i + 1);
+  const title = displayTitle(anime);
+
+  return (
+    <div className="px-4 pt-24 pb-16 md:px-12">
+      <div className="flex flex-col gap-8 md:flex-row">
+        {anime.picture_url && (
+          <Image
+            src={anime.picture_url}
+            alt={title}
+            width={240}
+            height={340}
+            className="h-fit rounded-md shadow-2xl"
+          />
+        )}
+        <div className="max-w-3xl">
+          <h1 className="text-3xl font-black md:text-5xl">{title}</h1>
+          {anime.title_en && anime.title_en !== anime.title && (
+            <p className="mt-1 text-muted">{anime.title}</p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-3 text-sm text-neutral-300">
+            {anime.mean && <span className="font-semibold text-green-400">★ {anime.mean}</span>}
+            {anime.media_type && <span className="uppercase">{anime.media_type}</span>}
+            {anime.start_season && <span className="capitalize">{anime.start_season}</span>}
+            {anime.status && <span className="capitalize">{anime.status.replaceAll("_", " ")}</span>}
+            {anime.progress && (
+              <span className="text-brand capitalize">
+                {anime.progress.status.replaceAll("_", " ")} · {watched}/{anime.num_episodes ?? "?"}
+              </span>
+            )}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {anime.genres.map((g) => (
+              <span key={g} className="rounded-full bg-surface-raised px-3 py-1 text-xs">
+                {g}
+              </span>
+            ))}
+          </div>
+          {anime.synopsis && (
+            <p className="mt-5 whitespace-pre-line text-neutral-200">{anime.synopsis}</p>
+          )}
+          <Link
+            href={`/watch/${anime.id}/${nextEpisode(anime)}`}
+            className="mt-6 inline-flex items-center gap-2 rounded bg-white px-6 py-2 font-semibold text-black hover:bg-white/80"
+          >
+            ▶ {watched ? `Resume episode ${nextEpisode(anime)}` : "Play episode 1"}
+          </Link>
+        </div>
+      </div>
+
+      <h2 className="mt-12 mb-4 text-xl font-semibold">Episodes</h2>
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-8 lg:grid-cols-12">
+        {episodes.map((ep) => (
+          <Link
+            key={ep}
+            href={`/watch/${anime.id}/${ep}`}
+            className={`rounded py-3 text-center text-sm font-semibold transition-colors hover:bg-brand ${
+              ep <= watched ? "bg-surface-raised text-muted" : "bg-neutral-700"
+            }`}
+          >
+            {ep <= watched ? "✓ " : ""}
+            {ep}
+          </Link>
+        ))}
+      </div>
+
+      <AnalyzePanel animeId={anime.id} episodeCount={count} signedIn={me !== null} />
+    </div>
+  );
+}
