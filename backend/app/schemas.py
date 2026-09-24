@@ -212,8 +212,17 @@ class EpisodeAnalysisOut(BaseModel):
     segments: list[SkipSegmentOut]
 
 
+class ReferenceOut(BaseModel):
+    kind: str
+    source_episode: int
+    duration_s: float
+
+
 class AnalysisOverview(BaseModel):
     episodes: list[EpisodeAnalysisOut]
+    references: list[
+        ReferenceOut
+    ]  # saved opening/ending fingerprints new episodes are searched for
     running: list[JobOut]  # queued or running jobs
 
 

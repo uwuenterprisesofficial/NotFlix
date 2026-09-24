@@ -10,6 +10,7 @@ from app.models import (
     JobStatus,
     ListEntry,
     ListStatus,
+    ReferenceSegment,
     SkipSegment,
 )
 from app.schemas import (
@@ -23,6 +24,7 @@ from app.schemas import (
     JobOut,
     Progress,
     ProgressUpdate,
+    ReferenceOut,
     SkipSegmentOut,
 )
 from app.services import catalog, mal
@@ -190,6 +192,15 @@ async def analysis_overview(anime_id: int, db: DB):
         )
     )
     analysed = {episode for episode, compared_with in rows if compared_with}
+    references = await db.execute(
+        select(
+            ReferenceSegment.kind,
+            ReferenceSegment.source_episode,
+            ReferenceSegment.frames * ReferenceSegment.hop_seconds,
+        )
+        .where(ReferenceSegment.anime_id == anime_id)
+        .order_by(ReferenceSegment.kind.desc(), ReferenceSegment.source_episode)
+    )
     return AnalysisOverview(
         episodes=[
             EpisodeAnalysisOut(
@@ -198,6 +209,10 @@ async def analysis_overview(anime_id: int, db: DB):
                 segments=[SkipSegmentOut.model_validate(s) for s in by_episode.get(ep, [])],
             )
             for ep in sorted(analysed | set(by_episode))
+        ],
+        references=[
+            ReferenceOut(kind=kind, source_episode=episode, duration_s=round(duration, 1))
+            for kind, episode, duration in references
         ],
         running=[JobOut.model_validate(j) for j in await _running_jobs(db, anime_id)],
     )

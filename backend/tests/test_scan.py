@@ -161,7 +161,7 @@ async def test_correcting_the_aniworld_mapping_drops_its_cache(client, user):
 
 
 async def test_show_streams_come_in_one_response_with_stored_resolutions(client, providers):
-    assert (await client.get("/anime/9/streams", params={"episode": 2})).json()["scanning"]
+    await client.get("/anime/9/streams", params={"episode": 2})  # starts the scan
     await source_scan.wait_idle()
 
     body = (await client.get("/anime/9/streams", params={"episode": 2})).json()

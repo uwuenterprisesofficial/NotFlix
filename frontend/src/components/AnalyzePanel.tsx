@@ -137,9 +137,9 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
     <section className="mt-6 max-w-2xl rounded-lg bg-surface-raised p-6">
       <h2 className="text-lg font-semibold">Intro &amp; outro detection</h2>
       <p className="mt-1 text-sm text-muted">
-        Compares the audio of neighbouring episodes to find the shared opening and ending, then
-        saves the timestamps for auto-skip. Only local files and direct streams can be analysed, not
-        embedded players.
+        The first time, two episodes are compared to find the opening and ending they share, and
+        both are saved as fingerprints. Later episodes are just searched for those. The timestamps
+        drive auto-skip. Only local files and direct streams can be analysed, not embedded players.
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
         <span className="flex items-center gap-2 rounded bg-neutral-800 px-2 py-1">
@@ -211,6 +211,17 @@ function AnalysisResults({ overview }: { overview: AnalysisOverview }) {
   return (
     <div className="mt-5 border-t border-white/10 pt-4 text-sm">
       <h3 className="font-semibold">Results</h3>
+      {overview.references.length > 0 && (
+        <p className="mt-1 text-muted">
+          Saved fingerprints, searched for in new episodes:{" "}
+          {overview.references
+            .map(
+              (r) =>
+                `${r.kind === "opening" ? "Intro" : "Outro"} from episode ${r.source_episode} (${formatTime(r.duration_s)})`,
+            )
+            .join(" · ")}
+        </p>
+      )}
       {pending.length > 0 && (
         <p className="mt-1 text-muted">
           Analysing episode{pending.length > 1 ? "s" : ""} {pending.join(", ")}…

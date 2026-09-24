@@ -8,6 +8,7 @@ from app.models import (
     Anime,
     EpisodeFingerprint,
     JobStatus,
+    ReferenceSegment,
     SkipSegment,
     StreamSource,
 )
@@ -18,7 +19,7 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture(autouse=True)
 def clean_tables(database):
     with sync_session() as db:
-        for model in (AnalysisJob, SkipSegment, StreamSource, EpisodeFingerprint):
+        for model in (AnalysisJob, SkipSegment, StreamSource, EpisodeFingerprint, ReferenceSegment):
             db.execute(delete(model))
         db.commit()
 
@@ -120,20 +121,28 @@ async def test_analyze_queues_job_and_reuses_finished_episodes(client, user, mon
     assert body["job"]["episodes"] == [1, 3]
 
 
-def test_worker_saves_fingerprints_and_matches_new_episodes_against_them(database, monkeypatch):
+def test_worker_learns_the_opening_and_ending_once_then_searches_new_episodes(
+    database, monkeypatch
+):
     from app.analysis.audio import SAMPLE_RATE, AudioDecodeError
     from app.analysis.media import Media
     from app.worker.tasks import run_analysis
 
     rng = np.random.default_rng(1)
-    opening = rng.standard_normal(80 * SAMPLE_RATE).astype(np.float32)
-    ending = rng.standard_normal(80 * SAMPLE_RATE).astype(np.float32)
+    noise = lambda s: rng.standard_normal(round(s * SAMPLE_RATE)).astype(np.float32)  # noqa: E731
+    opening_a, opening_b, ending = noise(80), noise(80), noise(80)
 
-    def fake_episode(intro_at: int) -> np.ndarray:
-        pad = lambda s: rng.standard_normal(s * SAMPLE_RATE).astype(np.float32)  # noqa: E731
-        return np.concatenate([pad(intro_at), opening, pad(600), ending, pad(30)])
+    def fake_episode(intro_at: int, opening=opening_a) -> np.ndarray:
+        return np.concatenate([noise(intro_at), opening, noise(600), ending, noise(30)])
 
-    audio = {f"ep{n}": fake_episode(at) for n, at in ((1, 10), (2, 70), (3, 40), (4, 25))}
+    # Episodes 5-7 have a new opening (second cour).
+    audio = {
+        f"ep{n}": fake_episode(at, op)
+        for n, at, op in (
+            (1, 10, opening_a), (2, 70, opening_a), (3, 40, opening_a), (4, 25, opening_a),
+            (5, 30, opening_b), (6, 50, opening_b), (7, 15, opening_b),
+        )
+    }  # fmt: skip
     asked = []
 
     def fake_resolve_all(anime_id, episodes, language, fresh=False):
@@ -159,18 +168,23 @@ def test_worker_saves_fingerprints_and_matches_new_episodes_against_them(databas
             db.commit()
         run_analysis(job_id)
         with sync_session() as db:
-            assert db.get(AnalysisJob, job_id).status == JobStatus.done
+            job = db.get(AnalysisJob, job_id)
+            assert job.status == JobStatus.done, job.error
             segments = {
                 (s.episode, s.kind): s
                 for s in db.scalars(select(SkipSegment).where(SkipSegment.anime_id == 7))
             }
-            fingerprints = {
+            compared = {
                 f.episode: f.compared_with
                 for f in db.scalars(
                     select(EpisodeFingerprint).where(EpisodeFingerprint.anime_id == 7)
                 )
             }
-        return segments, fingerprints
+            references = sorted(
+                (r.kind, r.source_episode)
+                for r in db.scalars(select(ReferenceSegment).where(ReferenceSegment.anime_id == 7))
+            )
+        return segments, compared, references
 
     with sync_session() as db:
         db.add(
@@ -181,29 +195,52 @@ def test_worker_saves_fingerprints_and_matches_new_episodes_against_them(databas
         )  # fmt: skip
         db.commit()
 
-    rows, fingerprints = run("job-1", [1, 2])
+    # First time: two episodes are compared, and their opening and ending are saved.
+    rows, compared, references = run("job-1", [1, 2])
     assert asked == [([1], "de-dub", False), ([2], "de-dub", False)]
     assert rows[(1, "opening")].start_s == pytest.approx(10, abs=1.5)
     assert rows[(2, "opening")].start_s == pytest.approx(70, abs=1.5)
     assert rows[(1, "ending")].start_s == pytest.approx(690, abs=1.5)
     assert rows[(2, "ending")].source == "manual"
     assert rows[(2, "ending")].start_s == 1
-    assert fingerprints == {1: [2], 2: [1]}
+    assert compared == {1: [2], 2: [1]}
+    assert [kind for kind, _ in references] == ["ending", "opening"]
 
-    # A new episode on its own is matched against the nearest saved fingerprint: only it is
-    # downloaded.
-    rows, fingerprints = run("job-3", [3])
+    # Next episodes are searched for the saved opening/ending: nothing is compared, and only
+    # the new episode is downloaded.
+    rows, compared, _ = run("job-3", [3])
     assert asked == [([3], "de-dub", False)]
     assert rows[(3, "opening")].start_s == pytest.approx(40, abs=1.5)
+    assert rows[(3, "opening")].end_s == pytest.approx(120, abs=1.5)
     assert rows[(3, "ending")].start_s == pytest.approx(720, abs=1.5)
-    assert rows[(2, "opening")].start_s == pytest.approx(70, abs=1.5)  # partner unchanged
-    assert fingerprints == {1: [2], 2: [1, 3], 3: [2]}
+    assert compared == {1: [2], 2: [1], 3: []}
 
     # Stored links that no longer play are replaced by fresh ones once.
-    rows, fingerprints = run("job-4", [4])
+    rows, compared, _ = run("job-4", [4])
     assert asked == [([4], "de-dub", False), ([4], "de-dub", True)]
     assert rows[(4, "opening")].start_s == pytest.approx(25, abs=1.5)
-    assert fingerprints[4] == [3]
+    assert compared[4] == []
+
+    # A new opening isn't found by the saved one: the episode is compared with the nearest
+    # analysed one (no download), which only shares the ending.
+    rows, compared, references = run("job-5", [5])
+    assert asked == [([5], "de-dub", False)]
+    assert (5, "opening") not in rows
+    assert rows[(5, "ending")].start_s == pytest.approx(710, abs=1.5)
+    assert compared[5] == [4]
+    assert len(references) == 2
+
+    # The next episode shares it with episode 5: it's found, saved as a second opening...
+    rows, compared, references = run("job-6", [6])
+    assert rows[(6, "opening")].start_s == pytest.approx(50, abs=1.5)
+    assert rows[(5, "opening")].start_s == pytest.approx(30, abs=1.5)  # the partner gains it
+    assert [kind for kind, _ in references].count("opening") == 2
+
+    # ...and from then on found directly.
+    rows, compared, _ = run("job-7", [7])
+    assert asked == [([7], "de-dub", False)]
+    assert rows[(7, "opening")].start_s == pytest.approx(15, abs=1.5)
+    assert compared[7] == []
 
 
 def test_worker_marks_job_failed_when_media_missing(database):

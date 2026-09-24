@@ -221,6 +221,25 @@ class EpisodeFingerprint(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class ReferenceSegment(Base):
+    """A show's opening or ending as a fingerprint, cut from an episode where comparing two
+    episodes found it. Later episodes are searched for it directly. A show can have several
+    per kind (e.g. a new opening in the second cour)."""
+
+    __tablename__ = "reference_segments"
+    __table_args__ = (UniqueConstraint("anime_id", "kind", "source_episode"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anime_id: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(String(10))
+    source_episode: Mapped[int] = mapped_column(Integer)
+    hashes: Mapped[bytes] = mapped_column(LargeBinary)
+    valid: Mapped[bytes] = mapped_column(LargeBinary)
+    frames: Mapped[int] = mapped_column(Integer)
+    hop_seconds: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AnalysisJob(Base):
     __tablename__ = "analysis_jobs"
 

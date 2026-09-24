@@ -100,7 +100,17 @@ export type AnalysisJob = {
 
 export type EpisodeAnalysis = { episode: number; analysed: boolean; segments: SkipSegment[] };
 
-export type AnalysisOverview = { episodes: EpisodeAnalysis[]; running: AnalysisJob[] };
+export type ReferenceFingerprint = {
+  kind: "opening" | "ending";
+  source_episode: number;
+  duration_s: number;
+};
+
+export type AnalysisOverview = {
+  episodes: EpisodeAnalysis[];
+  references: ReferenceFingerprint[];
+  running: AnalysisJob[];
+};
 
 export type ProviderScan = {
   provider: string;
