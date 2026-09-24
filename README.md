@@ -5,7 +5,7 @@ A Netflix-style front end for anime, backed by your MyAnimeList account:
 - **Browse**: hero banner plus rows for Continue Watching, Recommended for You, My List, Watch Again, and MAL's Top Airing / Most Popular / Coming Soon.
 - **Sync with MyAnimeList**: sign in with MAL OAuth. "Sync MAL" imports your list and watch progress. Finishing an episode writes your progress back to MAL.
 - **Recommendations**: a genre taste profile built from your scores relative to your own average, combined with MAL community recommendations of your best-rated shows.
-- **Player**: plays a direct stream (mp4/HLS) or embeds a third-party player in a sandboxed `<iframe>`.
+- **Player**: plays a direct stream (mp4/HLS) or embeds a third-party player in an `<iframe>`. The iframe isn't sandboxed because hosters refuse to play in one, so use your browser's popup/ad blocker against their ads.
 - **Intro/outro detection**: compares audio fingerprints of two or more episodes to find the shared opening and ending. Results are stored in Postgres, so each episode is only analysed once, and they drive the "Skip Intro" / auto-skip controls.
 
 ## Stack

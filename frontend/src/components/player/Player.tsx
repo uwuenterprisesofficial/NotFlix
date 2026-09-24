@@ -100,11 +100,10 @@ export function Player({
             key={stream.url}
             src={stream.url}
             title={`Episode ${episode}`}
-            // No popups or top-level redirects from third-party embed pages.
-            sandbox="allow-scripts allow-same-origin allow-presentation"
+            // No sandbox: hosters (VOE, Doodstream, ...) detect it and refuse to play. Browsers
+            // already block top-level redirects from cross-origin frames without a user click.
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
             allowFullScreen
-            referrerPolicy="no-referrer"
             className="h-full w-full border-0"
           />
         )}
