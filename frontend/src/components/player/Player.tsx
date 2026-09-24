@@ -4,16 +4,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { formatTime } from "@/lib/format";
-import type { SkipSegment, Source } from "@/lib/types";
+import { LANGUAGE_LABELS } from "@/lib/languages";
+import type { SkipSegment, Stream } from "@/lib/types";
 import { DirectVideo } from "./DirectVideo";
 import { useAutoSkip } from "./useAutoSkip";
+import { useSources } from "./useSources";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function Player({
   animeId,
   episode,
-  sources,
   segments,
   hasNext,
   signedIn,
@@ -21,20 +22,27 @@ export function Player({
 }: {
   animeId: number;
   episode: number;
-  sources: Source[];
   segments: SkipSegment[];
   hasNext: boolean;
   signedIn: boolean;
   watched: number;
 }) {
   const router = useRouter();
-  const [sourceIndex, setSourceIndex] = useState(0);
+  const sources = useSources(animeId, episode);
+  const [streamChoice, setStreamChoice] = useState<Record<string, number>>({});
   const [autoSkip, setAutoSkip] = useAutoSkip();
   const [saveState, setSaveState] = useState<SaveState>(episode <= watched ? "saved" : "idle");
   const saving = useRef(false);
   const autoMarked = useRef(false);
-  const source = sources[sourceIndex];
   const nextHref = `/watch/${animeId}/${episode + 1}`;
+
+  const streams = sources.resolved?.streams ?? [];
+  const streamIndex = sources.active ? (streamChoice[sources.active.id] ?? 0) : 0;
+  const stream: Stream | undefined = streams[streamIndex] ?? streams[0];
+  // Timestamps from the source itself match its exact cut; analysed ones are the fallback.
+  const skipSegments = sources.resolved?.skip_segments.length
+    ? sources.resolved.skip_segments
+    : segments;
 
   async function markWatched() {
     if (!signedIn || saving.current || saveState === "saved") return;
@@ -58,21 +66,21 @@ export function Player({
   return (
     <div>
       <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
-        {source?.kind === "direct" && (
+        {stream?.kind === "direct" && (
           <DirectVideo
-            key={source.url}
-            url={source.url}
-            segments={segments}
+            key={stream.url}
+            stream={stream}
+            segments={skipSegments}
             autoSkip={autoSkip}
             nextEpisodeLabel={hasNext ? "Next Episode ›" : null}
             onSkipEnding={hasNext ? () => router.push(nextHref) : null}
             onNearEnd={autoMarkWatched}
           />
         )}
-        {source?.kind === "embed" && (
+        {stream?.kind === "embed" && (
           <iframe
-            key={source.url}
-            src={source.url}
+            key={stream.url}
+            src={stream.url}
             title={`Episode ${episode}`}
             // No popups or top-level redirects from third-party embed pages.
             sandbox="allow-scripts allow-same-origin allow-presentation"
@@ -82,31 +90,53 @@ export function Player({
             className="h-full w-full border-0"
           />
         )}
-        {!source && (
-          <div className="grid h-full place-items-center p-6 text-center text-muted">
-            <div>
-              <p className="text-lg font-semibold text-white">No source for this episode yet</p>
-              <p className="mt-2 text-sm">
-                Add a row to the <code>stream_sources</code> table or implement a provider in{" "}
-                <code>backend/app/providers</code>.
-              </p>
-            </div>
-          </div>
-        )}
+        {!stream && <PlayerStatus sources={sources} />}
       </div>
 
+      {sources.languages.length > 0 && (
+        <div className="mt-4 space-y-3 text-sm">
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Language">
+            {sources.languages.map((lang) => (
+              <button
+                key={lang}
+                role="tab"
+                aria-selected={lang === sources.language}
+                onClick={() => sources.setLanguage(lang)}
+                className={`rounded-full px-4 py-1 font-semibold ${lang === sources.language ? "bg-white text-black" : "bg-surface-raised hover:bg-neutral-700"}`}
+              >
+                {LANGUAGE_LABELS[lang]}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2" aria-label="Source">
+            {sources.candidates.map((o) => (
+              <button
+                key={o.id}
+                onClick={() => sources.choose(o.id)}
+                title={sources.failed(o) ? "This source failed" : undefined}
+                className={`rounded px-3 py-1 ${o.id === sources.active?.id ? "bg-brand" : "bg-surface-raised hover:bg-neutral-700"} ${sources.failed(o) ? "line-through opacity-50" : ""}`}
+              >
+                {o.label}
+              </button>
+            ))}
+            {streams.length > 1 &&
+              streams.map((s, i) => (
+                <button
+                  key={s.url}
+                  onClick={() =>
+                    sources.active && setStreamChoice((c) => ({ ...c, [sources.active!.id]: i }))
+                  }
+                  className={`rounded border px-3 py-1 ${s === stream ? "border-white" : "border-white/20 text-muted hover:text-white"}`}
+                >
+                  {s.label}
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-        {sources.length > 1 &&
-          sources.map((s, i) => (
-            <button
-              key={s.url}
-              onClick={() => setSourceIndex(i)}
-              className={`rounded px-3 py-1 ${i === sourceIndex ? "bg-white text-black" : "bg-surface-raised hover:bg-neutral-700"}`}
-            >
-              {s.provider}
-            </button>
-          ))}
-        {source?.kind === "direct" && (
+        {stream?.kind === "direct" && (
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -142,7 +172,36 @@ export function Player({
         </div>
       </div>
 
-      <SegmentInfo segments={segments} embedded={source?.kind === "embed"} />
+      <SegmentInfo segments={skipSegments} embedded={stream?.kind === "embed"} />
+    </div>
+  );
+}
+
+function PlayerStatus({ sources }: { sources: ReturnType<typeof useSources> }) {
+  let title = "Loading sources…";
+  let detail: string | null = null;
+  if (sources.loadError) {
+    title = "Couldn’t load sources";
+    detail = "Is the NotFlix API running?";
+  } else if (!sources.loading && sources.languages.length === 0) {
+    title = "No source for this episode yet";
+    detail =
+      "No provider has this episode. For German sources, check the AniWorld mapping on the show’s page.";
+  } else if (sources.resolving) {
+    title = `Loading ${sources.active?.label}…`;
+  } else if (sources.error) {
+    title = `${sources.active?.label ?? "Source"} failed`;
+    detail = `${sources.error}. Pick another source or language below.`;
+  } else if (!sources.loading && !sources.active) {
+    title = `No working ${LANGUAGE_LABELS[sources.language]} source`;
+    detail = "Try another language below.";
+  }
+  return (
+    <div className="grid h-full place-items-center p-6 text-center text-muted">
+      <div>
+        <p className="text-lg font-semibold text-white">{title}</p>
+        {detail && <p className="mt-2 text-sm">{detail}</p>}
+      </div>
     </div>
   );
 }

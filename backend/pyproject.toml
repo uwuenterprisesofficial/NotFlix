@@ -5,6 +5,7 @@ description = "NotFlix API: MyAnimeList sync, recommendations and intro/outro de
 requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.20.0",
+    "beautifulsoup4>=4.15.0",
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
     "itsdangerous>=2.2.0",

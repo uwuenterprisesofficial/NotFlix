@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AnalyzePanel } from "@/components/AnalyzePanel";
+import { AniWorldMapping } from "@/components/AniWorldMapping";
 import { apiOrNull } from "@/lib/api";
 import { displayTitle, nextEpisode } from "@/lib/format";
 import type { AnimeDetail, Me } from "@/lib/types";
@@ -86,6 +87,7 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
         ))}
       </div>
 
+      {me && <AniWorldMapping animeId={anime.id} />}
       <AnalyzePanel animeId={anime.id} episodeCount={count} signedIn={me !== null} />
     </div>
   );

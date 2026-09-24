@@ -9,10 +9,16 @@ class AudioDecodeError(RuntimeError):
     pass
 
 
-def load_audio(source: str, sample_rate: int = SAMPLE_RATE) -> np.ndarray:
+def load_audio(
+    source: str, headers: dict[str, str] | None = None, sample_rate: int = SAMPLE_RATE
+) -> np.ndarray:
     """Decode any ffmpeg-readable file or URL into mono float32 PCM."""
+    header_args = (
+        ["-headers", "".join(f"{k}: {v}\r\n" for k, v in headers.items())] if headers else []
+    )
     cmd = [
         "ffmpeg", "-nostdin", "-v", "error",
+        *header_args,
         "-i", source,
         "-vn", "-ac", "1", "-ar", str(sample_rate),
         "-f", "f32le", "-",

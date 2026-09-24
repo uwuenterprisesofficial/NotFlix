@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -113,6 +114,25 @@ class StreamSource(Base):
     provider: Mapped[str] = mapped_column(String(50))
     kind: Mapped[str] = mapped_column(String(10))  # "embed" | "direct"
     url: Mapped[str] = mapped_column(Text)
+    language: Mapped[str | None] = mapped_column(String(10))  # e.g. "de-dub", "en-sub"
+
+
+class ProviderMapping(Base):
+    """How a MAL anime is identified on another service (AniList id, AniWorld slug + season)."""
+
+    __tablename__ = "provider_mappings"
+    __table_args__ = (UniqueConstraint("anime_id", "provider"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anime_id: Mapped[int] = mapped_column(Integer, index=True)
+    provider: Mapped[str] = mapped_column(String(20))
+    external_id: Mapped[str | None] = mapped_column(Text)  # None = looked up, not found
+    season: Mapped[int | None] = mapped_column(Integer)
+    episode_offset: Mapped[int] = mapped_column(Integer, default=0)
+    manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class SkipSegment(Base):

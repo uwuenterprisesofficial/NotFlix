@@ -2,18 +2,17 @@
 
 import type Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
-import type { SkipSegment } from "@/lib/types";
+import type { SkipSegment, Stream } from "@/lib/types";
 
 const LABELS: Record<SkipSegment["kind"], string> = {
   opening: "Skip Intro",
   ending: "Skip Outro",
 };
 
-function useStream(ref: React.RefObject<HTMLVideoElement | null>, url: string) {
+function useStream(ref: React.RefObject<HTMLVideoElement | null>, url: string, isHls: boolean) {
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
-    const isHls = /\.m3u8(\?|$)/i.test(url);
     if (!isHls || video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = url;
       return;
@@ -30,19 +29,19 @@ function useStream(ref: React.RefObject<HTMLVideoElement | null>, url: string) {
       cancelled = true;
       hls?.destroy();
     };
-  }, [ref, url]);
+  }, [ref, url, isHls]);
 }
 
 /** A <video> we fully control, so intro/outro skipping works (unlike cross-origin iframes). */
 export function DirectVideo({
-  url,
+  stream,
   segments,
   autoSkip,
   nextEpisodeLabel,
   onSkipEnding,
   onNearEnd,
 }: {
-  url: string;
+  stream: Stream;
   segments: SkipSegment[];
   autoSkip: boolean;
   nextEpisodeLabel: string | null;
@@ -52,7 +51,7 @@ export function DirectVideo({
   const ref = useRef<HTMLVideoElement>(null);
   const autoSkipped = useRef(new Set<SkipSegment["kind"]>());
   const [active, setActive] = useState<SkipSegment | null>(null);
-  useStream(ref, url);
+  useStream(ref, stream.url, stream.format === "hls");
 
   function skip(segment: SkipSegment) {
     if (segment.kind === "ending" && onSkipEnding) onSkipEnding();
@@ -92,7 +91,18 @@ export function DirectVideo({
         onTimeUpdate={onTimeUpdate}
         onEnded={() => onSkipEnding?.()}
         className="h-full w-full bg-black"
-      />
+      >
+        {stream.subtitles.map((sub, i) => (
+          <track
+            key={sub.url}
+            kind="subtitles"
+            src={sub.url}
+            label={sub.label}
+            srcLang={sub.lang ?? undefined}
+            default={i === 0}
+          />
+        ))}
+      </video>
       {active && (
         <button
           onClick={() => skip(active)}

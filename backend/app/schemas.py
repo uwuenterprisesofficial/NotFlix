@@ -58,12 +58,6 @@ class SyncResult(BaseModel):
     recommendations: int
 
 
-class SourceOut(BaseModel):
-    provider: str
-    kind: Literal["embed", "direct"]
-    url: str
-
-
 class SkipSegmentOut(ORM):
     kind: str
     start_s: float
@@ -75,8 +69,48 @@ class SkipSegmentOut(ORM):
 class EpisodeOut(BaseModel):
     anime_id: int
     episode: int
-    sources: list[SourceOut]
     skip_segments: list[SkipSegmentOut]
+
+
+class SubtitleOut(BaseModel):
+    url: str
+    label: str
+    lang: str | None
+
+
+class StreamOut(BaseModel):
+    kind: Literal["embed", "direct"]
+    url: str
+    label: str
+    format: Literal["hls", "file"] | None
+    subtitles: list[SubtitleOut]
+
+
+class ResolvedOut(BaseModel):
+    streams: list[StreamOut]
+    skip_segments: list[SkipSegmentOut]
+
+
+class SourceOptionOut(BaseModel):
+    id: str
+    provider: str
+    label: str
+    language: str
+    resolved: ResolvedOut | None
+
+
+class MappingOut(ORM):
+    provider: str
+    external_id: str | None
+    season: int | None
+    episode_offset: int
+    manual: bool
+
+
+class AniWorldMappingIn(BaseModel):
+    slug: str = Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$", max_length=200)
+    season: int = Field(ge=0, le=100)
+    episode_offset: int = Field(default=0, ge=-2000, le=2000)
 
 
 class ProgressUpdate(BaseModel):

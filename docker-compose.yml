@@ -9,6 +9,10 @@ x-backend: &backend
     MAL_REDIRECT_URI: ${MAL_REDIRECT_URI:-http://localhost:3000/api/auth/callback}
     SECRET_KEY: ${SECRET_KEY:-change-me}
     FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+    # Stream providers; an empty URL disables one. Anivexa must be run separately.
+    ANIVEXA_URL: ${ANIVEXA_URL:-}
+    ANIWORLD_URL: ${ANIWORLD_URL-https://aniworld.to}
+    ANIWORLD_SERIES_PATH: ${ANIWORLD_SERIES_PATH:-anime/{slug}}
     DATABASE_URL: postgresql+psycopg://notflix:notflix@db:5432/notflix
     REDIS_URL: redis://redis:6379/0
     MEDIA_DIR: /media

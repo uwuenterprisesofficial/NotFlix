@@ -6,6 +6,9 @@ os.environ.setdefault(
     "DATABASE_URL", "postgresql+psycopg://notflix:notflix@localhost:5432/notflix_test"
 )
 os.environ["MAL_CLIENT_ID"] = ""
+# Tests never reach external streaming sites; provider tests inject their own HTTP clients.
+os.environ["ANIWORLD_URL"] = ""
+os.environ["ANIVEXA_URL"] = ""
 
 
 @pytest.fixture
@@ -45,3 +48,29 @@ async def client(database):
     app.dependency_overrides.clear()
     # Pooled async connections are bound to this test's event loop.
     await async_engine.dispose()
+
+
+@pytest.fixture
+def user(database):
+    from datetime import UTC, datetime
+
+    from sqlalchemy import delete
+
+    from app.api.deps import current_user_optional
+    from app.db.session import sync_session
+    from app.main import app
+    from app.models import User
+
+    with sync_session() as db:
+        db.execute(delete(User))
+        u = User(
+            mal_user_id=1,
+            name="tester",
+            access_token="a",
+            refresh_token="r",
+            token_expires_at=datetime(2100, 1, 1, tzinfo=UTC),
+        )
+        db.add(u)
+        db.commit()
+        app.dependency_overrides[current_user_optional] = lambda: u
+        return u

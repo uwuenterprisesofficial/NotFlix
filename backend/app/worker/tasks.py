@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.analysis.audio import load_audio
 from app.analysis.detect import detect_segments
 from app.analysis.fingerprint import fingerprint
-from app.analysis.media import resolve_media
+from app.analysis.media import resolve_all
 from app.db.session import sync_session
 from app.models import AnalysisJob, JobStatus, SkipSegment
 
@@ -24,11 +24,9 @@ def run_analysis(job_id: str) -> None:
 
         try:
             fingerprints = {}
-            for episode in job.episodes:
+            for episode, media in resolve_all(job.anime_id, job.episodes).items():
                 log.info("Fingerprinting anime %s episode %s", job.anime_id, episode)
-                fingerprints[episode] = fingerprint(
-                    load_audio(resolve_media(db, job.anime_id, episode))
-                )
+                fingerprints[episode] = fingerprint(load_audio(media.source, media.headers))
 
             detected = detect_segments(fingerprints)
             existing = {

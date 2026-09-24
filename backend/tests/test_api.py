@@ -1,32 +1,11 @@
-from datetime import UTC, datetime
-
 import numpy as np
 import pytest
 from sqlalchemy import delete, select
 
-from app.api.deps import current_user_optional
 from app.db.session import sync_session
-from app.main import app
-from app.models import AnalysisJob, JobStatus, SkipSegment, StreamSource, User
+from app.models import AnalysisJob, JobStatus, SkipSegment, StreamSource
 
 pytestmark = pytest.mark.anyio
-
-
-@pytest.fixture
-def user(database):
-    with sync_session() as db:
-        db.execute(delete(User))
-        u = User(
-            mal_user_id=1,
-            name="tester",
-            access_token="a",
-            refresh_token="r",
-            token_expires_at=datetime(2100, 1, 1, tzinfo=UTC),
-        )
-        db.add(u)
-        db.commit()
-        app.dependency_overrides[current_user_optional] = lambda: u
-        return u
 
 
 @pytest.fixture(autouse=True)
@@ -53,9 +32,8 @@ async def test_login_requires_mal_client_id(client):
     assert resp.status_code == 503
 
 
-async def test_episode_returns_sources_and_skip_segments(client):
+async def test_episode_returns_skip_segments(client):
     with sync_session() as db:
-        db.add(StreamSource(anime_id=5, episode=1, provider="p", kind="embed", url="https://x/e/1"))
         db.add(
             SkipSegment(
                 anime_id=5, episode=1, kind="opening", start_s=30, end_s=120, confidence=0.9
@@ -64,9 +42,36 @@ async def test_episode_returns_sources_and_skip_segments(client):
         db.commit()
 
     body = (await client.get("/anime/5/episodes/1")).json()
-    assert body["sources"] == [{"provider": "p", "kind": "embed", "url": "https://x/e/1"}]
     assert body["skip_segments"][0]["kind"] == "opening"
     assert body["skip_segments"][0]["end_s"] == 120
+
+
+async def test_sources_include_stored_stream_sources(client):
+    with sync_session() as db:
+        db.add(
+            StreamSource(
+                anime_id=5,
+                episode=1,
+                provider="p",
+                kind="embed",
+                url="https://x/e/1",
+                language="de-sub",
+            )
+        )
+        db.commit()
+
+    [option] = (await client.get("/anime/5/episodes/1/sources")).json()
+    assert option["provider"] == "database"
+    assert option["language"] == "de-sub"
+    assert option["resolved"]["streams"] == [
+        {"kind": "embed", "url": "https://x/e/1", "label": "p", "format": None, "subtitles": []}
+    ]
+    resolved = (
+        await client.get("/anime/5/episodes/1/resolve", params={"option": option["id"]})
+    ).json()
+    assert resolved["streams"][0]["url"] == "https://x/e/1"
+    missing = await client.get("/anime/5/episodes/2/resolve", params={"option": option["id"]})
+    assert missing.status_code == 404
 
 
 async def test_analyze_requires_sign_in(client):
@@ -107,6 +112,7 @@ async def test_analyze_queues_job_and_reuses_finished_episodes(client, user, mon
 
 def test_worker_stores_detected_segments(database, monkeypatch):
     from app.analysis.audio import SAMPLE_RATE
+    from app.analysis.media import Media
     from app.worker.tasks import run_analysis
 
     rng = np.random.default_rng(1)
@@ -118,8 +124,11 @@ def test_worker_stores_detected_segments(database, monkeypatch):
         return np.concatenate([pad(intro_at), opening, pad(600), ending, pad(30)])
 
     audio = {"ep1": fake_episode(10), "ep2": fake_episode(70)}
-    monkeypatch.setattr("app.worker.tasks.resolve_media", lambda db, a, ep: f"ep{ep}")
-    monkeypatch.setattr("app.worker.tasks.load_audio", lambda source: audio[source])
+    monkeypatch.setattr(
+        "app.worker.tasks.resolve_all",
+        lambda anime_id, episodes: {ep: Media(f"ep{ep}") for ep in episodes},
+    )
+    monkeypatch.setattr("app.worker.tasks.load_audio", lambda source, headers: audio[source])
 
     with sync_session() as db:
         db.add(AnalysisJob(id="job-1", anime_id=7, episodes=[1, 2]))

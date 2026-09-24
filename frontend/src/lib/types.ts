@@ -39,21 +39,48 @@ export type Me = {
   last_synced_at: string | null;
 };
 
-export type Source = { provider: string; kind: "embed" | "direct"; url: string };
-
 export type SkipSegment = {
   kind: "opening" | "ending";
   start_s: number;
   end_s: number;
   confidence: number;
-  source: string;
+  source: "analysis" | "manual" | "provider";
 };
 
 export type Episode = {
   anime_id: number;
   episode: number;
-  sources: Source[];
   skip_segments: SkipSegment[];
+};
+
+export type Language = "de-dub" | "de-sub" | "en-dub" | "en-sub" | "unknown";
+
+export type Subtitle = { url: string; label: string; lang: string | null };
+
+export type Stream = {
+  kind: "embed" | "direct";
+  url: string;
+  label: string;
+  format: "hls" | "file" | null;
+  subtitles: Subtitle[];
+};
+
+export type Resolved = { streams: Stream[]; skip_segments: SkipSegment[] };
+
+export type SourceOption = {
+  id: string;
+  provider: string;
+  label: string;
+  language: Language;
+  resolved: Resolved | null;
+};
+
+export type ProviderMapping = {
+  provider: string;
+  external_id: string | null;
+  season: number | null;
+  episode_offset: number;
+  manual: boolean;
 };
 
 export type AnalysisJob = {

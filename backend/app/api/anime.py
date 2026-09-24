@@ -5,7 +5,6 @@ from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser, OptionalUser
 from app.models import AnalysisJob, JobStatus, ListEntry, ListStatus, SkipSegment
-from app.providers.base import find_sources
 from app.schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
@@ -15,7 +14,6 @@ from app.schemas import (
     Progress,
     ProgressUpdate,
     SkipSegmentOut,
-    SourceOut,
 )
 from app.services import catalog, mal
 from app.services.sync import access_token
@@ -44,11 +42,9 @@ async def episode_detail(anime_id: int, episode: int, db: DB):
         .where(SkipSegment.anime_id == anime_id, SkipSegment.episode == episode)
         .order_by(SkipSegment.start_s)
     )
-    sources = await find_sources(db, anime_id, episode)
     return EpisodeOut(
         anime_id=anime_id,
         episode=episode,
-        sources=[SourceOut(provider=s.provider, kind=s.kind, url=s.url) for s in sources],
         skip_segments=[SkipSegmentOut.model_validate(s) for s in segments],
     )
 

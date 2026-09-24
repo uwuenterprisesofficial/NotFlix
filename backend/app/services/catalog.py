@@ -1,11 +1,10 @@
-import json
 from datetime import UTC, datetime, timedelta
 from typing import TypeVar
 
-from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import get_json, set_json
 from app.core.config import get_settings
 from app.models import Anime, ListEntry
 from app.schemas import AnimeCard, AnimeDetail, Progress
@@ -14,15 +13,6 @@ from app.services.sync import upsert_anime
 
 RANKING_TTL_SECONDS = 3600
 ANIME_STALE_AFTER = timedelta(days=7)
-
-_redis: Redis | None = None
-
-
-def redis() -> Redis:
-    global _redis
-    if _redis is None:
-        _redis = Redis.from_url(get_settings().redis_url)
-    return _redis
 
 
 def mal_configured() -> bool:
@@ -60,16 +50,16 @@ async def anime_by_ids(db: AsyncSession, ids: list[int]) -> list[Anime]:
 async def ranking(db: AsyncSession, ranking_type: str, limit: int = 20) -> list[Anime]:
     """MAL ranking lists (airing, bypopularity, upcoming, ...), cached in Redis for an hour."""
     key = f"mal:ranking:{ranking_type}:{limit}"
-    cached = await redis().get(key)
+    cached = await get_json(key)
     if cached is not None:
-        return await anime_by_ids(db, json.loads(cached))
+        return await anime_by_ids(db, cached)
 
     async with mal.MalClient() as client:
         nodes = await client.ranking(ranking_type, limit)
     await upsert_anime(db, nodes)
     await db.commit()
     ids = [n["id"] for n in nodes]
-    await redis().set(key, json.dumps(ids), ex=RANKING_TTL_SECONDS)
+    await set_json(key, ids, RANKING_TTL_SECONDS)
     return await anime_by_ids(db, ids)
 
 

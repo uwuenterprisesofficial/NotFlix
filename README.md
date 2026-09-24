@@ -51,22 +51,38 @@ npm run dev                                 # UI on :3000
 
 ## Streams
 
-Sources come from providers in `backend/app/providers/`. The only built-in provider reads the `stream_sources` table:
+The player lists every source it finds for an episode, grouped by language: German Dub, German Sub, English Sub, English Dub. The language you pick is remembered per browser, and German Dub is the default. If a source fails, the next one in the same language is tried automatically.
+
+Sources come from providers in `backend/app/providers/`:
+
+| Provider | Languages | Playback | Setting |
+|----------|-----------|----------|---------|
+| `aniworld` | German dub/sub, some English sub | iframe embed (VOE, Doodstream, …) | `ANIWORLD_URL`, on by default |
+| `anivexa` | English sub/dub | direct HLS/MP4 through the NotFlix proxy, embed fallback | `ANIVEXA_URL`, off by default |
+| `database` | any | whatever you store | always on |
+
+> **Legal note.** AniWorld and the sites Anivexa aggregates are not licensed distributors. In the EU, watching streams you know come from an obviously illegal source is itself infringement. Enabling these providers is your decision and your responsibility.
+
+**AniWorld** is scraped directly. A MAL entry is matched to an AniWorld series by trying slugs made from its titles, and the season number is taken from AniList's prequel chain. If that match is wrong, correct the slug, season or episode offset on the show's page (signed in) under **German sources (AniWorld)**. AniWorld changes domains and layouts: set `ANIWORLD_URL` to a mirror, or `ANIWORLD_SERIES_PATH=anime/stream/{slug}` if series pages 404.
+
+**Anivexa** (<https://github.com/walterwhite-69/Anivexa-API>) is a separate Node.js service that NotFlix does not ship or start. Run it yourself and set `ANIVEXA_URL` to its address. Shows are looked up by AniList id, which NotFlix maps from the MAL id. MKissa (captcha), ReAnime (obfuscated playlists) and AnimeOnsen (DASH) are left out; change the list with `ANIVEXA_PROVIDERS`. Streaming sites block most datacenter IPs, so it works best on a home server.
+
+**Your own sources** go in the `stream_sources` table:
 
 ```sql
-INSERT INTO stream_sources (anime_id, episode, provider, kind, url)
-VALUES (21, 1, 'my-site', 'embed', 'https://example.com/embed/one-piece-1');
+INSERT INTO stream_sources (anime_id, episode, provider, kind, url, language)
+VALUES (21, 1, 'my-site', 'embed', 'https://example.com/embed/one-piece-1', 'de-sub');
 ```
 
-`anime_id` is the MyAnimeList id. `kind` is `embed` (shown in an iframe) or `direct` (an mp4/m3u8 URL played by NotFlix itself). To add a site, implement the `StreamProvider` protocol and append it to `PROVIDERS`.
+`anime_id` is the MyAnimeList id. `kind` is `embed` (shown in an iframe) or `direct` (an mp4/m3u8 URL played by NotFlix itself).
 
-Skipping only works for **direct** sources. A cross-origin iframe can't be seeked or read from the outside, so for embeds the detected timestamps are only displayed.
+**Direct vs. embed.** Direct streams are played by NotFlix's own player, so Skip Intro, auto-skip, subtitles and the analyzer all work. HLS and header-protected streams are relayed through `/api/proxy` using signed URLs, so the proxy only fetches URLs the backend issued. An embedded third-party player is cross-origin and can't be controlled from outside, so for embeds the intro/outro times are only displayed. When a source reports its own intro/outro times (some Anivexa providers do), those are used for that stream instead of the analysed ones.
 
 ## Intro/outro detection
 
 On a show's page, pick an episode range and press **Analyse**. The worker then:
 
-1. Resolves each episode's media: `MEDIA_DIR/<anime_id>/<episode>.{mkv,mp4,…}` (`./media` in docker compose), otherwise a `direct` stream source.
+1. Resolves each episode's media: `MEDIA_DIR/<anime_id>/<episode>.{mkv,mp4,…}` (`./media` in docker compose), otherwise the first direct stream any provider offers.
 2. Decodes the audio with ffmpeg to mono 5.5 kHz and computes a 32-bit fingerprint every 100 ms (Haitsma–Kalker: signs of band-energy differences in 300–2000 Hz).
 3. For each pair of neighbouring episodes, votes on time offsets using exact hash matches. At the best offsets it looks for long runs where the bit error rate stays low. A stretch of 20–200 s shared by both episodes is an opening if it sits in the first half, otherwise an ending.
 4. Saves the result to `skip_segments`. Rows with `source = 'manual'` are never overwritten. Episodes that were already analysed are skipped next time, and a single new episode is compared against one that was already analysed.

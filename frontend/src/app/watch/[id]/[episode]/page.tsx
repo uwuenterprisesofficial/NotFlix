@@ -29,7 +29,6 @@ export default async function WatchPage({ params }: PageProps<"/watch/[id]/[epis
         key={episode}
         animeId={anime.id}
         episode={episode}
-        sources={data.sources}
         segments={data.skip_segments}
         hasNext={!anime.num_episodes || episode < anime.num_episodes}
         signedIn={me !== null}

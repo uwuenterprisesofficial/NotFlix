@@ -1,0 +1,58 @@
+from typing import cast
+
+from sqlalchemy import select
+
+from app.db.session import AsyncSessionLocal
+from app.models import StreamSource
+from app.providers.base import (
+    AnimeInfo,
+    Language,
+    ProviderError,
+    Resolved,
+    SourceOption,
+    Stream,
+)
+
+LANGUAGES = {"de-dub", "de-sub", "en-dub", "en-sub"}
+
+
+def _stream(row: StreamSource) -> Stream:
+    if row.kind == "embed":
+        return Stream(kind="embed", url=row.url, label=row.provider)
+    is_hls = ".m3u8" in row.url.split("?")[0].lower()
+    return Stream(
+        kind="direct", url=row.url, label=row.provider, format="hls" if is_hls else "file"
+    )
+
+
+class DatabaseProvider:
+    """Sources stored in the stream_sources table (added by hand or by an importer)."""
+
+    name = "database"
+
+    async def options(self, anime: AnimeInfo, episode: int) -> list[SourceOption]:
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(
+                select(StreamSource)
+                .where(StreamSource.anime_id == anime.id, StreamSource.episode == episode)
+                .order_by(StreamSource.id)
+            )
+            return [
+                SourceOption(
+                    id=f"{self.name}:{row.id}",
+                    provider=self.name,
+                    label=row.provider,
+                    language=cast(Language, row.language)
+                    if row.language in LANGUAGES
+                    else "unknown",
+                    resolved=Resolved(streams=[_stream(row)]),
+                )
+                for row in rows
+            ]
+
+    async def resolve(self, anime: AnimeInfo, episode: int, key: str) -> Resolved:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(StreamSource, int(key)) if key.isdigit() else None
+        if row is None or row.anime_id != anime.id or row.episode != episode:
+            raise ProviderError("Source not found")
+        return Resolved(streams=[_stream(row)])

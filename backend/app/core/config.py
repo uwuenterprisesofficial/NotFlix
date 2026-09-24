@@ -21,6 +21,21 @@ class Settings(BaseSettings):
     # Local directory the analyzer reads episode files from: <media_dir>/<anime_id>/<episode>.<ext>
     media_dir: str = "/media"
 
+    # Where the browser reaches this API (the frontend proxies /api/* here); used for proxy URLs.
+    public_api_prefix: str = "/api"
+
+    # Self-hosted Anivexa API (English sources). Empty disables the provider.
+    anivexa_url: str = ""
+    # mkissa (captcha), reanime (obfuscated playlists) and animeonsen (DASH) are left out.
+    anivexa_providers: str = (
+        "anizone,anikoto,aniwaves,animegg,anineko,anidbapp,anibd,kaa,animedunya"
+    )
+
+    # AniWorld (German dub/sub). Empty disables the provider. The series path changes with site
+    # redesigns, so it is configurable.
+    aniworld_url: str = "https://aniworld.to"
+    aniworld_series_path: str = "anime/{slug}"
+
 
 @lru_cache
 def get_settings() -> Settings:
