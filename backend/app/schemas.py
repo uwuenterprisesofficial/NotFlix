@@ -14,6 +14,25 @@ class Progress(BaseModel):
     score: int
 
 
+class ReasonOut(BaseModel):
+    name: str
+    points: float  # how much this feature moves the predicted score
+
+
+class PredictionOut(BaseModel):
+    """The user's predicted score for a show they haven't scored (see services.taste)."""
+
+    score: float
+    tier: Literal["must_watch", "recommended", "maybe", "skip", "avoid"]
+    reasons: list[ReasonOut] = []
+
+
+class TagOut(BaseModel):
+    id: int
+    name: str
+    category: Literal["genre", "explicit", "demographic", "theme"]
+
+
 class AnimeCard(ORM):
     id: int
     title: str
@@ -25,12 +44,117 @@ class AnimeCard(ORM):
     genres: list[str] = []
     progress: Progress | None = None
     reason: str | None = None
+    prediction: PredictionOut | None = None
 
 
 class AnimeDetail(AnimeCard):
     synopsis: str | None = None
     status: str | None = None
     start_season: str | None = None
+    tags: list[TagOut] = []
+    studios: list[str] = []
+    source: str | None = None
+    rank: int | None = None
+    num_list_users: int | None = None
+
+
+class SearchResponse(BaseModel):
+    items: list[AnimeCard]
+    page: int
+    has_next: bool
+    source: Literal["mal", "jikan", "local"]  # where the results came from
+
+
+class GenreOut(TagOut):
+    count: int | None = None  # shows with it (from Jikan), when known
+
+
+class ShowRefOut(BaseModel):
+    id: int
+    title: str
+    title_en: str | None
+    picture_url: str | None
+    mean: float | None
+    score: int | None  # the user's score
+    prediction: PredictionOut | None
+
+
+class StatusCountOut(BaseModel):
+    status: str
+    count: int
+
+
+class OverviewOut(BaseModel):
+    total: int
+    by_status: list[StatusCountOut]
+    episodes: int
+    days: float | None
+    scored: int
+    mean_score: float | None
+    median_score: float | None
+    std_score: float | None
+    mal_mean: float | None  # MAL's mean score of the shows the user scored
+    mean_difference: float | None  # user score minus MAL mean, on average
+    mean_abs_difference: float | None
+    agreement: float | None  # correlation of the user's scores with MAL's
+    median_members: int | None
+    drop_rate: float | None
+
+
+class ScoreBucketOut(BaseModel):
+    score: int
+    mine: int
+    mal: int  # the user's scored shows whose MAL mean rounds to this score
+
+
+class TagStatOut(BaseModel):
+    key: str
+    name: str
+    kind: str  # genre | theme | demographic | explicit | studio | source | type | era
+    count: int
+    share: float
+    scored: int
+    mean_score: float | None
+    mal_mean: float | None
+    delta: float | None  # user score minus MAL mean on these shows
+    affinity: float | None  # points above/below the user's own mean (shrunk for few shows)
+    weight: float | None  # the prediction model's weight
+    dropped: int
+
+
+class HotTakeOut(BaseModel):
+    kind: str
+    title: str
+    text: str
+    value: float | None = None
+    anime: ShowRefOut | None = None
+
+
+class ModelFeatureOut(BaseModel):
+    name: str
+    kind: str
+    points: float
+
+
+class ModelStatsOut(BaseModel):
+    scored: int
+    mae: float | None  # cross-validated mean error of the predictions, in points
+    baseline_mae: float | None  # the same for MAL's score shifted by the user's offset
+    mal_weight: float | None
+    thresholds: list[float]  # predicted score needed for must watch, recommended, maybe, skip
+    likes: list[ModelFeatureOut]
+    dislikes: list[ModelFeatureOut]
+
+
+class StatsOut(BaseModel):
+    overview: OverviewOut
+    score_distribution: list[ScoreBucketOut]
+    favourites: list[TagStatOut]
+    hated: list[TagStatOut]
+    breakdown: dict[str, list[TagStatOut]]
+    hot_takes: list[HotTakeOut]
+    model: ModelStatsOut | None
+    plan_to_watch: list[ShowRefOut]
 
 
 class Row(BaseModel):

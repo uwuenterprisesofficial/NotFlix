@@ -71,6 +71,16 @@ class Anime(Base):
     popularity: Mapped[int | None] = mapped_column(Integer)
     genres: Mapped[list[str]] = mapped_column(JSON, default=list)
     start_season: Mapped[str | None] = mapped_column(String(20))
+    # Genres, themes and demographics with their MAL ids ([{"id": 1, "name": "Action"}]).
+    genre_tags: Mapped[list[dict]] = mapped_column(JSON, default=list, server_default="[]")
+    studios: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    source: Mapped[str | None] = mapped_column(String(30))  # e.g. manga, light_novel, original
+    rating: Mapped[str | None] = mapped_column(String(10))  # e.g. pg_13, r
+    num_list_users: Mapped[int | None] = mapped_column(Integer)
+    num_scoring_users: Mapped[int | None] = mapped_column(Integer)
+    rank: Mapped[int | None] = mapped_column(Integer)
+    average_episode_duration: Mapped[int | None] = mapped_column(Integer)  # seconds
+    start_year: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -102,6 +112,18 @@ class Recommendation(Base):
     anime_id: Mapped[int] = mapped_column(ForeignKey("anime.id", ondelete="CASCADE"))
     score: Mapped[float] = mapped_column(Float)
     reason: Mapped[str | None] = mapped_column(Text)
+
+
+class TasteModel(Base):
+    """A user's fitted score predictor (see services.taste), refitted on every list sync."""
+
+    __tablename__ = "taste_models"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    data: Mapped[dict] = mapped_column(JSON)
+    fitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class StreamSource(Base):

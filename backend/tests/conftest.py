@@ -9,6 +9,7 @@ os.environ["MAL_CLIENT_ID"] = ""
 # Tests never reach external streaming sites; provider tests inject their own HTTP clients.
 os.environ["ANIWORLD_URL"] = ""
 os.environ["ANIVEXA_URL"] = ""
+os.environ["JIKAN_URL"] = ""
 
 
 @pytest.fixture

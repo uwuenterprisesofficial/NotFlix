@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { displayTitle, nextEpisode } from "@/lib/format";
 import type { AnimeDetail } from "@/lib/types";
+import { PredictionBadge } from "./PredictionBadge";
 
 export function Hero({ anime }: { anime: AnimeDetail }) {
   const episode = nextEpisode(anime);
@@ -31,6 +32,7 @@ export function Hero({ anime }: { anime: AnimeDetail }) {
           )}
           <h1 className="text-4xl font-black drop-shadow md:text-6xl">{displayTitle(anime)}</h1>
           <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-neutral-300">
+            <PredictionBadge prediction={anime.prediction} size="md" />
             {anime.mean && <span className="font-semibold text-green-400">★ {anime.mean}</span>}
             {anime.start_season && <span className="capitalize">{anime.start_season}</span>}
             {anime.num_episodes && <span>{anime.num_episodes} episodes</span>}

@@ -5,6 +5,7 @@ import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { AnimeToastMapping } from "@/components/AnimeToastMapping";
 import { AniWorldMapping } from "@/components/AniWorldMapping";
 import { EpisodeBrowser } from "@/components/EpisodeBrowser";
+import { PredictionPanel } from "@/components/PredictionPanel";
 import { apiOrNull } from "@/lib/api";
 import { displayTitle, nextEpisode } from "@/lib/format";
 import type { AnimeDetail, Me } from "@/lib/types";
@@ -52,12 +53,24 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
             )}
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            {anime.genres.map((g) => (
-              <span key={g} className="rounded-full bg-surface-raised px-3 py-1 text-xs">
-                {g}
-              </span>
-            ))}
+            {anime.tags.length
+              ? anime.tags.map((t) => (
+                  <Link
+                    key={t.id}
+                    href={`/search?genre=${t.id}`}
+                    title={`${t.category[0].toUpperCase()}${t.category.slice(1)} · more like this`}
+                    className={`rounded-full px-3 py-1 text-xs hover:bg-white/20 ${t.category === "genre" ? "bg-surface-raised" : "border border-white/20"}`}
+                  >
+                    {t.name}
+                  </Link>
+                ))
+              : anime.genres.map((g) => (
+                  <span key={g} className="rounded-full bg-surface-raised px-3 py-1 text-xs">
+                    {g}
+                  </span>
+                ))}
           </div>
+          {anime.prediction && <PredictionPanel prediction={anime.prediction} />}
           {anime.synopsis && (
             <p className="mt-5 whitespace-pre-line text-neutral-200">{anime.synopsis}</p>
           )}

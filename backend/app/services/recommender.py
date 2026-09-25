@@ -3,7 +3,9 @@
 1. Build a genre taste profile: shows scored above the user's own mean pull their genres up,
    shows below it (and dropped shows) pull them down.
 2. Collect candidates from MAL's community recommendations of the user's best-rated shows.
-3. Rank candidates by genre affinity, community vote strength and MAL mean score.
+3. Rank candidates by how much the user is likely to enjoy them (the predicted score from
+   services.taste when there's a model, else genre affinity), community vote strength and MAL
+   mean score.
 """
 
 import math
@@ -38,6 +40,7 @@ class Candidate:
     mean: float | None = None
     votes: int = 0  # summed MAL "num_recommendations" across seeds
     seeds: list[int] = field(default_factory=list)  # list anime that recommended this one
+    predicted: float | None = None  # the user's predicted score (services.taste)
 
 
 @dataclass(frozen=True)
@@ -48,14 +51,13 @@ class Ranked:
 
 
 def taste_profile(items: list[ListItem]) -> dict[str, float]:
-    scores = [i.score for i in items if i.score > 0]
-    user_mean = sum(scores) / len(scores) if scores else 7.0
+    mean = user_mean(items)
 
     totals: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
     for item in items:
         if item.score > 0:
-            weight = item.score - user_mean
+            weight = item.score - mean
         else:
             weight = IMPLICIT_WEIGHT.get(ListStatus(item.status), 0.0)
         for genre in item.genres:
@@ -76,8 +78,19 @@ def seed_shows(items: list[ListItem], limit: int = 15) -> list[ListItem]:
     ]
 
 
-def score_candidate(profile: dict[str, float], c: Candidate) -> float:
-    affinity = sum(profile.get(g, 0.0) for g in c.genres) / len(c.genres) if c.genres else 0.0
+def user_mean(items: list[ListItem]) -> float:
+    scores = [i.score for i in items if i.score > 0]
+    return sum(scores) / len(scores) if scores else 7.0
+
+
+def score_candidate(profile: dict[str, float], c: Candidate, mean: float = 7.0) -> float:
+    if c.predicted is not None:
+        # Two points above the user's average is as good as it gets.
+        affinity = max(-1.0, min(1.0, (c.predicted - mean) / 2.0))
+    elif c.genres:
+        affinity = sum(profile.get(g, 0.0) for g in c.genres) / len(c.genres)
+    else:
+        affinity = 0.0
     social = min(1.0, math.log1p(c.votes) / math.log1p(50))
     quality = max(-1.0, min(1.0, ((c.mean or 7.0) - 7.0) / 2.0))
     return W_GENRE * affinity + W_SOCIAL * social + W_QUALITY * quality
@@ -85,6 +98,7 @@ def score_candidate(profile: dict[str, float], c: Candidate) -> float:
 
 def rank(items: list[ListItem], candidates: list[Candidate], limit: int = 30) -> list[Ranked]:
     profile = taste_profile(items)
+    mean = user_mean(items)
     on_list = {i.anime_id for i in items}
     titles = {i.anime_id: i.title for i in items}
 
@@ -96,7 +110,7 @@ def rank(items: list[ListItem], candidates: list[Candidate], limit: int = 30) ->
         ranked.append(
             Ranked(
                 anime_id=c.anime_id,
-                score=round(score_candidate(profile, c), 4),
+                score=round(score_candidate(profile, c, mean), 4),
                 reason=f"Because you liked {seed}" if seed else None,
             )
         )

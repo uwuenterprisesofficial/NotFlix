@@ -43,3 +43,11 @@ def test_rank_handles_empty_list():
     ranked = rank([], [Candidate(anime_id=1, genres=["Action"], mean=8.5, votes=3)])
     assert len(ranked) == 1
     assert ranked[0].reason is None
+
+
+def test_rank_uses_the_predicted_score_over_genres_when_there_is_one():
+    candidates = [
+        Candidate(anime_id=10, genres=["Sci-Fi"], mean=8.0, votes=10, seeds=[1], predicted=5.0),
+        Candidate(anime_id=11, genres=["Romance"], mean=8.0, votes=10, seeds=[1], predicted=9.5),
+    ]
+    assert [r.anime_id for r in rank(LIST, candidates)] == [11, 10]

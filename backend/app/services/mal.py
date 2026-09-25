@@ -13,7 +13,8 @@ API_BASE = "https://api.myanimelist.net/v2"
 AUTH_BASE = "https://myanimelist.net/v1/oauth2"
 ANIME_FIELDS = (
     "id,title,alternative_titles,main_picture,synopsis,mean,popularity,media_type,"
-    "status,num_episodes,genres,start_season"
+    "status,num_episodes,genres,start_season,start_date,studios,source,rating,num_list_users,"
+    "num_scoring_users,rank,average_episode_duration"
 )
 
 
@@ -58,7 +59,22 @@ def anime_from_node(node: dict[str, Any]) -> dict[str, Any]:
         "popularity": node.get("popularity"),
         "genres": [g["name"] for g in node.get("genres") or []],
         "start_season": f"{season['season']} {season['year']}" if season else None,
+        "genre_tags": [{"id": g["id"], "name": g["name"]} for g in node.get("genres") or []],
+        "studios": [s["name"] for s in node.get("studios") or []],
+        "source": node.get("source"),
+        "rating": node.get("rating"),
+        "num_list_users": node.get("num_list_users"),
+        "num_scoring_users": node.get("num_scoring_users"),
+        "rank": node.get("rank"),
+        "average_episode_duration": node.get("average_episode_duration") or None,
+        "start_year": _year(node.get("start_date"), season),
     }
+
+
+def _year(start_date: str | None, season: dict[str, Any] | None) -> int | None:
+    if start_date and start_date[:4].isdigit():
+        return int(start_date[:4])
+    return season["year"] if season else None
 
 
 class TokenSet:
@@ -117,6 +133,14 @@ class MalClient:
         page = await self._get(
             f"{API_BASE}/anime/ranking",
             {"ranking_type": ranking_type, "limit": limit, "fields": ANIME_FIELDS},
+        )
+        return [item["node"] for item in page.get("data", [])]
+
+    async def search(self, query: str, limit: int = 30, offset: int = 0) -> list[dict[str, Any]]:
+        """MAL's title search (the query needs at least 3 characters)."""
+        page = await self._get(
+            f"{API_BASE}/anime",
+            {"q": query, "limit": limit, "offset": offset, "fields": ANIME_FIELDS, "nsfw": "true"},
         )
         return [item["node"] for item in page.get("data", [])]
 

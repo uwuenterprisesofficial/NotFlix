@@ -4,6 +4,18 @@ export type Progress = {
   score: number;
 };
 
+export type Tier = "must_watch" | "recommended" | "maybe" | "skip" | "avoid";
+
+/** The viewer's predicted score for a show they haven't scored (from their MAL list). */
+export type Prediction = {
+  score: number;
+  tier: Tier;
+  /** The features that moved the prediction most (detail page only). */
+  reasons: { name: string; points: number }[];
+};
+
+export type TagCategory = "genre" | "theme" | "demographic" | "explicit";
+
 export type AnimeCard = {
   id: number;
   title: string;
@@ -15,12 +27,94 @@ export type AnimeCard = {
   genres: string[];
   progress: Progress | null;
   reason: string | null;
+  prediction: Prediction | null;
 };
 
 export type AnimeDetail = AnimeCard & {
   synopsis: string | null;
   status: string | null;
   start_season: string | null;
+  tags: { id: number; name: string; category: TagCategory }[];
+  studios: string[];
+  source: string | null;
+  rank: number | null;
+  num_list_users: number | null;
+};
+
+export type SearchResponse = {
+  items: AnimeCard[];
+  page: number;
+  has_next: boolean;
+  source: "mal" | "jikan" | "local";
+};
+
+export type Genre = { id: number; name: string; category: TagCategory; count: number | null };
+
+export type ShowRef = {
+  id: number;
+  title: string;
+  title_en: string | null;
+  picture_url: string | null;
+  mean: number | null;
+  score: number | null;
+  prediction: Prediction | null;
+};
+
+export type TagStat = {
+  key: string;
+  name: string;
+  kind: string;
+  count: number;
+  share: number;
+  scored: number;
+  mean_score: number | null;
+  mal_mean: number | null;
+  delta: number | null;
+  affinity: number | null;
+  weight: number | null;
+  dropped: number;
+};
+
+export type HotTake = {
+  kind: string;
+  title: string;
+  text: string;
+  value: number | null;
+  anime: ShowRef | null;
+};
+
+export type Stats = {
+  overview: {
+    total: number;
+    by_status: { status: Progress["status"]; count: number }[];
+    episodes: number;
+    days: number | null;
+    scored: number;
+    mean_score: number | null;
+    median_score: number | null;
+    std_score: number | null;
+    mal_mean: number | null;
+    mean_difference: number | null;
+    mean_abs_difference: number | null;
+    agreement: number | null;
+    median_members: number | null;
+    drop_rate: number | null;
+  };
+  score_distribution: { score: number; mine: number; mal: number }[];
+  favourites: TagStat[];
+  hated: TagStat[];
+  breakdown: Record<string, TagStat[]>;
+  hot_takes: HotTake[];
+  model: {
+    scored: number;
+    mae: number | null;
+    baseline_mae: number | null;
+    mal_weight: number | null;
+    thresholds: number[];
+    likes: { name: string; kind: string; points: number }[];
+    dislikes: { name: string; kind: string; points: number }[];
+  } | null;
+  plan_to_watch: ShowRef[];
 };
 
 export type Row = { id: string; title: string; items: AnimeCard[] };

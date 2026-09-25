@@ -7,9 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import get_json, set_json
 from app.core.config import get_settings
 from app.models import Anime, ListEntry
-from app.schemas import AnimeCard, AnimeDetail, Progress
+from app.schemas import AnimeCard, AnimeDetail, PredictionOut, Progress, ReasonOut, TagOut
 from app.services import mal
 from app.services.sync import upsert_anime
+from app.services.tags import category
+from app.services.taste import Predictor, Show
 
 RANKING_TTL_SECONDS = 3600
 ANIME_STALE_AFTER = timedelta(days=7)
@@ -22,24 +24,56 @@ def mal_configured() -> bool:
 CardT = TypeVar("CardT", AnimeCard, AnimeDetail)
 
 
-def _build(model: type[CardT], anime: Anime, entry: ListEntry | None, reason: str | None) -> CardT:
+def predicts(entry: ListEntry | None) -> bool:
+    """Whether a show gets a predicted score: not when the user scored or dropped it."""
+    return entry is None or (entry.score == 0 and entry.status != "dropped")
+
+
+def _build(
+    model: type[CardT],
+    anime: Anime,
+    entry: ListEntry | None,
+    reason: str | None,
+    predictor: Predictor | None,
+    reasons: int = 0,
+) -> CardT:
     card = model.model_validate(anime)
     if entry is not None:
         card.progress = Progress(
             status=entry.status, episodes_watched=entry.episodes_watched, score=entry.score
         )
     card.reason = reason
+    if predictor is not None and predicts(entry):
+        p = predictor.predict(Show.of(anime), reasons)
+        card.prediction = PredictionOut(
+            score=p.score,
+            tier=p.tier,
+            reasons=[ReasonOut(name=n, points=v) for n, v in p.reasons],
+        )
     return card
 
 
-def to_card(anime: Anime, entry: ListEntry | None = None, reason: str | None = None) -> AnimeCard:
-    return _build(AnimeCard, anime, entry, reason)
+def to_card(
+    anime: Anime,
+    entry: ListEntry | None = None,
+    reason: str | None = None,
+    predictor: Predictor | None = None,
+) -> AnimeCard:
+    return _build(AnimeCard, anime, entry, reason, predictor)
 
 
 def to_detail(
-    anime: Anime, entry: ListEntry | None = None, reason: str | None = None
+    anime: Anime,
+    entry: ListEntry | None = None,
+    reason: str | None = None,
+    predictor: Predictor | None = None,
 ) -> AnimeDetail:
-    return _build(AnimeDetail, anime, entry, reason)
+    detail = _build(AnimeDetail, anime, entry, reason, predictor, reasons=6)
+    detail.tags = [
+        TagOut(id=t["id"], name=t["name"], category=category(t["id"]))
+        for t in anime.genre_tags or []
+    ]
+    return detail
 
 
 async def anime_by_ids(db: AsyncSession, ids: list[int]) -> list[Anime]:

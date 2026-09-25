@@ -4,7 +4,10 @@ A Netflix-style front end for anime, backed by your MyAnimeList account:
 
 - **Browse**: hero banner plus rows for Continue Watching, Recommended for You, My List, Watch Again, and MAL's Top Airing / Most Popular / Coming Soon.
 - **Sync with MyAnimeList**: sign in with MAL OAuth. "Sync MAL" imports your list and watch progress. Finishing an episode writes your progress back to MAL. Clicking **✓ Watched** again unwatches it: MAL only stores a count, so progress goes back to the episode before.
-- **Recommendations**: a genre taste profile built from your scores relative to your own average, combined with MAL community recommendations of your best-rated shows.
+- **Recommendations**: MAL community recommendations of your best-rated shows, ranked by your predicted score (see below), community votes and MAL's score.
+- **Statistics** (`/stats`): your list compared with MAL: score distribution next to MAL's for the same shows, favourite and disliked genres/themes, a sortable breakdown by genre, theme, demographic, studio, source, type and decade, hot takes (shows you rate far above or below MAL, acclaimed shows you dropped, hidden gems, genres you judge differently), and what drives your scores.
+- **Predicted scores and labels**: every show you haven't scored gets a predicted score and a label: **MUST WATCH**, **RECOMMENDED**, **MAYBE**, **PROBABLY SKIP** or **AVOID**. Labels show on posters, the banner and the detail page (with what moved the prediction). In **Settings** (gear icon) you can turn the poster labels off or show the predicted score next to them.
+- **Search** (magnifier icon): MyAnimeList title search, and a genre/theme/demographic dropdown to browse top rated, most popular, newest or "best for you".
 - **Player**: plays a direct stream (mp4/HLS) or embeds a third-party player in an `<iframe>`. The iframe isn't sandboxed because hosters refuse to play in one, so use your browser's popup/ad blocker against their ads.
 - **Intro/outro detection**: compares audio fingerprints of two or more episodes to find the shared opening and ending. Results are stored in Postgres, so each episode is only analysed once, and they drive the "Skip Intro" / auto-skip controls.
 
@@ -115,6 +118,32 @@ What the worker does:
 The widget on the show page lists the saved fingerprints ("Intro from episode 1 (1:30)") above the per-episode results.
 
 **Stopping an analysis.** Every waiting or running job is listed in the widget ("Analysing episodes 2, 3… (1:05)") with a **✕**; the player's "Detecting intro & outro…" has a **Stop** link. A waiting job is taken out of the queue, a running one has its worker process killed (RQ's stop command, which also ends the ffmpeg it started); either way the job is marked failed ("Stopped"). This also clears a job that only looks like it's running because its worker died. A job running longer than `ANALYSIS_TIMEOUT_MINUTES` (default 10, in `.env`) is stopped by RQ and marked failed ("Stopped after 10 minutes"); one whose worker died without reporting is marked the same way a minute after that limit.
+
+## Statistics and predictions
+
+MAL's API returns genres, themes and demographics in one list; NotFlix splits them by MAL id as MAL's site does. Genres: Action, Adventure, Avant Garde, Award Winning, Boys Love, Comedy, Drama, Fantasy, Girls Love, Gourmet, Horror, Mystery, Romance, Sci-Fi, Slice of Life, Sports, Supernatural and Suspense. Explicit genres: Ecchi, Erotica and Hentai. Demographics: Shounen, Seinen, Shoujo, Josei and Kids. Everything else is a theme.
+
+**The prediction** (`backend/app/services/taste.py`) is a weighted ridge regression fitted to your scored shows on every sync:
+
+`score ≈ intercept + a·(MAL score) + b·(popularity) + Σ weight(genre, theme, demographic, studio, source, type, decade)`
+
+Shows you dropped without a score count as low scores at half weight. Features seen on fewer than two of your shows are left out, and the ridge penalty pulls rarely seen ones towards zero, so one loved show doesn't make its genre a favourite. At least 10 scored shows are needed.
+
+**The labels** come from where a prediction falls among the cross-validated predictions for your own list:
+
+| Label | Predicted score among what you've watched |
+|---|---|
+| MUST WATCH | top 15% |
+| RECOMMENDED | top 40% |
+| MAYBE | middle |
+| PROBABLY SKIP | bottom 30% |
+| AVOID | bottom 12% |
+
+So they adapt to how generously you score. The statistics page shows the thresholds, the model's error on shows it hadn't seen next to MAL's score alone, and the features that raise or lower your scores.
+
+**Genre search.** MAL's API can't list shows by genre, so the genre search uses [Jikan](https://jikan.moe), an unofficial read-only MAL API (`JIKAN_URL`, cached for an hour). Without it, or when it's down, the search falls back to shows NotFlix already knows. The title search uses MAL's own search; without MAL credentials it searches the local catalog.
+
+The migration `9680d567f63d` adds the genre ids, studios, source, members and so on to cached shows and marks them stale, so they're fetched again from MAL. **Press "Sync MAL" once after upgrading** to get the details for your list.
 
 ## Development
 

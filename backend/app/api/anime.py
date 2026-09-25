@@ -31,6 +31,7 @@ from app.schemas import (
 )
 from app.services import catalog, mal
 from app.services.sync import access_token
+from app.services.taste import predictor_for
 from app.worker.queue import analysis_queue, stop_job, timeout_message, timeout_seconds
 
 router = APIRouter(tags=["anime"])
@@ -48,7 +49,7 @@ async def anime_detail(anime_id: int, user: OptionalUser, db: DB):
         entry = await db.scalar(
             select(ListEntry).where(ListEntry.user_id == user.id, ListEntry.anime_id == anime_id)
         )
-    return catalog.to_detail(anime, entry)
+    return catalog.to_detail(anime, entry, predictor=await predictor_for(db, user))
 
 
 @router.get("/anime/{anime_id}/episodes/{episode}", response_model=EpisodeOut)

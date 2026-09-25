@@ -25,6 +25,8 @@ x-backend: &backend
     MEDIA_DIR: /media
     # An intro/outro analysis running longer than this is stopped and marked failed.
     ANALYSIS_TIMEOUT_MINUTES: ${ANALYSIS_TIMEOUT_MINUTES:-10}
+    # Genre search (MAL's own API can't list shows by genre). Empty: only known shows.
+    JIKAN_URL: ${JIKAN_URL-https://api.jikan.moe/v4}
   # Lets the containers reach services running on your machine (Anivexa, ReAnime) at
   # http://host.docker.internal:<port>; "localhost" inside a container is the container itself.
   extra_hosts:

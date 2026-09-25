@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # The frontend proxies /api/* to this backend, so the callback lives on the frontend origin.
     mal_redirect_uri: str = "http://localhost:3000/api/auth/callback"
 
+    # Jikan (unofficial MyAnimeList API) for the genre search, which MAL's own API lacks.
+    # Empty disables it: the genre search then only finds shows already in the local catalog.
+    jikan_url: str = "https://api.jikan.moe/v4"
+
     # Local directory the analyzer reads episode files from: <media_dir>/<anime_id>/<episode>.<ext>
     media_dir: str = "/media"
     # An intro/outro analysis running longer than this is stopped and marked failed.

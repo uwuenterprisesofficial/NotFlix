@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Anime, ListEntry, Recommendation, User
-from app.services import mal
+from app.services import mal, taste
 from app.services.recommender import Candidate, ListItem, rank, seed_shows
 
 MAX_CANDIDATE_LOOKUPS = 40
@@ -82,7 +82,10 @@ async def sync_user(db: AsyncSession, user: User) -> dict[str, int]:
                 )
             )
 
-        candidates = await _collect_candidates(db, client, items)
+        await db.flush()
+        user.last_synced_at = datetime.now(UTC)
+        predictor = await taste.refit(db, user)
+        candidates = await _collect_candidates(db, client, items, predictor)
 
     ranked = rank(items, candidates)
     await db.execute(delete(Recommendation).where(Recommendation.user_id == user.id))
@@ -90,13 +93,15 @@ async def sync_user(db: AsyncSession, user: User) -> dict[str, int]:
         Recommendation(user_id=user.id, anime_id=r.anime_id, score=r.score, reason=r.reason)
         for r in ranked
     )
-    user.last_synced_at = datetime.now(UTC)
     await db.commit()
     return {"entries": len(items), "recommendations": len(ranked)}
 
 
 async def _collect_candidates(
-    db: AsyncSession, client: mal.MalClient, items: list[ListItem]
+    db: AsyncSession,
+    client: mal.MalClient,
+    items: list[ListItem],
+    predictor: taste.Predictor | None = None,
 ) -> list[Candidate]:
     seeds = seed_shows(items)
     details = await _gather_limited(client.anime(s.anime_id, "recommendations") for s in seeds)
@@ -125,5 +130,7 @@ async def _collect_candidates(
         if anime is None:
             continue
         c.genres, c.mean = anime.genres, anime.mean
+        if predictor is not None:
+            c.predicted = predictor.score(taste.Show.of(anime))
         result.append(c)
     return result
