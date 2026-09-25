@@ -25,6 +25,7 @@ export function Player({
   watched,
   via,
   server,
+  resumeAt = null,
 }: {
   animeId: number;
   episode: number;
@@ -35,6 +36,8 @@ export function Player({
   /** Provider and server the previous episode used; preferred for this one. */
   via: { provider: string | null; label: string | null };
   server: string | null;
+  /** Where this episode was stopped last time (signed in, direct streams). */
+  resumeAt?: number | null;
 }) {
   const { t } = useT();
   const router = useRouter();
@@ -51,7 +54,7 @@ export function Player({
   const isWatched = episode <= progress;
   const autoMarked = useRef(false);
   // Where playback is, so a replacement for a stream that broke continues from there.
-  const position = useRef(0);
+  const position = useRef(resumeAt ?? 0);
   const { stream } = sources;
   // The video area renders into the layout's frame, which survives moving to the next episode.
   const frame = usePlayerFrame();
@@ -94,6 +97,22 @@ export function Player({
     setSaving(false);
   }
 
+  /** Remember where playback is, for resuming (on the user's account, so any device). */
+  function savePosition(at: number, duration: number, final: boolean) {
+    if (!signedIn) return;
+    const url = `/api/anime/${animeId}/position`;
+    const body = JSON.stringify({ episode, position_s: at, duration_s: duration });
+    // The tab may be closing: a beacon still goes out.
+    if (final && navigator.sendBeacon?.(url, new Blob([body], { type: "application/json" })))
+      return;
+    fetch(url, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body,
+      keepalive: true,
+    }).catch(() => {});
+  }
+
   function autoMarkWatched() {
     if (autoMarked.current) return;
     autoMarked.current = true;
@@ -126,6 +145,8 @@ export function Player({
                 onFail={() => sources.failStream(stream.url)}
                 resumeFrom={() => position.current}
                 onPosition={(t) => (position.current = t)}
+                resumedAt={resumeAt}
+                onSave={savePosition}
               />
             )}
             {stream?.kind === "embed" && (
@@ -321,6 +342,7 @@ function SegmentInfo({
           <span key={s.kind} className="rounded bg-surface-raised px-3 py-1">
             {s.kind === "opening" ? t("player.intro") : t("player.outro")} {formatTime(s.start_s)}–
             {formatTime(s.end_s)}
+            {s.source === "aniskip" && <span className="ml-1 text-xs opacity-70">(AniSkip)</span>}
           </span>
         ))}
       </div>

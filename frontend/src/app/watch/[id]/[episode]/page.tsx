@@ -59,6 +59,9 @@ export default async function WatchPage({
       watched={anime.progress?.episodes_watched ?? 0}
       via={{ provider: param("via"), label: param("option") }}
       server={param("server")}
+      resumeAt={
+        anime.resume?.episode === episode && param("start") !== "0" ? anime.resume.position_s : null
+      }
     />
   );
 }

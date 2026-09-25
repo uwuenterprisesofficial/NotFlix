@@ -11,6 +11,7 @@ os.environ["ANILIST_CLIENT_ID"] = ""
 os.environ["ANIWORLD_URL"] = ""
 os.environ["ANIVEXA_URL"] = ""
 os.environ["JIKAN_URL"] = ""
+os.environ["ANISKIP_URL"] = ""
 
 
 @pytest.fixture

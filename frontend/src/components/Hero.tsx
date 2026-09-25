@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { displayTitle, nextEpisode, reasonText, seasonText } from "@/lib/format";
+import { displayTitle, formatTime, nextEpisode, reasonText, seasonText } from "@/lib/format";
 import { formatNumber, genreName } from "@/lib/i18n";
 import { getT } from "@/lib/i18n/server";
 import type { AnimeDetail } from "@/lib/types";
@@ -10,7 +10,7 @@ import { allowedImage } from "@/lib/images";
 
 export async function Hero({ anime }: { anime: AnimeDetail }) {
   const { t, lang } = await getT();
-  const episode = nextEpisode(anime);
+  const episode = anime.resume?.episode ?? nextEpisode(anime);
 
   return (
     <section className="relative h-[70vh] min-h-[420px] w-full overflow-hidden">
@@ -64,7 +64,12 @@ export async function Hero({ anime }: { anime: AnimeDetail }) {
               href={`/watch/${anime.id}/${episode}`}
               className="flex items-center gap-2 rounded bg-white px-6 py-2 font-semibold text-black hover:bg-white/80"
             >
-              ▶ {anime.progress ? t("hero.resume", { episode }) : t("hero.play")}
+              ▶{" "}
+              {anime.resume
+                ? t("hero.resumeAt", { episode, time: formatTime(anime.resume.position_s) })
+                : anime.progress
+                  ? t("hero.resume", { episode })
+                  : t("hero.play")}
             </Link>
             <Link
               href={`/anime/${anime.id}`}

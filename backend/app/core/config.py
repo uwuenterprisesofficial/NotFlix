@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Empty disables it: the genre search then only finds shows already in the local catalog.
     jikan_url: str = "https://api.jikan.moe/v4"
 
+    # AniSkip (crowd-sourced opening/ending times by MAL id): the fallback until NotFlix's own
+    # detection finds an episode's opening. Empty disables it.
+    aniskip_url: str = "https://api.aniskip.com"
+
     # Local directory the analyzer reads episode files from: <media_dir>/<anime_id>/<episode>.<ext>
     media_dir: str = "/media"
     # An intro/outro analysis running longer than this is stopped and marked failed.

@@ -171,6 +171,7 @@ export const common = {
   // Hero / cards
   "hero.play": { en: "Play", de: "Abspielen" },
   "hero.resume": { en: "Resume E{episode}", de: "Weiter mit F{episode}" },
+  "hero.resumeAt": { en: "Resume E{episode} · {time}", de: "Weiter mit F{episode} · {time}" },
   "hero.moreInfo": { en: "More Info", de: "Mehr Infos" },
   "anime.episodes": {
     en: (v: { count: number }) => n(v.count, "episode", "episodes"),

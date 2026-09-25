@@ -54,6 +54,10 @@ export const analysis = {
   "jobStatus.done": { en: "done", de: "fertig" },
   "jobStatus.failed": { en: "failed", de: "fehlgeschlagen" },
   "analysis.notFound": { en: "{label} not found", de: "{label} nicht gefunden" },
+  "analysis.fromAniSkip": {
+    en: "From AniSkip (crowd-sourced), until the detection finds this episode's exact times",
+    de: "Von AniSkip (Community-Daten), bis die Erkennung die genauen Zeiten dieser Folge findet",
+  },
   "analysis.manual": { en: "Entered manually", de: "Von Hand eingetragen" },
   "analysis.results": { en: "Results", de: "Ergebnisse" },
   "analysis.savedFingerprints": {

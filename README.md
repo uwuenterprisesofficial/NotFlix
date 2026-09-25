@@ -124,6 +124,22 @@ The widget on the show page lists the saved fingerprints ("Intro from episode 1 
 
 **Stopping an analysis.** Every waiting or running job is listed in the widget ("Analysing episodes 2, 3… (1:05)") with a **✕**; the player's "Detecting intro & outro…" has a **Stop** link. A waiting job is taken out of the queue, a running one has its worker process killed (RQ's stop command, which also ends the ffmpeg it started); either way the job is marked failed ("Stopped"). This also clears a job that only looks like it's running because its worker died. A job running longer than `ANALYSIS_TIMEOUT_MINUTES` (default 10, in `.env`) is stopped by RQ and marked failed ("Stopped after 10 minutes"); one whose worker died without reporting is marked the same way a minute after that limit.
 
+**When no intro is known yet.** Detection needs a direct stream and a finished analysis, so a few fallbacks keep Skip Intro working meanwhile:
+
+- **AniSkip.** An episode without an opening of its own gets AniSkip's crowd-sourced opening/ending times (`api.aniskip.com`, by MAL id; `ANISKIP_URL`, empty to turn it off). They're stored with `source = 'aniskip'` (marked "AniSkip" under the player and in the widget) and are only a stand-in: they may be from another release of the episode, so the episode is still analysed, and the detected times replace them. An episode AniSkip doesn't have isn't asked for again for a day.
+- **Retries.** An episode that was analysed without finding its opening is analysed again (at most once a day) once the show has a saved opening fingerprint, e.g. one learned from later episodes.
+- **» 1:25.** While no opening is known for the playing episode, the player shows a button that jumps 85 seconds ahead (a typical opening), during the first 8 minutes and outside the credits.
+
+## Resume watching
+
+While a direct stream plays, the player remembers where you are in the show's current episode (`playback_positions`, one per show and signed-in user, so it follows your MAL/AniList account rather than the browser): every 15 seconds, when pausing, and when the tab is hidden or closed (`navigator.sendBeacon`, so it arrives even as the page goes away). Only the episode you're watching is kept; starting another episode of the show replaces it.
+
+- **Resuming.** Opening that episode again starts where you stopped, with "Resumed at 2:13 · Start over" over the player for a few seconds. The show page's Play button ("Resume episode 3 at 12:40"), the banner and the cards (with a progress bar) open that episode there.
+- **Finished.** A position in the last 2 minutes (the credits), or an episode marked watched, clears it. Under 15 seconds nothing is saved.
+- Embedded third-party players can't report their position, so only direct streams are resumed.
+
+API: `GET`/`PUT`/`DELETE /api/anime/{id}/position` (`POST` too, for the beacon).
+
 ## Catalogue
 
 Every show NotFlix sees is kept in the database (the `anime` table, plus `anime_synopses` for translated synopses and the stream tables): shows you open, search results, genre results, rankings, your lists and recommendations. The catalogue always answers first:

@@ -2,6 +2,10 @@ import type { Messages } from "../core";
 
 export const detail = {
   "detail.resume": { en: "Resume episode {episode}", de: "Weiter mit Folge {episode}" },
+  "detail.resumeAt": {
+    en: "Resume episode {episode} at {time}",
+    de: "Folge {episode} ab {time} fortsetzen",
+  },
   "detail.play1": { en: "Play episode 1", de: "Folge 1 abspielen" },
   "detail.moreLikeThis": { en: "{category} · more like this", de: "{category} · mehr davon" },
   "detail.synopsisEnglish": {

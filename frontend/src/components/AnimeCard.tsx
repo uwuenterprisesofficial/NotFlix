@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { displayTitle, reasonText, relativeTime } from "@/lib/format";
+import { displayTitle, formatTime, reasonText, relativeTime } from "@/lib/format";
 import { formatNumber, genreName } from "@/lib/i18n";
 import { allowedImage } from "@/lib/images";
 import type { AnimeCard as AnimeCardType } from "@/lib/types";
@@ -56,8 +56,14 @@ export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; flui
   const { t, lang } = useT();
   const now = useNow();
   const airing = anime.airing;
-  // New Episodes: the (released) episode opens the player directly.
-  const href = airing ? `/watch/${anime.id}/${airing.episode}` : `/anime/${anime.id}`;
+  const resume = !airing ? anime.resume : null;
+  // New Episodes: the (released) episode opens the player directly; so does an episode the
+  // user stopped in (it resumes there).
+  const href = airing
+    ? `/watch/${anime.id}/${airing.episode}`
+    : resume
+      ? `/watch/${anime.id}/${resume.episode}`
+      : `/anime/${anime.id}`;
   const watched = anime.progress?.episodes_watched ?? 0;
   const showProgress = anime.progress?.status === "watching" && anime.num_episodes;
   const title = displayTitle(anime);
@@ -87,6 +93,15 @@ export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; flui
           <div className="absolute top-1.5 left-1.5">
             <PredictionBadge prediction={anime.prediction} />
           </div>
+          {resume && (
+            <span className="absolute right-1.5 bottom-1.5 rounded bg-black/80 px-1.5 py-0.5 text-[11px] font-semibold shadow">
+              ▶ {t("airing.episode", { episode: resume.episode })}
+              <span className="font-normal text-neutral-300">
+                {" "}
+                · {formatTime(resume.position_s)}
+              </span>
+            </span>
+          )}
           {airing && (
             <span className="absolute right-1.5 bottom-1.5 rounded bg-black/80 px-1.5 py-0.5 text-[11px] font-semibold shadow">
               {t("airing.episode", { episode: airing.episode })}
@@ -109,7 +124,15 @@ export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; flui
             </p>
           </div>
         </div>
-        {showProgress ? (
+        {resume?.duration_s ? (
+          // Netflix-style: how far into the episode the user got.
+          <div className="mt-1 h-1 overflow-hidden rounded bg-white/20">
+            <div
+              className="h-full bg-brand"
+              style={{ width: `${Math.min(100, (resume.position_s / resume.duration_s) * 100)}%` }}
+            />
+          </div>
+        ) : showProgress ? (
           <div className="mt-1 h-1 overflow-hidden rounded bg-white/20">
             <div
               className="h-full bg-brand"

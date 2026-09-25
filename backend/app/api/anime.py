@@ -4,9 +4,10 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.api.deps import DB, CurrentUser, OptionalUser
+from app.core.cache import redis
 from app.models import (
     AnalysisJob,
     EpisodeFingerprint,
@@ -26,13 +27,15 @@ from app.schemas import (
     EpisodeOut,
     JobOut,
     ListStatusUpdate,
+    PositionIn,
     Progress,
     ProgressUpdate,
     ReferenceOut,
+    ResumeOut,
     SkipSegmentOut,
     SynopsisOut,
 )
-from app.services import airing, catalog, list_status, synopsis
+from app.services import airing, aniskip, catalog, list_status, positions, synopsis
 from app.services.taste import predictor_for
 from app.worker.queue import analysis_queue, stop_job, timeout_message, timeout_seconds
 
@@ -40,6 +43,9 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["anime"])
 # How long past the timeout a running job may go unreported before it counts as dead.
 TIMEOUT_GRACE = timedelta(minutes=1)
+ANISKIP_CONFIDENCE = 0.5  # crowd-sourced, for another release of the episode
+# An episode analysed without finding its opening is tried again at most this often.
+RETRY_ANALYSIS_S = 24 * 3600
 
 
 @router.get("/anime/{anime_id}", response_model=AnimeDetail)
@@ -55,6 +61,8 @@ async def anime_detail(anime_id: int, user: OptionalUser, db: DB, lang: str = "e
             select(ListEntry).where(ListEntry.user_id == user.id, ListEntry.anime_id == anime_id)
         )
     detail = catalog.to_detail(anime, entry, predictor=await predictor_for(db, user))
+    if user is not None and (position := await positions.get(db, user.id, anime_id)):
+        detail.resume = ResumeOut.model_validate(position)
     detail.aired_episodes = await airing.aired_episodes(db, anime)
     if anime.next_episode_at and anime.next_episode_at > datetime.now(UTC):
         detail.next_episode, detail.next_episode_at = anime.next_episode, anime.next_episode_at
@@ -82,11 +90,27 @@ async def anime_synopsis(anime_id: int, db: DB, lang: str = Query(pattern=r"^[a-
 
 @router.get("/anime/{anime_id}/episodes/{episode}", response_model=EpisodeOut)
 async def episode_detail(anime_id: int, episode: int, db: DB):
-    segments = await db.scalars(
+    """The episode's opening/ending times: detected or entered ones, else AniSkip's (stored
+    until the detection finds the exact ones)."""
+    query = (
         select(SkipSegment)
         .where(SkipSegment.anime_id == anime_id, SkipSegment.episode == episode)
         .order_by(SkipSegment.start_s)
     )
+    segments = list(await db.scalars(query))
+    have = {s.kind for s in segments}
+    if "opening" not in have:
+        found = [f for f in await aniskip.skip_times(anime_id, episode) if f.kind not in have]
+        for f in found:
+            db.add(
+                SkipSegment(
+                    anime_id=anime_id, episode=episode, kind=f.kind, start_s=f.start_s,
+                    end_s=f.end_s, confidence=ANISKIP_CONFIDENCE, source="aniskip",
+                )
+            )  # fmt: skip
+        if found:
+            await db.commit()
+            segments = list(await db.scalars(query))
     return EpisodeOut(
         anime_id=anime_id,
         episode=episode,
@@ -106,6 +130,8 @@ async def update_progress(anime_id: int, body: ProgressUpdate, user: CurrentUser
         saved = await list_status.save(db, user, anime_id, new_status, body.episodes_watched)
     except list_status.NotSaved as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+    # A watched episode has nothing to resume.
+    await positions.clear(db, user.id, anime_id, up_to_episode=body.episodes_watched)
     return _progress(saved)
 
 
@@ -117,6 +143,26 @@ def _progress(saved: list_status.Saved) -> Progress:
         score=entry.score,
         failed=saved.failed,
     )
+
+
+@router.get("/anime/{anime_id}/position", response_model=ResumeOut | None)
+async def get_position(anime_id: int, user: CurrentUser, db: DB):
+    """Where the user stopped in the episode they're watching of this show (or null)."""
+    position = await positions.get(db, user.id, anime_id)
+    return ResumeOut.model_validate(position) if position else None
+
+
+# POST as well: navigator.sendBeacon (used when the tab closes) can only POST.
+@router.api_route("/anime/{anime_id}/position", methods=["PUT", "POST"], status_code=204)
+async def save_position(anime_id: int, body: PositionIn, user: CurrentUser, db: DB) -> None:
+    """Remember where playback is (replacing the show's earlier episode). Near the end the
+    position is dropped: the episode is finished."""
+    await positions.save(db, user.id, anime_id, body.episode, body.position_s, body.duration_s)
+
+
+@router.delete("/anime/{anime_id}/position", status_code=204)
+async def clear_position(anime_id: int, user: CurrentUser, db: DB) -> None:
+    await positions.clear(db, user.id, anime_id)
 
 
 @router.put("/anime/{anime_id}/list", response_model=Progress)
@@ -225,10 +271,16 @@ async def analyze_automatically(anime_id: int, body: AutoAnalyzeRequest, user: C
     if anime.num_episodes is None or body.episode < anime.num_episodes:
         wanted.append(body.episode + 1)
 
-    with_segments = set(
+    # Done: a detected opening (AniSkip's is only a stand-in), or times entered by hand.
+    with_opening = set(
         await db.scalars(
             select(SkipSegment.episode).where(
-                SkipSegment.anime_id == anime_id, SkipSegment.episode.in_(wanted)
+                SkipSegment.anime_id == anime_id,
+                SkipSegment.episode.in_(wanted),
+                or_(
+                    (SkipSegment.kind == "opening") & (SkipSegment.source != "aniskip"),
+                    SkipSegment.source == "manual",
+                ),
             )
         )
     )
@@ -241,6 +293,20 @@ async def analyze_automatically(anime_id: int, body: AutoAnalyzeRequest, user: C
         )
         if fp.compared_with
     }
+    # Analysed before without an opening: tried again (at most daily) once there's a saved
+    # opening fingerprint to search it for, e.g. learned from other episodes since.
+    has_reference = await db.scalar(
+        select(func.count())
+        .select_from(ReferenceSegment)
+        .where(ReferenceSegment.anime_id == anime_id, ReferenceSegment.kind == "opening")
+    )
+    if has_reference:
+        for ep in sorted(matched - with_opening):
+            if await redis().set(
+                f"analysis:retry:{anime_id}:{ep}", 1, ex=RETRY_ANALYSIS_S, nx=True
+            ):
+                matched.discard(ep)
+    with_segments = with_opening
     queued = {ep for job in await _running_jobs(db, anime_id) for ep in job.episodes}
     todo = [ep for ep in wanted if ep not in with_segments | matched | queued]
     if not todo:
