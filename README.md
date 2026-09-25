@@ -146,6 +146,8 @@ Connect with someone, get recommendations for both of you, and watch with a sync
 
 **Connecting.** **Invite someone** creates a link (`/together/join/<code>`, valid once, for 7 days). Whoever opens it while signed in (with MyAnimeList, AniList or both) is connected with you; opened while signed out, the invite is taken up right after signing in. A connection can be removed from its page (**Disconnect**).
 
+**Guests.** Someone without MyAnimeList or AniList can open the link and **Join as guest** with just a name. A guest is signed in on that browser like anyone else, and can watch together and invite others, but has no list: no My List, statistics, progress or resume, and the list endpoints answer 403. The recommendations then use only the inviter's list: their taste, with MAL's score and popularity standing in for the guest ("Show this to <guest>" is the inviter's favourites). If nobody in the pair has a list (two guests, or an empty list), the rows are the catalogue's **Top rated** and **Most popular** shows. A guest who signs in later keeps their connections: they become that account's user, or are merged into it if the account already has one. Removing a guest's last connection removes the guest.
+
 **Recommendations for both** (`GET /api/together/{id}`). Each person's taste is their score predictor (see Statistics), or without one (too few scores) their genre profile plus MAL's score. How much someone would like a show is measured against their own average and spread of scores, so a generous and a strict scorer count the same. The rows:
 
 - **Continue together**: shows you're both watching (or have on hold).

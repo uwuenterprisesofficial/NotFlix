@@ -17,7 +17,8 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
     api<{ mal: boolean; anilist: boolean }>("/auth/providers"),
     searchParams,
   ]);
-  if (me) redirect("/settings");
+  // A guest signs in here to use their own list (keeping their Watch Together connections).
+  if (me && !me.guest) redirect("/settings");
 
   const option = (href: string, label: string, enabled: boolean, note?: string) => (
     <div>
@@ -37,6 +38,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
       <h1 className="text-3xl font-black">{t("login.title")}</h1>
       <p className="mt-2 text-muted">{t("login.info")}</p>
       {params.login === "failed" && <p className="mt-4 text-red-400">{t("login.failed")}</p>}
+      {me?.guest && <p className="mt-4 text-sm">{t("guest.note")}</p>}
       <div className="mt-8 space-y-4">
         {option(
           "/api/auth/login?provider=mal",

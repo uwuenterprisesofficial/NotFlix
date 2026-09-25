@@ -32,6 +32,14 @@ export default async function TogetherPage() {
     <div className="mx-auto max-w-3xl px-4 pt-24 pb-16">
       <h1 className="text-3xl font-black md:text-4xl">{t("together.title")}</h1>
       <p className="mt-1 text-muted">{t("together.subtitle")}</p>
+      {me.guest && (
+        <p className="mt-4 rounded bg-surface-raised p-3 text-sm">
+          {t("guest.note")}{" "}
+          <Link href="/login" className="underline hover:text-white">
+            {t("guest.signIn")}
+          </Link>
+        </p>
+      )}
 
       <div className="mt-8">
         <InviteLink />

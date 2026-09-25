@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useSyncExternalStore, useTransition } from "react";
 import { LOCALE } from "@/lib/i18n";
@@ -54,22 +55,34 @@ export function UserMenu({ me }: { me: Me }) {
   return (
     <div className="flex items-center gap-3 text-sm">
       {message && <span className="hidden text-muted md:inline">{message}</span>}
-      <button
-        onClick={sync}
-        disabled={syncing}
-        className="rounded border border-white/30 px-3 py-1 hover:bg-white/10 disabled:opacity-50"
-        title={
-          !me.last_synced_at
-            ? t("user.neverSynced")
-            : hydrated
-              ? t("user.lastSynced", {
-                  when: new Date(me.last_synced_at).toLocaleString(LOCALE[lang]),
-                })
-              : t("user.lastSyncedShort")
-        }
-      >
-        {syncing ? t("user.syncing") : t("user.sync")}
-      </button>
+      {me.guest ? (
+        <>
+          <span className="rounded bg-white/15 px-2 py-0.5 text-xs">{t("guest.badge")}</span>
+          <Link
+            href="/login"
+            className="rounded border border-white/30 px-3 py-1 hover:bg-white/10"
+          >
+            {t("guest.signIn")}
+          </Link>
+        </>
+      ) : (
+        <button
+          onClick={sync}
+          disabled={syncing}
+          className="rounded border border-white/30 px-3 py-1 hover:bg-white/10 disabled:opacity-50"
+          title={
+            !me.last_synced_at
+              ? t("user.neverSynced")
+              : hydrated
+                ? t("user.lastSynced", {
+                    when: new Date(me.last_synced_at).toLocaleString(LOCALE[lang]),
+                  })
+                : t("user.lastSyncedShort")
+          }
+        >
+          {syncing ? t("user.syncing") : t("user.sync")}
+        </button>
+      )}
       <button onClick={logout} className="text-muted hover:text-white">
         {t("user.signOut")}
       </button>

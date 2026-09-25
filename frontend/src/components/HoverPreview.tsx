@@ -115,7 +115,8 @@ export function HoverPreview({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ status: "plan_to_watch" }),
     }).catch(() => null);
-    if (res?.status === 401) {
+    // Not signed in, or a guest (no list): sign in with one.
+    if (res?.status === 401 || res?.status === 403) {
       router.push("/login");
       return;
     }

@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 
-from app.api.deps import DB, CurrentUser, OptionalUser
+from app.api.deps import DB, CurrentUser, ListUser, OptionalUser
 from app.core.cache import redis
 from app.models import (
     AnalysisJob,
@@ -119,7 +119,7 @@ async def episode_detail(anime_id: int, episode: int, db: DB):
 
 
 @router.put("/anime/{anime_id}/progress", response_model=Progress)
-async def update_progress(anime_id: int, body: ProgressUpdate, user: CurrentUser, db: DB):
+async def update_progress(anime_id: int, body: ProgressUpdate, user: ListUser, db: DB):
     """Record watched episodes locally and on every linked list (MyAnimeList, AniList)."""
     anime = await catalog.get_anime(db, anime_id)
     if anime is None:
@@ -166,7 +166,7 @@ async def clear_position(anime_id: int, user: CurrentUser, db: DB) -> None:
 
 
 @router.put("/anime/{anime_id}/list", response_model=Progress)
-async def set_list_status(anime_id: int, body: ListStatusUpdate, user: CurrentUser, db: DB):
+async def set_list_status(anime_id: int, body: ListStatusUpdate, user: ListUser, db: DB):
     """Put a show on the user's lists with this status (e.g. "Plan to watch" from a preview
     card). Episodes watched so far are kept."""
     if await catalog.get_anime(db, anime_id) is None:

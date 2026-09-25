@@ -100,6 +100,60 @@ export function AcceptInvite({ code, name }: { code: string; name: string }) {
   );
 }
 
+/** Accept an invite without an account: just a name. */
+export function JoinAsGuest({ code }: { code: string }) {
+  const { t } = useT();
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function join(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    setFailed(false);
+    const res = await fetch(`/api/together/invites/${code}/guest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: name.trim() }),
+    }).catch(() => null);
+    if (res?.ok) {
+      try {
+        localStorage.removeItem(PENDING_INVITE_KEY); // taken up as a guest instead
+      } catch {}
+      const { id } = await res.json();
+      router.push(`/together/${id}`);
+      router.refresh();
+      return;
+    }
+    setFailed(true);
+    setBusy(false);
+  }
+
+  return (
+    <form onSubmit={join} className="flex flex-wrap gap-2">
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        maxLength={40}
+        required
+        placeholder={t("together.guestName")}
+        aria-label={t("together.guestName")}
+        className="min-w-0 flex-1 rounded bg-black/40 px-3 py-2"
+      />
+      <button
+        type="submit"
+        disabled={busy || !name.trim()}
+        className="rounded bg-white px-5 py-2 font-semibold text-black disabled:opacity-60"
+      >
+        {busy ? t("together.connecting") : t("together.guestJoin")}
+      </button>
+      {failed && <p className="w-full text-sm text-red-400">{t("together.guestFailed")}</p>}
+    </form>
+  );
+}
+
 /** Opened signed out: remember the invite, so it's taken up after signing in. */
 export function RememberInvite({ code }: { code: string }) {
   useEffect(() => {

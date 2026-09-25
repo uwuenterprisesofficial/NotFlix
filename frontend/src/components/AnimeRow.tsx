@@ -23,6 +23,8 @@ export function AnimeRow({ row, pairNames }: { row: Row; pairNames?: PairNames }
   const { t } = useT();
   const scroller = useRef<HTMLDivElement>(null);
   const key = `row.${row.id}`;
+  // Rows with a pair (Watch Together) come with their titles translated already.
+  const title = ROW_TITLES.has(key) && !pairNames ? t(key as MessageKey) : row.title;
 
   function scroll(direction: 1 | -1) {
     const el = scroller.current;
@@ -32,9 +34,7 @@ export function AnimeRow({ row, pairNames }: { row: Row; pairNames?: PairNames }
   return (
     <section id={row.id} className="group/row relative scroll-mt-20">
       <div className="mb-2 flex items-baseline gap-4 px-4 md:px-12">
-        <h2 className="text-lg font-semibold md:text-xl">
-          {ROW_TITLES.has(key) ? t(key as MessageKey) : row.title}
-        </h2>
+        <h2 className="text-lg font-semibold md:text-xl">{title}</h2>
         {row.id === "new-episodes" && (
           <Link href="/calendar" className="text-sm text-muted hover:text-white">
             {t("row.calendar")}

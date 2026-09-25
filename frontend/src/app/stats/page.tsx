@@ -11,11 +11,11 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function StatsPage() {
   const [me, { t }] = await Promise.all([apiOrNull<Me>("/me"), getT()]);
-  if (!me) {
+  if (!me || me.guest) {
     return (
       <div className="mx-auto mt-40 max-w-lg rounded-lg bg-surface-raised p-8 text-center">
         <h1 className="text-2xl font-bold">{t("nav.stats")}</h1>
-        <p className="mt-3 text-muted">{t("stats.signIn")}</p>
+        <p className="mt-3 text-muted">{me ? t("guest.stats") : t("stats.signIn")}</p>
       </div>
     );
   }

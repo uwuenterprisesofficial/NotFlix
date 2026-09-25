@@ -16,6 +16,8 @@ async function currentUser(): Promise<Me | null> {
 
 export async function Navbar() {
   const [me, { t }] = await Promise.all([currentUser(), getT()]);
+  // A guest (Watch Together without a list) has no list or statistics.
+  const withList = me !== null && !me.guest;
 
   return (
     <header className="fixed inset-x-0 top-0 z-50 bg-gradient-to-b from-black/90 to-transparent">
@@ -34,7 +36,7 @@ export async function Navbar() {
           <Link href="/" className="hover:text-white">
             {t("nav.home")}
           </Link>
-          {me && (
+          {withList && (
             <Link href="/#my-list" className="hover:text-white">
               {t("nav.myList")}
             </Link>
@@ -42,7 +44,7 @@ export async function Navbar() {
           <Link href="/calendar" className="hover:text-white">
             {t("nav.calendar")}
           </Link>
-          {me && (
+          {withList && (
             <Link href="/stats" className="hover:text-white">
               {t("nav.stats")}
             </Link>

@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import delete
+from test_anilist_accounts import _sign_in, clean, providers  # noqa: F401 (fixtures)
 
 from app.db.session import sync_session
 from app.models import Anime, Connection, ConnectionInvite, ListEntry, User
@@ -233,3 +234,106 @@ async def test_expected_position():
     room = {"position": 10.0, "playing": True, "at": 1_000_000}
     assert expected_position(room, 1_002_500) == 12.5
     assert expected_position({**room, "playing": False}, 1_002_500) == 10.0
+
+
+# Guests
+
+
+async def test_recommendations_with_a_guest(client, people, lists):
+    with sync_session() as db:
+        db.execute(delete(ListEntry).where(ListEntry.user_id == people.other.id))
+        guest = db.get(User, people.other.id)
+        guest.is_guest = True
+        db.commit()
+    people.other.is_guest = True
+    cid = await _connect(client, people)
+
+    body = (await client.get(f"/together/{cid}")).json()
+    assert body["me_list"] is True and body["partner_list"] is False
+    rows = {r["id"]: [c["id"] for c in r["items"]] for r in body["rows"]}
+    # Only tester's list: their favourites for the guest, what they're watching and planned.
+    assert set(rows["show_to_partner"]) == {1, 2, 3}
+    assert "show_to_me" not in rows and "both_loved" not in rows
+    assert rows["continue"] == [10] and rows["planned"] == [11]
+    assert 8 in rows["together"]
+    card = body["rows"][0]["items"][0]
+    assert card["pair"]["partner"] is None and card["pair"]["me"] is not None
+    assert body["compatibility"]["score"] is None
+
+    people.act_as(people.other)
+    body = (await client.get(f"/together/{cid}")).json()
+    rows = {r["id"]: [c["id"] for c in r["items"]] for r in body["rows"]}
+    assert set(rows["show_to_me"]) == {1, 2, 3}
+    # A guest has no list of their own.
+    assert (await client.put("/anime/1/progress", json={"episodes_watched": 1})).status_code == 403
+    assert (await client.post("/me/sync")).status_code == 403
+    assert (await client.get("/me/stats")).status_code == 403
+
+
+async def test_no_lists_at_all(client, people, lists):
+    with sync_session() as db:
+        db.execute(delete(ListEntry))
+        db.commit()
+    cid = await _connect(client, people)
+    body = (await client.get(f"/together/{cid}")).json()
+    assert body["me_list"] is False and body["partner_list"] is False
+    rows = {r["id"]: [c["id"] for c in r["items"]] for r in body["rows"]}
+    assert set(rows) == {"top_rated", "popular"}
+    popular = rows["popular"]
+    assert popular.index(1) < popular.index(11)  # by members
+
+
+async def test_disconnecting_removes_the_guest(client, people):
+    with sync_session() as db:
+        db.get(User, people.other.id).is_guest = True
+        db.commit()
+    people.other.is_guest = True
+    cid = await _connect(client, people)
+    assert (await client.delete(f"/together/{cid}")).status_code == 204
+    with sync_session() as db:
+        assert db.get(User, people.other.id) is None
+        assert db.get(User, people.me.id) is not None
+
+
+async def _join_as_guest(client, name="Sam"):
+    await _sign_in(client, "mal")
+    code = (await client.post("/together/invites")).json()["code"]
+    await client.post("/auth/logout")
+    res = await client.post(f"/together/invites/{code}/guest", json={"name": name})
+    assert res.status_code == 200 and res.json()["partner"]["name"] == "mal-user"
+    return res.json()["id"]
+
+
+@pytest.mark.usefixtures("providers")
+async def test_guest_signs_in_and_keeps_the_connection(client):
+    cid = await _join_as_guest(client)
+    me = (await client.get("/me")).json()
+    assert (me["name"], me["guest"], me["mal"], me["anilist"]) == ("Sam", True, None, None)
+    [conn] = (await client.get("/together")).json()
+    assert conn["id"] == cid
+    # Signed in already: joining as a guest again isn't possible.
+    assert (await client.post("/together/invites/x/guest", json={"name": "a"})).status_code == 409
+
+    # Signing in (an account nobody has yet) turns the guest into that account's user.
+    await _sign_in(client, "anilist")
+    after = (await client.get("/me")).json()
+    assert after["id"] == me["id"] and after["guest"] is False
+    assert after["name"] == "al-user" and after["anilist"] == {"name": "al-user"}
+    assert [c["id"] for c in (await client.get("/together")).json()] == [cid]
+
+
+@pytest.mark.usefixtures("providers")
+async def test_guest_signs_in_with_an_existing_account(client):
+    await _sign_in(client, "anilist")  # al-user exists already
+    owner = (await client.get("/me")).json()
+    await client.post("/auth/logout")
+    cid = await _join_as_guest(client)
+    guest_id = (await client.get("/me")).json()["id"]
+
+    await _sign_in(client, "anilist")
+    me = (await client.get("/me")).json()
+    assert me["id"] == owner["id"] and me["guest"] is False
+    [conn] = (await client.get("/together")).json()
+    assert conn["id"] == cid and conn["partner"]["name"] == "mal-user"
+    with sync_session() as db:
+        assert db.get(User, guest_id) is None
