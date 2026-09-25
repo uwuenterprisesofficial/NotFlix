@@ -12,7 +12,8 @@ import { useT } from "./I18nProvider";
 import { LanguageFlag } from "./LanguageFlag";
 import { Dropdown } from "./player/Dropdown";
 
-const POLL_MS = 3000;
+// While a scan runs, episodes are stored (and shown) as they're found: ask this often.
+const POLL_MS = 1500;
 export const SCAN_FINISHED_EVENT = "notflix:scan-finished";
 /** Dispatch after changing what providers should find (e.g. a mapping) to rescan. */
 export const SOURCES_CHANGED_EVENT = "notflix:sources-changed";
@@ -186,6 +187,12 @@ export function EpisodeBrowser({
         {nothingAired && t("airing.notAired")}
         {failed && t("episodes.loadFailed")}
         {running.length > 0 && t("episodes.looking", { providers: providerNames(running) })}
+        {running.length > 0 && data?.progress && data.progress.total > 1 && (
+          // Episodes appear as they're found; this says how far along the search is.
+          <span className="ml-1 tabular-nums">
+            {t("episodes.progress", { stored: data.progress.stored, total: data.progress.total })}
+          </span>
+        )}
         {broken.length > 0 && (
           <span className="block text-amber-400/80">
             {t("episodes.unreachable", { providers: providerNames(broken) })}

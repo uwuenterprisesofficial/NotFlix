@@ -43,6 +43,10 @@ export const detail = {
     en: "Couldn’t load episode availability.",
     de: "Verfügbarkeit der Folgen konnte nicht geladen werden.",
   },
+  "episodes.progress": {
+    en: "({stored} of {total} checked)",
+    de: "({stored} von {total} geprüft)",
+  },
   "episodes.looking": {
     en: "Looking for episodes on {providers}…",
     de: "Suche Folgen auf {providers}…",

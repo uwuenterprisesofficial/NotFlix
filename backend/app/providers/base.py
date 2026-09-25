@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, TypeVar
@@ -121,27 +121,44 @@ class StreamProvider(Protocol):
 SCAN_CONCURRENCY = 4
 
 
+# Receives a scan's results as they come in (episode -> options), to store them right away.
+Found = Callable[[dict[int, list[SourceOption]]], Awaitable[None]]
+
+
 async def scan_each_episode(
-    provider: StreamProvider, anime: AnimeInfo, episodes: list[int]
+    provider: StreamProvider, anime: AnimeInfo, episodes: list[int], found: Found | None = None
 ) -> dict[int, list[SourceOption]]:
-    """Default scan: ask for every episode, a few at a time. Providers that can list many
-    episodes in one request implement `scan` themselves."""
+    """Default scan: ask for every episode, a few at a time, in the given order (the ones the
+    user is nearest first); each episode is handed to `found` as soon as it's known. Providers
+    that can list many episodes in one request implement `scan` themselves."""
     limit = asyncio.Semaphore(SCAN_CONCURRENCY)
+    results: dict[int, list[SourceOption]] = {}
 
-    async def one(episode: int) -> tuple[int, list[SourceOption]]:
+    async def one(episode: int) -> None:
         async with limit:
-            return episode, await provider.options(anime, episode)
+            options = await provider.options(anime, episode)
+        results[episode] = options
+        if found is not None:
+            await found({episode: options})
 
-    return dict(await asyncio.gather(*(one(ep) for ep in episodes)))
+    await asyncio.gather(*(one(ep) for ep in episodes))
+    return results
+
+
+def lists_whole_show(provider: StreamProvider) -> bool:
+    """The provider lists a show's episodes in a request or two, so a scan covers them all."""
+    return bool(getattr(provider, "lists_whole_show", False))
 
 
 async def scan(
-    provider: StreamProvider, anime: AnimeInfo, episodes: list[int]
+    provider: StreamProvider, anime: AnimeInfo, episodes: list[int], found: Found | None = None
 ) -> dict[int, list[SourceOption]]:
+    """Every episode's options. Results may be handed to `found` along the way (the returned
+    dict has them all either way)."""
     custom = getattr(provider, "scan", None)
-    return await (
-        custom(anime, episodes) if custom else scan_each_episode(provider, anime, episodes)
-    )
+    if custom is None:
+        return await scan_each_episode(provider, anime, episodes, found)
+    return await custom(anime, episodes, found)
 
 
 def resolved_to_json(resolved: Resolved) -> dict[str, Any]:

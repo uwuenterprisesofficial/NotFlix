@@ -301,12 +301,22 @@ class CachedResolutionOut(BaseModel):
     resolved: ResolvedOut
 
 
+class ScanProgressOut(BaseModel):
+    """Running scans of a show: episodes stored so far out of those asked for."""
+
+    stored: int
+    total: int
+
+
 class ShowStreamsOut(BaseModel):
     """Everything the player needs for a show, to keep in the browser until `expires_at`."""
 
     providers: list[ProviderCoverageOut]
     scanning: bool
     expires_at: datetime
+    cursor: int = 0  # server time (ms): pass as `after` for what changed since
+    partial: bool = False  # only the episodes that changed (see `after`)
+    progress: ScanProgressOut | None = None
     episodes: list[EpisodeOptionsOut]
     resolutions: list[CachedResolutionOut]
 
@@ -328,6 +338,7 @@ class AvailabilityOut(BaseModel):
     checked: list[int]  # episodes every reachable provider has looked at
     scans: list[ProviderScanOut]
     scanning: bool
+    progress: ScanProgressOut | None = None
 
 
 class MappingOut(ORM):

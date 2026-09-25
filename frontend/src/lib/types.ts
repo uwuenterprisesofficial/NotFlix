@@ -267,6 +267,8 @@ export type Availability = {
   checked: number[];
   scans: ProviderScan[];
   scanning: boolean;
+  /** Running scans: episodes stored so far (they show up right away) of those asked for. */
+  progress?: { stored: number; total: number } | null;
 };
 
 /** GET /me/stats: statistics are computed in the background; poll while "loading". */

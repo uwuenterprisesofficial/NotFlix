@@ -5,6 +5,7 @@ import {
   isFresh,
   type ShowStreams,
   saveEpisodeOptions,
+  loadShowChanges,
   loadShowStreams,
   saveResolution,
   storedResolution,
@@ -19,6 +20,8 @@ type Resolution = { ok: true; resolved: Resolved } | { ok: false; error: string 
 const DIRECT_PATIENCE_MS = 8000;
 // Resolve the next episode's source once this one has been playing for a moment.
 const PREFETCH_AFTER_MS = 10_000;
+// While a scan runs, what it has found since is fetched this often.
+const SCAN_POLL_MS = 3000;
 // Links older than this may have expired early when they fail; younger ones are just broken.
 const STALE_LINKS_MS = 10 * 60_000;
 
@@ -88,31 +91,34 @@ export function useSources(
   const inflight = useRef(new Set<string>());
   const prefetched = useRef(false);
 
-  // The show's stream data: the stored copy while it's fresh, else one request. Providers that
-  // haven't covered this episode yet are asked for just this episode.
+  // The show's stream data: the stored copy while it's fresh, else one request. While a scan
+  // runs, what it has stored since is fetched every few seconds (episodes appear as they're
+  // found). Providers that haven't covered this episode yet are asked for just this episode.
   const [reload, setReload] = useState(0);
+  const asked = useRef(new Set<string>());
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     (async () => {
       let data = getShowStreams(animeId);
-      if (!data || !isFresh(data.expires_at)) {
+      const following = !!data?.scanning && !!data.cursor && isFresh(data.expires_at);
+      if (following || !data || !isFresh(data.expires_at)) {
         try {
-          data = await loadShowStreams(animeId, episode);
+          data = following
+            ? await loadShowChanges(animeId, episode)
+            : await loadShowStreams(animeId, episode);
         } catch {
           if (!cancelled && !data) setLoadError(true);
           if (!data) return;
         }
         if (cancelled) return;
       }
-      // Fetched mid-scan: fetch again once the scan should be done, so later episodes find
-      // complete data.
-      if (data.scanning)
-        timer = setTimeout(
-          () => setReload((r) => r + 1),
-          Math.max(1000, Date.parse(data.expires_at) - Date.now() + 500),
-        );
+      if (data.scanning) timer = setTimeout(() => setReload((r) => r + 1), SCAN_POLL_MS);
       for (const name of unsettled(data, episode)) {
+        // Once per provider and episode: the scan may simply not have got there yet.
+        const key = `${episode}:${name}`;
+        if (asked.current.has(key)) continue;
+        asked.current.add(key);
         fetch(
           `/api/anime/${animeId}/episodes/${episode}/sources?provider=${encodeURIComponent(name)}`,
         )

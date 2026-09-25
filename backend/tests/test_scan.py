@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -216,3 +217,104 @@ async def test_show_streams_come_in_one_response_with_stored_resolutions(client,
     ]
     await source_scan.forget(9, "counting")
     assert await source_scan.cached_resolutions(9) == []
+
+
+class GatedProvider(CountingProvider):
+    """Episodes after 6 wait for the gate: a scan that's partway through."""
+
+    def __init__(self):
+        super().__init__()
+        self.gate = asyncio.Event()
+
+    async def options(self, anime, episode):
+        if episode > 6:
+            await self.gate.wait()
+        return await super().options(anime, episode)
+
+
+@pytest.fixture
+def gated(monkeypatch):
+    provider = GatedProvider()
+    monkeypatch.setattr(providers_base, "enabled_providers", lambda: [provider])
+    monkeypatch.setattr(providers_base, "_down_until", {})
+    yield provider
+    provider.gate.set()  # never leave a scan hanging
+
+
+async def test_scan_results_are_stored_as_they_come(client, gated):
+    first = (await client.get("/anime/9/streams", params={"episode": 1})).json()
+    assert first["scanning"] is True and first["partial"] is False
+
+    for _ in range(100):  # the first episodes are stored while the rest is still going
+        body = (await client.get("/anime/9/availability")).json()
+        if len(body["checked"]) >= 6:
+            break
+        await asyncio.sleep(0.02)
+    assert body["scanning"] is True
+    assert body["checked"] == [1, 2, 3, 4, 5, 6]
+    assert body["progress"] == {"stored": 6, "total": 24}
+    assert body["episodes"][1] == {"episode": 2, "languages": ["de-dub", "en-sub"]}
+    # The nearest episodes were asked for first.
+    assert gated.calls[:6] == [1, 2, 3, 4, 5, 6]
+
+    # The player asks for what changed since its copy: just those episodes, empty ones too.
+    delta = (
+        await client.get("/anime/9/streams", params={"episode": 1, "after": first["cursor"]})
+    ).json()
+    assert delta["partial"] is True and delta["resolutions"] == []
+    assert [e["episode"] for e in delta["episodes"]] == [1, 2, 3, 4, 5, 6]
+    assert delta["episodes"][4] == {"episode": 5, "options": []}
+    assert delta["providers"][0]["episodes"] == [1, 2, 3, 4, 5, 6]
+
+    # A stored episode answers right away, though the scan isn't done.
+    sources = (await client.get("/anime/9/episodes/2/sources")).json()
+    assert [s["id"] for s in sources] == ["counting:de2", "counting:en2"]
+
+    gated.gate.set()
+    await source_scan.wait_idle()
+    rest = (
+        await client.get("/anime/9/streams", params={"episode": 1, "after": delta["cursor"]})
+    ).json()
+    assert rest["scanning"] is False and rest["progress"] is None
+    assert [e["episode"] for e in rest["episodes"]] == list(range(7, 25))
+
+
+async def test_a_later_scan_only_asks_for_missing_episodes(client, providers):
+    await client.get("/anime/9/availability")  # episodes 1-24 (the count is unknown)
+    await source_scan.wait_idle()
+    providers.calls.clear()
+    await client.get("/anime/9/streams", params={"episode": 20})  # episodes 15-32
+    await source_scan.wait_idle()
+    assert sorted(providers.calls) == list(range(25, 33))
+
+
+class ListingProvider(CountingProvider):
+    """Lists a whole show in one request."""
+
+    name = "listing"
+    lists_whole_show = True
+
+    def __init__(self):
+        super().__init__()
+        self.scans: list[list[int]] = []
+
+    async def scan(self, anime, episodes, found=None):
+        self.scans.append(episodes)
+        return {ep: [] for ep in episodes}
+
+
+async def test_listing_providers_cover_the_whole_show(client, monkeypatch, database):
+    from app.models import Anime
+
+    with sync_session() as db:
+        db.merge(Anime(id=77, title="Long", genres=[], num_episodes=200, status="finished_airing"))
+        db.commit()
+    counting, listing = CountingProvider(), ListingProvider()
+    monkeypatch.setattr(providers_base, "enabled_providers", lambda: [counting, listing])
+    await client.get("/anime/77/streams", params={"episode": 100})
+    await source_scan.wait_idle()
+    # Episode by episode: a window around the user, nearest first.
+    assert counting.calls[:3] == [100, 101, 99] and len(counting.calls) == 60
+    # One listing: every episode.
+    [asked] = listing.scans
+    assert sorted(asked) == list(range(1, 201)) and asked[0] == 100

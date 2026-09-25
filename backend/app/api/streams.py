@@ -3,7 +3,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser, OptionalUser
@@ -33,6 +33,7 @@ from app.schemas import (
     ProviderCoverageOut,
     ProviderScanOut,
     ResolvedOut,
+    ScanProgressOut,
     ShowStreamsOut,
     SkipSegmentOut,
     SourceOptionOut,
@@ -49,6 +50,8 @@ log = logging.getLogger(__name__)
 PROXY_LINKS_VALID = timedelta(seconds=TOKEN_MAX_AGE_S) - timedelta(hours=1)
 # While a scan runs, the browser's copy is incomplete: it asks again this soon.
 SCANNING_RECHECK = timedelta(seconds=30)
+# How long a request for one episode waits for a running episode-by-episode scan to get there.
+EPISODE_WAIT_S = 4
 router = APIRouter(prefix="/anime/{anime_id}", tags=["streams"])
 providers_router = APIRouter(tags=["streams"])
 
@@ -124,12 +127,14 @@ async def _start_scan(
     aired = await airing_info.aired_episodes(db, anime)
     if aired == 0:
         return info
-    window = source_scan.scan_window(
-        min(num_episodes or aired, aired) if aired else num_episodes, around
-    )
+    known = min(num_episodes or aired, aired) if aired else num_episodes
+    window = source_scan.scan_window(known, around)
     if aired:
         window = [ep for ep in window if ep <= aired]
-    await source_scan.ensure_scan(info, window, airing, force)
+    # Nearest to the user first: those are stored (and shown) first.
+    window = source_scan.by_distance(window, around)
+    whole = source_scan.by_distance(list(range(1, known + 1)), around) if known else None
+    await source_scan.ensure_scan(info, window, airing, force, whole=whole)
     return info
 
 
@@ -149,17 +154,27 @@ def _option_out(o: SourceOption) -> SourceOptionOut:
     )
 
 
+def _lists_whole_show(name: str) -> bool:
+    return any(
+        p.name == name and providers_base.lists_whole_show(p)
+        for p in providers_base.enabled_providers()
+    )
+
+
 async def _options(info: AnimeInfo, episode: int, provider: str) -> list[SourceOption]:
     """Cached options first; otherwise wait for a running scan, or ask the provider now."""
     cached = await source_scan.cached_options(info.id, episode, provider)
     if cached is not None:
         return cached
     if scan := source_scan.running_scan(info.id, provider, episode):
-        try:
-            await asyncio.wait_for(asyncio.shield(scan), OPTIONS_TIMEOUT_S)
-        except TimeoutError:
+        # Scans store as they go: this episode is there as soon as the scan has it. One that
+        # lists the whole show at once is waited for; one going episode by episode only
+        # briefly, then this episode is asked for directly.
+        wait = OPTIONS_TIMEOUT_S if _lists_whole_show(provider) else EPISODE_WAIT_S
+        if await source_scan.wait_for_episode(scan, episode, wait):
+            return await source_scan.cached_options(info.id, episode, provider) or []
+        if _lists_whole_show(provider):
             return []
-        return await source_scan.cached_options(info.id, episode, provider) or []
     try:
         live = await provider_options(info, episode, provider)
     except Exception as e:
@@ -184,16 +199,30 @@ async def episode_sources(
 
 
 @router.get("/streams", response_model=ShowStreamsOut)
-async def show_streams(anime_id: int, db: DB, user: OptionalUser, episode: int | None = None):
+async def show_streams(
+    anime_id: int,
+    db: DB,
+    user: OptionalUser,
+    episode: int | None = None,
+    after: int | None = Query(None, description="Only what changed since this `cursor`"),
+):
     """Every cached source of the show and every still-valid resolution, in one response, for
     the browser to keep until `expires_at`. A provider that hasn't covered an episode yet
-    (not in its `episodes`, and not failed) is asked through /episodes/{n}/sources."""
+    (not in its `episodes`, and not failed) is asked through /episodes/{n}/sources.
+
+    With `after` (the `cursor` of an earlier answer), only the episodes stored since then are
+    listed (each with all its options; none if it has none now), and no resolutions: while a
+    scan runs, the browser asks for that every few seconds instead of everything again."""
+    cursor = source_scan.now_ms()  # before reading: whatever is stored later comes next time
     info = await _start_scan(db, anime_id, user, around=episode)
     anime = await catalog.get_anime(db, anime_id)
     airing = anime is None or anime.num_episodes is None or anime.status == "currently_airing"
     names = [p.name for p in providers_base.enabled_providers()]
-    scans, options = await source_scan.cached_sources(info.id, names)
-    resolutions = await source_scan.cached_resolutions(info.id)
+    changed = await source_scan.changed_since(info.id, after) if after is not None else None
+    scans, options = await source_scan.cached_sources(info.id, names, changed)
+    resolutions = await source_scan.cached_resolutions(info.id) if changed is None else []
+    if changed is not None:
+        options = {ep: options.get(ep, []) for ep in changed}
 
     now = datetime.now(UTC)
     cap = now + PROXY_LINKS_VALID
@@ -216,6 +245,9 @@ async def show_streams(anime_id: int, db: DB, user: OptionalUser, episode: int |
         ],
         scanning=scanning,
         expires_at=expires_at,
+        cursor=cursor,
+        partial=changed is not None,
+        progress=_progress(info.id),
         episodes=[
             EpisodeOptionsOut(episode=ep, options=[_option_out(o) for o in found])
             for ep, found in sorted(options.items())
@@ -238,7 +270,13 @@ async def _availability(anime_id: int) -> AvailabilityOut:
         checked=found.checked,
         scans=[ProviderScanOut.model_validate(s) for s in found.scans],
         scanning=source_scan.scanning(anime_id),
+        progress=_progress(anime_id),
     )
+
+
+def _progress(anime_id: int) -> ScanProgressOut | None:
+    found = source_scan.progress(anime_id)
+    return ScanProgressOut(stored=found[0], total=found[1]) if found else None
 
 
 @router.get("/availability", response_model=AvailabilityOut)

@@ -11,6 +11,10 @@ export type ShowStreams = {
   providers: ProviderCoverage[];
   scanning: boolean;
   expires_at: string;
+  /** Server time of this data: `after` for what changed since (while a scan runs). */
+  cursor?: number;
+  /** Running scans: episodes stored so far of those asked for. */
+  progress?: { stored: number; total: number } | null;
   episodes: { episode: number; options: SourceOption[] }[];
   resolutions: StoredResolution[];
 };
@@ -80,6 +84,43 @@ export function loadShowStreams(animeId: number, episode: number): Promise<ShowS
       .then((data: ShowStreams) => {
         write(animeId, data);
         return data;
+      })
+      .finally(() => inflight.delete(animeId));
+    inflight.set(animeId, request);
+  }
+  return request;
+}
+
+type Changes = ShowStreams & { partial: boolean };
+
+/**
+ * While a scan runs: fetch only the episodes stored since the stored copy (each with all its
+ * options), and merge them in. Falls back to a full load without a copy to add to.
+ */
+export function loadShowChanges(animeId: number, episode: number): Promise<ShowStreams> {
+  const show = getShowStreams(animeId);
+  if (!show?.cursor) return loadShowStreams(animeId, episode);
+  let request = inflight.get(animeId);
+  if (!request) {
+    request = fetch(`/api/anime/${animeId}/streams?episode=${episode}&after=${show.cursor}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
+      .then((changes: Changes) => {
+        const current = getShowStreams(animeId) ?? show;
+        const changed = new Set(changes.episodes.map((e) => e.episode));
+        const merged: ShowStreams = {
+          ...current,
+          providers: changes.providers,
+          scanning: changes.scanning,
+          expires_at: changes.expires_at,
+          cursor: changes.cursor,
+          progress: changes.progress,
+          episodes: [
+            ...current.episodes.filter((e) => !changed.has(e.episode)),
+            ...changes.episodes.filter((e) => e.options.length),
+          ].sort((a, b) => a.episode - b.episode),
+        };
+        write(animeId, merged);
+        return merged;
       })
       .finally(() => inflight.delete(animeId));
     inflight.set(animeId, request);
