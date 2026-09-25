@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Anime, ListEntry, ListStatus, TasteModel, User
-from app.services.tags import category
+from app.services.tags import category, tags_from_names
 
 Tier = Literal["must_watch", "recommended", "maybe", "skip", "avoid"]
 TIERS: tuple[Tier, ...] = ("must_watch", "recommended", "maybe", "skip", "avoid")
@@ -40,7 +40,7 @@ RIDGE_POPULARITY = 2.0
 DROPPED_WEIGHT = 0.5
 FOLDS = 5
 MAX_STUDIOS = 2
-MODEL_VERSION = 1  # bump to refit stored models after a change to the features
+MODEL_VERSION = 2  # bump to refit stored models after a change to the features
 
 
 @dataclass(frozen=True)
@@ -64,15 +64,20 @@ class Show:
 
     @classmethod
     def of(cls, anime: Anime) -> "Show":
+        # Shows cached before the genre ids were stored only have the names.
+        tags = anime.genre_tags or tags_from_names(anime.genres or [])
+        year = anime.start_year
+        if year is None and anime.start_season and anime.start_season[-4:].isdigit():
+            year = int(anime.start_season[-4:])
         return cls(
             id=anime.id,
             title=anime.title,
             mean=anime.mean,
-            tags=tuple((t["id"], t["name"]) for t in anime.genre_tags or []),
+            tags=tuple((t["id"], t["name"]) for t in tags),
             studios=tuple(anime.studios or ()),
             source=anime.source,
             media_type=anime.media_type,
-            year=anime.start_year,
+            year=year,
             members=anime.num_list_users,
             rank=anime.rank,
             duration_s=anime.average_episode_duration,

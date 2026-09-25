@@ -361,3 +361,15 @@ class AnalysisOverview(BaseModel):
 class AnalyzeResponse(BaseModel):
     cached: bool
     job: JobOut | None
+
+
+class StatsStatusOut(BaseModel):
+    """The statistics page: cached statistics, and whether newer ones are being computed."""
+
+    status: Literal["ready", "loading", "failed"]
+    step: str | None = None  # what the background computation is doing
+    done: int = 0
+    total: int = 0
+    error: str | None = None
+    stats: StatsOut | None = None  # while loading: the previous statistics, if any
+    computed_at: datetime | None = None

@@ -62,3 +62,19 @@ def category(tag_id: int) -> Category:
     if tag_id in DEMOGRAPHIC_IDS:
         return "demographic"
     return "theme"
+
+
+_BY_NAME = {name.lower(): tag_id for tag_id, name in KNOWN_TAGS.items()} | {
+    # Older or long names MAL has used for the same ids.
+    "romantic subtext": 74,
+    "cute girls doing cute things": 52,
+    "sci fi": 24,
+}
+
+
+def tags_from_names(names: list[str]) -> list[dict]:
+    """Genre ids for shows cached before the ids were stored (only their names are), so they
+    still count until their details are fetched again."""
+    return [
+        {"id": _BY_NAME[name.lower()], "name": name} for name in names if name.lower() in _BY_NAME
+    ]

@@ -204,9 +204,17 @@ async def test_stats_and_predictions_in_the_api(client, user):
                      genre_tags=[{"id": 40, "name": "Psychological"}]))  # fmt: skip
         db.commit()
 
+    from app.services import stats_jobs
+
+    await stats_jobs.forget(user.id)
+    first = (await client.get("/me/stats")).json()
+    assert first["status"] == "loading" and first["stats"] is None
+    await stats_jobs.wait_idle()
     resp = await client.get("/me/stats")
     assert resp.status_code == 200
-    body = resp.json()
+    ready = resp.json()
+    assert ready["status"] == "ready"
+    body = ready["stats"]
     assert body["overview"]["scored"] == 60
     assert body["model"]["scored"] == 60
     assert body["plan_to_watch"][0]["prediction"]["tier"] in ("skip", "avoid")
@@ -245,3 +253,65 @@ async def test_genre_list_falls_back_to_known_tags(client):
 
 async def test_stats_need_sign_in(client):
     assert (await client.get("/me/stats")).status_code == 401
+
+
+def test_shows_cached_before_genre_ids_use_their_genre_names():
+    from app.models import Anime
+
+    anime = Anime(
+        id=1, title="Old", genres=["Action", "Isekai", "Shounen", "Romantic Subtext", "Unknown"],
+        genre_tags=[], start_season="fall 2019",
+    )  # fmt: skip
+    show = Show.of(anime)
+    assert show.tags == ((1, "Action"), (62, "Isekai"), (27, "Shounen"), (74, "Romantic Subtext"))
+    assert show.year == 2019
+
+
+async def test_stats_fill_in_missing_show_details_from_mal(client, user, monkeypatch):
+    """Shows without genre ids/members get their details fetched in the background."""
+    from app.core.config import get_settings
+    from app.db.session import sync_session
+    from app.models import Anime
+    from app.services import mal, stats_jobs
+    from app.services.stats_jobs import redis
+
+    listed = [(r.show, r.status, r.score) for r in _list(20)]
+    _seed_list(user, listed)
+    with sync_session() as db:
+        for anime in db.query(Anime).all():
+            anime.genre_tags, anime.num_list_users, anime.studios = [], None, []
+        db.commit()
+    for show, _, _ in listed:
+        await redis().delete(f"anime:details-tried:{show.id}")
+
+    detail_calls = []
+
+    def node(show):
+        return {
+            "id": show.id, "title": show.title, "mean": show.mean,
+            "genres": [{"id": i, "name": n} for i, n in show.tags],
+            "studios": [{"id": 1, "name": show.studios[0]}], "num_list_users": show.members,
+        }  # fmt: skip
+
+    async def my_animelist(self):
+        # The list endpoint leaves some shows incomplete; those are fetched one by one.
+        return [{"node": {**node(s), "num_list_users": None} if s.id % 2 else node(s),
+                 "list_status": {}} for s, _, _ in listed]  # fmt: skip
+
+    async def anime(self, anime_id, extra_fields=""):
+        detail_calls.append(anime_id)
+        return node(next(s for s, _, _ in listed if s.id == anime_id))
+
+    monkeypatch.setattr(get_settings(), "mal_client_id", "id")
+    monkeypatch.setattr(mal.MalClient, "my_animelist", my_animelist)
+    monkeypatch.setattr(mal.MalClient, "anime", anime)
+    await stats_jobs.forget(user.id)
+
+    assert (await client.get("/me/stats")).json()["status"] == "loading"
+    await stats_jobs.wait_idle()
+    body = (await client.get("/me/stats")).json()
+    assert body["status"] == "ready"
+    assert sorted(detail_calls) == sorted(s.id for s, _, _ in listed if s.id % 2)
+    assert len(body["stats"]["breakdown"]["genre"]) >= 4
+    with sync_session() as db:
+        assert all(a.genre_tags and a.num_list_users for a in db.query(Anime).all())

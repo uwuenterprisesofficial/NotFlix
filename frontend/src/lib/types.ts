@@ -225,3 +225,15 @@ export type Availability = {
   scans: ProviderScan[];
   scanning: boolean;
 };
+
+/** GET /me/stats: statistics are computed in the background; poll while "loading". */
+export type StatsStatus = {
+  status: "ready" | "loading" | "failed";
+  step: string | null;
+  done: number;
+  total: number;
+  error: string | null;
+  /** While loading: the previous statistics, if there are any. */
+  stats: Stats | null;
+  computed_at: string | null;
+};

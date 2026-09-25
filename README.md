@@ -143,7 +143,7 @@ So they adapt to how generously you score. The statistics page shows the thresho
 
 **Genre search.** MAL's API can't list shows by genre, so the genre search uses [Jikan](https://jikan.moe), an unofficial read-only MAL API (`JIKAN_URL`, cached for an hour). Without it, or when it's down, the search falls back to shows NotFlix already knows. The title search uses MAL's own search; without MAL credentials it searches the local catalog.
 
-The migration `9680d567f63d` adds the genre ids, studios, source, members and so on to cached shows and marks them stale, so they're fetched again from MAL. **Press "Sync MAL" once after upgrading** to get the details for your list.
+**Loading.** Statistics are computed in the background and cached (Redis) until your next list sync, so the page opens at once and shows progress while they're computed. The first time, listed shows that lack the details the statistics need (genre ids, studios, source, members — e.g. shows cached before those were stored) get them from MAL: from your list in a request or two, then one request per show still missing something. Shows cached before the genre ids were stored still count by their genre names in the meantime. "Sync MAL" starts the computation for the new list right away.
 
 ## Development
 

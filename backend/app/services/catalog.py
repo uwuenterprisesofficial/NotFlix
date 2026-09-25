@@ -10,7 +10,7 @@ from app.models import Anime, ListEntry
 from app.schemas import AnimeCard, AnimeDetail, PredictionOut, Progress, ReasonOut, TagOut
 from app.services import mal
 from app.services.sync import upsert_anime
-from app.services.tags import category
+from app.services.tags import category, tags_from_names
 from app.services.taste import Predictor, Show
 
 RANKING_TTL_SECONDS = 3600
@@ -71,7 +71,7 @@ def to_detail(
     detail = _build(AnimeDetail, anime, entry, reason, predictor, reasons=6)
     detail.tags = [
         TagOut(id=t["id"], name=t["name"], category=category(t["id"]))
-        for t in anime.genre_tags or []
+        for t in anime.genre_tags or tags_from_names(anime.genres or [])
     ]
     return detail
 
