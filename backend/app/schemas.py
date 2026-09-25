@@ -35,6 +35,11 @@ class TagOut(BaseModel):
     category: Literal["genre", "explicit", "demographic", "theme"]
 
 
+class AiringOut(BaseModel):
+    episode: int
+    airing_at: datetime
+
+
 class AnimeCard(ORM):
     id: int
     title: str
@@ -47,11 +52,16 @@ class AnimeCard(ORM):
     progress: Progress | None = None
     reason: str | None = None
     prediction: PredictionOut | None = None
+    airing: AiringOut | None = None  # in the release calendar / New Episodes: this episode
 
 
 class AnimeDetail(AnimeCard):
     synopsis: str | None = None
     synopsis_language: str = "en"  # MAL's are English; see GET /anime/{id}/synopsis
+    # Episodes aired so far (None: no limit known, e.g. finished), and the next one's air time.
+    aired_episodes: int | None = None
+    next_episode: int | None = None
+    next_episode_at: datetime | None = None
     status: str | None = None
     start_season: str | None = None
     tags: list[TagOut] = []
@@ -402,3 +412,10 @@ class StatsStatusOut(BaseModel):
     error: str | None = None
     stats: StatsOut | None = None  # while loading: the previous statistics, if any
     computed_at: datetime | None = None
+
+
+class CalendarOut(BaseModel):
+    """Episodes airing between two times (Japanese broadcast, from AniList), in order."""
+
+    items: list[AnimeCard]  # one per episode, with `airing` set
+    refreshing: bool  # the schedule is being updated; ask again shortly

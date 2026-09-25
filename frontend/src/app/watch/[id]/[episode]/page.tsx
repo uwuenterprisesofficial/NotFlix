@@ -1,6 +1,9 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AirTime } from "@/components/AirTime";
 import { Player } from "@/components/player/Player";
 import { api, apiOrNull } from "@/lib/api";
+import { getT } from "@/lib/i18n/server";
 import type { AnimeDetail, Episode, Me } from "@/lib/types";
 
 export default async function WatchPage({
@@ -20,6 +23,30 @@ export default async function WatchPage({
   ]);
   if (!anime || (anime.num_episodes && episode > anime.num_episodes)) notFound();
 
+  const aired = anime.aired_episodes;
+  if (aired !== null && episode > aired) {
+    // Not aired: no streams exist yet, so none are looked for.
+    const { t } = await getT();
+    const airsAt = episode === anime.next_episode ? anime.next_episode_at : null;
+    return (
+      <div className="grid aspect-video place-items-center rounded bg-surface-raised p-6 text-center">
+        <div>
+          <p className="text-lg font-semibold">{t("airing.notYetTitle", { episode })}</p>
+          {airsAt && (
+            <p className="mt-2 text-muted">
+              {t("airing.nextOn", { episode })}
+              <AirTime at={airsAt} />
+            </p>
+          )}
+          <p className="mt-2 text-sm text-muted">{t("airing.notYetInfo")}</p>
+          <Link href={`/anime/${anime.id}`} className="mt-4 inline-block text-sm underline">
+            {t("airing.back")}
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   // The heading and the player frame come from the layout.
   return (
     <Player
@@ -27,7 +54,7 @@ export default async function WatchPage({
       animeId={anime.id}
       episode={episode}
       segments={data.skip_segments}
-      hasNext={!anime.num_episodes || episode < anime.num_episodes}
+      hasNext={episode < (aired ?? anime.num_episodes ?? Infinity)}
       signedIn={me !== null}
       watched={anime.progress?.episodes_watched ?? 0}
       via={{ provider: param("via"), label: param("option") }}

@@ -1,10 +1,13 @@
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter
 from sqlalchemy import select
 
+from app.api.calendar import cards as calendar_cards
 from app.api.deps import DB, OptionalUser
 from app.models import Anime, ListEntry, ListStatus, Recommendation
 from app.schemas import AnimeDetail, BrowseResponse, Row
-from app.services import anilist_account, catalog, mal
+from app.services import airing, anilist_account, catalog, mal
 from app.services.taste import predictor_for
 
 router = APIRouter(tags=["browse"])
@@ -14,6 +17,26 @@ RANKING_ROWS = [
     ("bypopularity", "Most Popular"),
     ("upcoming", "Coming Soon"),
 ]
+
+
+NEW_EPISODES_DAYS = 3
+NEW_EPISODES_MAX = 40
+
+
+async def _new_episodes(db, user, entries: dict[int, ListEntry]):
+    """Episodes aired in the last days, newest first (each show once, its latest episode);
+    shows on the user's list first. The schedule is refreshed in the background."""
+    now = datetime.now(UTC)
+    since = now - timedelta(days=NEW_EPISODES_DAYS)
+    for monday in {airing.week_start(since), airing.week_start(now)}:
+        await airing.ensure_week(monday)
+    latest: dict[int, airing.Airing] = {}
+    for e in await airing.between(db, since, now):
+        latest[e.anime_id] = e  # in time order: the last one wins
+    ordered = sorted(latest.values(), key=lambda e: e.airing_at, reverse=True)
+    mine = {i for i, e in entries.items() if e.status != "dropped"}
+    ordered.sort(key=lambda e: e.anime_id not in mine)
+    return await calendar_cards(db, user, ordered[:NEW_EPISODES_MAX])
 
 
 @router.get("/browse", response_model=BrowseResponse)
@@ -81,6 +104,13 @@ async def browse(user: OptionalUser, db: DB):
             hero = detail(anime, rec.reason)
         elif watching:
             hero = detail(watching[0])
+
+    new_episodes = await _new_episodes(db, user, entries)
+    if new_episodes:
+        # Right after what the user is watching.
+        rows.insert(
+            1 if rows else 0, Row(id="new-episodes", title="New Episodes", items=new_episodes)
+        )
 
     if catalog.mal_configured():
         for ranking_type, title in RANKING_ROWS:

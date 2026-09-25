@@ -6,6 +6,7 @@ so list entries without one are skipped.
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -22,6 +23,8 @@ AUTH_URL = "https://anilist.co/api/v2/oauth/authorize"
 TOKEN_URL = "https://anilist.co/api/v2/oauth/token"
 ID_BATCH = 50  # media per request when mapping MAL ids to AniList ids
 MAX_RATE_LIMIT_WAIT_S = 90
+UNREACHABLE_BACKOFF_S = 60
+_down_until = 0.0  # after a connection failure, AniList isn't tried again until then
 
 log = logging.getLogger(__name__)
 
@@ -121,6 +124,9 @@ class AniListClient:
 
     async def query(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         """Run a query, waiting out AniList's rate limit (HTTP 429 with Retry-After)."""
+        global _down_until
+        if _down_until > time.monotonic():
+            raise AniListError("AniList was unreachable a moment ago")
         waited = 0.0
         while True:
             try:
@@ -130,6 +136,8 @@ class AniListClient:
                     headers=self._headers,
                 )
             except httpx.HTTPError as e:
+                # Don't make every page wait for the same failure.
+                _down_until = time.monotonic() + UNREACHABLE_BACKOFF_S
                 raise AniListError(f"AniList unreachable: {e}") from e
             if resp.status_code == 429 and waited < MAX_RATE_LIMIT_WAIT_S:
                 delay = float(resp.headers.get("Retry-After") or 30)
@@ -184,7 +192,7 @@ class AniListClient:
         return data["SaveMediaListEntry"]
 
 
-_MEDIA = """
+MEDIA_FIELDS = """
 id idMal episodes format status averageScore popularity duration source
 title { romaji english native } synonyms coverImage { extraLarge large } description(asHtml: false)
 genres season seasonYear startDate { year } studios(isMain: true) { nodes { name } }
@@ -195,7 +203,7 @@ query ($userId: Int) {{
   MediaListCollection(userId: $userId, type: ANIME) {{
     lists {{ entries {{
       status progress updatedAt score(format: POINT_10)
-      media {{ {_MEDIA} }}
+      media {{ {MEDIA_FIELDS} }}
     }} }}
   }}
 }}

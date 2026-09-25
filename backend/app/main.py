@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import anime, auth, browse, me, proxy, search, streams
+from app.api import anime, auth, browse, calendar, me, proxy, search, streams
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -20,6 +20,7 @@ app.include_router(auth.router)
 app.include_router(me.router)
 app.include_router(browse.router)
 app.include_router(search.router)
+app.include_router(calendar.router)
 app.include_router(anime.router)
 app.include_router(streams.router)
 app.include_router(streams.providers_router)

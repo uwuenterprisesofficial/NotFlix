@@ -31,7 +31,7 @@ from app.schemas import (
     SkipSegmentOut,
     SynopsisOut,
 )
-from app.services import anilist, anilist_account, catalog, mal, synopsis
+from app.services import airing, anilist, anilist_account, catalog, mal, synopsis
 from app.services.sync_tokens import mal_token
 from app.services.taste import predictor_for
 from app.worker.queue import analysis_queue, stop_job, timeout_message, timeout_seconds
@@ -55,6 +55,9 @@ async def anime_detail(anime_id: int, user: OptionalUser, db: DB, lang: str = "e
             select(ListEntry).where(ListEntry.user_id == user.id, ListEntry.anime_id == anime_id)
         )
     detail = catalog.to_detail(anime, entry, predictor=await predictor_for(db, user))
+    detail.aired_episodes = await airing.aired_episodes(db, anime)
+    if anime.next_episode_at and anime.next_episode_at > datetime.now(UTC):
+        detail.next_episode, detail.next_episode_at = anime.next_episode, anime.next_episode_at
     if synopsis.supported(lang):
         row = await synopsis.stored(db, anime_id, lang)
         if row is not None and row.synopsis:

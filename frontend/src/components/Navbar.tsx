@@ -37,6 +37,9 @@ export async function Navbar() {
               {t("nav.myList")}
             </Link>
           )}
+          <Link href="/calendar" className="hover:text-white">
+            {t("nav.calendar")}
+          </Link>
           {me && (
             <Link href="/stats" className="hover:text-white">
               {t("nav.stats")}
