@@ -165,13 +165,12 @@ async def connections(user: CurrentUser, db: DB):
         if partner is None:
             continue
         watching, online = await _partner_watching(conn, user)
-        cached = await together.cached(conn.id)
         out.append(
             ConnectionOut(
                 id=conn.id,
                 partner=_person(partner),
                 created_at=conn.created_at,
-                compatibility=cached["compatibility"]["score"] if cached else None,
+                compatibility=await together.score(conn.id),
                 partner_watching=watching,
                 partner_online=online,
             )

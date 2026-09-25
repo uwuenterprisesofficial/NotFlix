@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from app.core import http
 from app.core.cache import get_json, set_json
 from app.providers.base import (
     AnimeInfo,
@@ -106,12 +107,8 @@ class ReAnimeProvider:
         self._http = http
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        client = self._http or httpx.AsyncClient(timeout=httpx.Timeout(30, connect=5))
-        try:
-            resp = await client.get(f"{self.base_url}{path}", params=params)
-        finally:
-            if self._http is None:
-                await client.aclose()
+        client = self._http or http.shared("reanime", timeout=httpx.Timeout(30, connect=5))
+        resp = await client.get(f"{self.base_url}{path}", params=params)
         if resp.status_code == 404:
             return None
         if resp.status_code >= 400:

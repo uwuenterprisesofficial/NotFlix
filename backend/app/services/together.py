@@ -301,12 +301,15 @@ async def _pool(db: AsyncSession, user_ids: tuple[int, int]) -> dict[int, Show]:
     return found
 
 
-async def cached(connection_id: int) -> dict[str, Any] | None:
-    return await get_json(f"together:{connection_id}")
+async def score(connection_id: int) -> int | None:
+    """The pair's compatibility, when it has been computed (kept apart from the whole report,
+    which is large, for the connection list)."""
+    found = await redis().get(f"together:{connection_id}:score")
+    return int(found) if found not in (None, b"") else None
 
 
 async def forget(connection_id: int) -> None:
-    await redis().delete(f"together:{connection_id}")
+    await redis().delete(f"together:{connection_id}", f"together:{connection_id}:score")
 
 
 def _version(a: User, b: User) -> str:
@@ -352,6 +355,8 @@ async def report(db: AsyncSession, connection_id: int, a: User, b: User) -> dict
         "pairs": {str(i): _pair(ma, mb, shows[i]) for i in ids},
     }
     await set_json(key, result, CACHE_TTL_S)
+    compat_score = compat["score"]
+    await redis().set(f"{key}:score", "" if compat_score is None else compat_score, ex=CACHE_TTL_S)
     return result
 
 

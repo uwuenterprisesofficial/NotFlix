@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -51,6 +52,10 @@ query ($mal: Int) {
 """
 
 _refreshing: dict[str, asyncio.Task] = {}
+_checking: dict[int, asyncio.Task] = {}  # shows being asked about, by MAL id
+_background: set[asyncio.Task] = set()
+CHECK_WAIT_S = 4  # longest a page waits for AniList
+CHECK_FAILED_TTL_S = 600
 
 
 def week_start(day: datetime) -> datetime:
@@ -156,8 +161,9 @@ async def ensure_week(monday: datetime, wait: bool = False) -> bool:
 
 
 async def wait_idle() -> None:
-    while _refreshing:
-        await asyncio.gather(*list(_refreshing.values()), return_exceptions=True)
+    while _refreshing or _checking or _background:
+        tasks = [*_refreshing.values(), *_checking.values(), *_background]
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 @dataclass
@@ -193,18 +199,50 @@ async def _check_show(db: AsyncSession, anime: Anime) -> None:
     await db.commit()
 
 
+async def _check_by_id(anime_id: int) -> None:
+    async with AsyncSessionLocal() as db:
+        anime = await db.get(Anime, anime_id)
+        if anime is not None:
+            await _check_show(db, anime)
+
+
+async def _check(anime_id: int) -> None:
+    """Ask AniList about a show once, however many requests want to know at the same time. A
+    failure isn't retried for a while (every page view would wait for it otherwise)."""
+    task = _checking.get(anime_id)
+    if task is None:
+        if await redis().exists(f"airing:failed:{anime_id}"):
+            return
+        task = asyncio.create_task(_check_by_id(anime_id))
+        _checking[anime_id] = task
+        task.add_done_callback(lambda _: _checking.pop(anime_id, None))
+    try:
+        await asyncio.shield(task)
+    except anilist_account.AniListError as e:
+        log.info("Next episode of anime %s unknown: %s", anime_id, e)
+        await redis().set(f"airing:failed:{anime_id}", 1, ex=CHECK_FAILED_TTL_S)
+
+
 async def aired_episodes(db: AsyncSession, anime: Anime | None) -> int | None:
     """How many episodes have aired; None when there's no limit to apply (finished, or not
-    known). Episodes after that haven't aired, so there are no streams to look for."""
+    known). Episodes after that haven't aired, so there are no streams to look for.
+
+    AniList is only waited for when the answer may be wrong otherwise (never checked, or the
+    next episode's air time has passed); a check that's merely due runs in the background."""
     if anime is None or anime.status == "finished_airing":
         return None
     now = datetime.now(UTC)
+    passed = anime.next_episode_at is not None and anime.next_episode_at <= now
     fresh = anime.airing_checked_at is not None and now - anime.airing_checked_at < SHOW_TTL
-    if not fresh or (anime.next_episode_at is not None and anime.next_episode_at <= now):
-        try:
-            await _check_show(db, anime)
-        except anilist_account.AniListError as e:
-            log.info("Next episode of anime %s unknown: %s", anime.id, e)
+    if anime.airing_checked_at is None or passed:
+        # Past the wait, it carries on in the background; this answer uses what's known.
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(_check(anime.id), CHECK_WAIT_S)
+        await db.refresh(anime)
+    elif not fresh:
+        task = asyncio.create_task(_check(anime.id))
+        _background.add(task)
+        task.add_done_callback(_background.discard)
     if anime.next_episode_at is not None and anime.next_episode_at > now and anime.next_episode:
         return anime.next_episode - 1
     return 0 if anime.status == "not_yet_aired" else None

@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from app.core import http as shared_http
 from app.core.config import get_settings
 from app.models import ListStatus
 from app.services.tags import tags_from_names
@@ -92,12 +93,8 @@ async def exchange_code(code: str, http: httpx.AsyncClient | None = None) -> Tok
         "redirect_uri": s.anilist_redirect_uri,
         "code": code,
     }
-    client = http or httpx.AsyncClient(timeout=20)
-    try:
-        resp = await client.post(TOKEN_URL, json=payload, headers={"Accept": "application/json"})
-    finally:
-        if http is None:
-            await client.aclose()
+    client = http or shared_http.shared("anilist", timeout=httpx.Timeout(30, connect=10))
+    resp = await client.post(TOKEN_URL, json=payload, headers={"Accept": "application/json"})
     if resp.status_code >= 400:
         raise AniListError(f"AniList token request failed ({resp.status_code}): {resp.text[:200]}")
     data = resp.json()
@@ -109,8 +106,7 @@ class AniListClient:
     """GraphQL calls as the signed-in user (or anonymously, without a token)."""
 
     def __init__(self, token: str | None = None, http: httpx.AsyncClient | None = None):
-        self._http = http or httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10))
-        self._own_http = http is None
+        self._http = http or shared_http.shared("anilist", timeout=httpx.Timeout(30, connect=10))
         self._headers = {"Accept": "application/json"}
         if token:
             self._headers["Authorization"] = f"Bearer {token}"
@@ -119,8 +115,7 @@ class AniListClient:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        if self._own_http:
-            await self._http.aclose()
+        pass  # the client is shared
 
     async def query(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         """Run a query, waiting out AniList's rate limit (HTTP 429 with Retry-After)."""

@@ -4,7 +4,7 @@ from typing import TypeVar
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.cache import get_json, set_json
+from app.core.cache import get_json, redis, set_json
 from app.core.config import get_settings
 from app.models import Anime, ListEntry
 from app.schemas import AnimeCard, AnimeDetail, PredictionOut, Progress, ReasonOut, TagOut
@@ -14,6 +14,7 @@ from app.services.tags import category, tags_from_names
 from app.services.taste import Predictor, Show
 
 RANKING_TTL_SECONDS = 3600
+FAILURE_TTL_SECONDS = 300  # after MAL fails, it's asked again after this long
 
 
 def mal_configured() -> bool:
@@ -88,9 +89,17 @@ async def ranking(db: AsyncSession, ranking_type: str, limit: int = 20) -> list[
     cached = await get_json(key)
     if cached is not None:
         return await anime_by_ids(db, cached)
+    # MAL just failed: not asked again on every page view for a while.
+    if await redis().exists(f"{key}:failed"):
+        raise mal.MalError("MAL failed a moment ago")
 
-    async with mal.MalClient() as client:
-        nodes = await client.ranking(ranking_type, limit)
+    try:
+        async with mal.MalClient() as client:
+            nodes = await client.ranking(ranking_type, limit)
+    except mal.MalError as e:
+        if e.outage:
+            await redis().set(f"{key}:failed", 1, ex=FAILURE_TTL_SECONDS)
+        raise
     await upsert_anime(db, nodes)
     await db.commit()
     ids = [n["id"] for n in nodes]

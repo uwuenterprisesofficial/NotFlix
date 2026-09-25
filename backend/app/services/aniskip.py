@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from app.core import http as shared_http
 from app.core.cache import redis
 from app.core.config import get_settings
 
@@ -44,8 +45,11 @@ async def skip_times(mal_id: int, episode: int) -> list[Found]:
     url = f"{get_settings().aniskip_url.rstrip('/')}/v2/skip-times/{mal_id}/{episode}"
     params = [("types", t) for t in KINDS] + [("episodeLength", "0")]
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_S, transport=_transport) as http:
-            resp = await http.get(url, params=params)
+        if _transport is not None:  # tests
+            async with httpx.AsyncClient(timeout=TIMEOUT_S, transport=_transport) as client:
+                resp = await client.get(url, params=params)
+        else:
+            resp = await shared_http.shared("aniskip", timeout=TIMEOUT_S).get(url, params=params)
         data = resp.json() if resp.status_code in (200, 404) else None
     except (httpx.HTTPError, ValueError) as e:
         log.info("AniSkip for %s E%s: %s", mal_id, episode, e)

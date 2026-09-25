@@ -8,6 +8,7 @@ import type { Connection } from "@/lib/types";
 import { useT } from "../I18nProvider";
 
 const POLL_MS = 20_000;
+const IDLE_POLL_MS = 5 * 60_000;
 
 /**
  * Anywhere in the app: "Anna is watching X · Episode 3 — Join" while a connection is watching in
@@ -33,20 +34,31 @@ export function TogetherToast() {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let last = 0;
+    // Someone without connections is asked rarely (they may accept an invite elsewhere).
     const load = () => {
-      if (document.visibilityState !== "visible") return;
+      clearTimeout(timer);
+      if (cancelled || document.visibilityState !== "visible") return;
+      last = Date.now();
       fetch("/api/together")
         .then((r) => (r.ok ? r.json() : []))
-        .then((all: Connection[]) => !cancelled && setConnections(all))
-        .catch(() => {});
+        .catch(() => [])
+        .then((all: Connection[]) => {
+          if (cancelled) return;
+          setConnections(all);
+          timer = setTimeout(load, all.length ? POLL_MS : IDLE_POLL_MS);
+        });
     };
+    // Back to the tab: at once, unless it was just asked.
+    const onVisible = () =>
+      document.visibilityState === "visible" && Date.now() - last > POLL_MS / 2 && load();
     load();
-    const timer = setInterval(load, POLL_MS);
-    document.addEventListener("visibilitychange", load);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", load);
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 

@@ -133,18 +133,27 @@ function Room({
     if (animeId) query.set("anime_id", String(animeId));
     if (episode) query.set("episode", String(episode));
     const events = new EventSource(`/api/together/${connectionId}/room/events?${query}`);
+    // Ready once both the room's state and who's in it are known (for this page): a player
+    // that settled before knowing the partner is there would take itself for the first one.
+    let gotState = false;
+    let gotPresence = false;
     events.onopen = () => setOffline(false);
     events.onerror = () => setOffline(true);
     events.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       if (msg.type === "state") {
         accept(msg.state);
-        setReady(true);
+        gotState = true;
       } else if (msg.type === "presence") {
         setMembers(msg.members);
+        gotPresence = true;
       }
+      if (gotState && gotPresence) setReady(true);
     };
-    return () => events.close();
+    return () => {
+      events.close();
+      setReady(false); // the next page's stream says again
+    };
   }, [connectionId, animeId, episode, accept]);
 
   // The partner started another episode: follow them.

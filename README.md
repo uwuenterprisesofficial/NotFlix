@@ -38,6 +38,14 @@ The browser only talks to Next.js. `/api/*` is proxied to FastAPI, so the sessio
 3. `docker compose up --build`
 4. Open <http://localhost:3000>, sign in, and press **Sync MAL**.
 
+**Faster everyday use.** Plain `docker compose up` runs the development setup: the frontend is Next's dev server (every page is compiled on its first visit, and React runs its slower development build) and the backend reloads on code changes. For watching rather than developing, use the production override, which serves the optimized build:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+```
+
+Code changes then need `--build` again. (Docker Compose 2.24 or newer.)
+
 ### Without Docker
 
 Needs Postgres, Redis and ffmpeg installed locally.

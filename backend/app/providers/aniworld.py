@@ -11,6 +11,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 from bs4 import BeautifulSoup
 
+from app.core import http
 from app.core.cache import get_json, set_json
 from app.providers.base import (
     SCAN_CONCURRENCY,
@@ -165,18 +166,15 @@ class AniWorldProvider:
         self._http = http
 
     def _client(self) -> httpx.AsyncClient:
-        return self._http or httpx.AsyncClient(
+        return self._http or http.shared(
+            "aniworld",
             timeout=httpx.Timeout(20, connect=5),
             headers={"User-Agent": USER_AGENT, "Accept-Language": "de-DE,de;q=0.9"},
         )
 
     async def _fetch(self, path: str) -> str | None:
         client = self._client()
-        try:
-            resp = await client.get(f"{self.base_url}{path}", follow_redirects=True)
-        finally:
-            if self._http is None:
-                await client.aclose()
+        resp = await client.get(f"{self.base_url}{path}", follow_redirects=True)
         if resp.status_code == 404:
             return None
         if resp.status_code >= 400:
@@ -305,9 +303,6 @@ class AniWorldProvider:
             location = resp.headers.get("location", "")
         except httpx.HTTPError:
             location = ""
-        finally:
-            if self._http is None:
-                await client.aclose()
         return location if location.startswith("https://") else url
 
     async def resolve(self, anime: AnimeInfo, episode: int, key: str) -> Resolved:
@@ -352,11 +347,7 @@ class AniWorldApiProvider(AniWorldProvider):
     async def _api(self, path: str, params: dict[str, Any] | None = None) -> Any:
         """Parsed JSON, or None when the API says the series/episode doesn't exist (4xx)."""
         client = self._client()
-        try:
-            resp = await client.get(f"{self.base_url}{path}", params=params)
-        finally:
-            if self._http is None:
-                await client.aclose()
+        resp = await client.get(f"{self.base_url}{path}", params=params)
         if 400 <= resp.status_code < 500:
             return None
         if resp.status_code >= 500:

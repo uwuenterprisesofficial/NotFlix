@@ -179,6 +179,23 @@ export function usePartySync(
     if (fresh) play(video);
   }, [ref, room, together, apply, send, play]);
 
+  /** Alone: report; with the partner: follow the room. Whoever was here first tells the room
+   * where their video really is when the partner arrives, before anything is corrected. */
+  const step = useCallback(() => {
+    const video = ref.current;
+    if (!video || !latest.current?.ready || !settled.current) return;
+    if (!together()) {
+      wasAlone.current = true;
+      if (video.playbackRate !== 1) video.playbackRate = 1;
+      report();
+    } else if (wasAlone.current) {
+      wasAlone.current = false;
+      send("seek", !video.paused);
+    } else {
+      apply();
+    }
+  }, [ref, together, report, send, apply]);
+
   // The room changed (or became known), or someone came or went.
   const rev = party?.state?.rev;
   const at = party?.state?.at;
@@ -186,8 +203,8 @@ export function usePartySync(
   useEffect(() => {
     if (!party) return;
     if (!settled.current) settle();
-    else if (together()) apply();
-  }, [party, rev, at, members, settle, together, apply]);
+    else step();
+  }, [party, rev, at, members, settle, step]);
 
   const active = party !== null;
   useEffect(() => {
@@ -231,23 +248,7 @@ export function usePartySync(
     video.addEventListener("loadedmetadata", onLoaded);
     if (video.readyState >= 1) onLoaded();
 
-    const timer = setInterval(() => {
-      const p = latest.current;
-      if (!p?.ready || !settled.current) return;
-      if (together()) {
-        // The partner just came: tell them where this video really is, then keep in step.
-        if (wasAlone.current) {
-          wasAlone.current = false;
-          send("seek", !video.paused);
-          return;
-        }
-        apply();
-      } else {
-        wasAlone.current = true;
-        if (video.playbackRate !== 1) video.playbackRate = 1;
-        report();
-      }
-    }, CHECK_EVERY_MS);
+    const timer = setInterval(step, CHECK_EVERY_MS);
     return () => {
       video.removeEventListener("play", onPlay);
       video.removeEventListener("pause", onPause);
@@ -259,7 +260,7 @@ export function usePartySync(
       clearInterval(timer);
       video.playbackRate = 1;
     };
-  }, [ref, active, room, together, apply, report, settle, send]);
+  }, [ref, active, room, settle, send, step]);
 
   return {
     blocked,

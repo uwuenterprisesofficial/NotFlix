@@ -6,6 +6,7 @@ import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { AnimeToastMapping } from "@/components/AnimeToastMapping";
 import { AniWorldMapping } from "@/components/AniWorldMapping";
 import { EpisodeBrowser } from "@/components/EpisodeBrowser";
+import { LazyDetails } from "@/components/LazyDetails";
 import { PredictionPanel } from "@/components/PredictionPanel";
 import { WatchTogetherMenu } from "@/components/together/TogetherBar";
 import { apiOrNull } from "@/lib/api";
@@ -142,18 +143,23 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
 
       {me && !me.guest && (
         // Rarely needed: fixing a wrong source match, and intro/outro detection.
-        <details className="group mt-12 max-w-2xl">
-          <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded bg-surface-raised px-4 py-2 text-sm font-semibold hover:bg-neutral-700 [&::-webkit-details-marker]:hidden">
-            <span aria-hidden className="transition-transform group-open:rotate-90">
-              ▸
-            </span>
-            {t("detail.moreOptions")}
-            <span className="font-normal text-muted">{t("detail.moreOptionsInfo")}</span>
-          </summary>
+        // Its panels load their data only once it's opened.
+        <LazyDetails
+          className="group mt-12 max-w-2xl"
+          summary={
+            <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded bg-surface-raised px-4 py-2 text-sm font-semibold hover:bg-neutral-700 [&::-webkit-details-marker]:hidden">
+              <span aria-hidden className="transition-transform group-open:rotate-90">
+                ▸
+              </span>
+              {t("detail.moreOptions")}
+              <span className="font-normal text-muted">{t("detail.moreOptionsInfo")}</span>
+            </summary>
+          }
+        >
           <AniWorldMapping animeId={anime.id} />
           <AnimeToastMapping animeId={anime.id} />
           <AnalyzePanel animeId={anime.id} signedIn />
-        </details>
+        </LazyDetails>
       )}
     </div>
   );

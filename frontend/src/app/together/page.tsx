@@ -79,6 +79,7 @@ export default async function TogetherPage() {
               {c.partner_watching && (
                 <Link
                   href={watchHref(c.partner_watching, c.id)}
+                  prefetch={false}
                   className="rounded bg-white px-4 py-1.5 text-sm font-semibold text-black"
                 >
                   ▶ {t("together.join")}
@@ -86,6 +87,8 @@ export default async function TogetherPage() {
               )}
               <Link
                 href={`/together/${c.id}`}
+                // Each would compute that pair's recommendations: only when opened.
+                prefetch={false}
                 className="rounded bg-brand px-4 py-1.5 text-sm font-semibold hover:bg-brand-dark"
               >
                 {t("together.open")}

@@ -5,7 +5,7 @@ from sqlalchemy import cast, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.api.deps import DB, OptionalUser
-from app.core.cache import get_json, set_json
+from app.core.cache import get_json, redis, set_json
 from app.models import Anime, ListEntry
 from app.schemas import GenreOut, SearchResponse
 from app.services import catalog, catalog_jobs, jikan, mal
@@ -19,6 +19,7 @@ MAL_MIN_QUERY = 3  # MAL's search rejects shorter queries
 GENRES_TTL_SECONDS = 24 * 3600
 GENRE_PAGE_TTL_SECONDS = 3600
 MAL_SEARCH_TTL_SECONDS = 7 * 24 * 3600
+MAL_FAILURE_TTL_SECONDS = 60
 CATALOGUE_EXTRA = 12  # catalogue-only matches added to the first page of MAL's results
 CATEGORY_ORDER = {"genre": 0, "theme": 1, "demographic": 2, "explicit": 3}
 
@@ -75,10 +76,14 @@ async def _mal_search(q: str, page: int) -> list[dict] | None:
     key = f"mal:search:{q.lower()}:{page}"
     nodes = await get_json(key)
     if nodes is None:
+        if await redis().exists("mal:search:failed"):
+            return None  # MAL failed a moment ago: the catalogue answers meanwhile
         try:
             async with mal.MalClient() as client:
                 nodes = await client.search(q, PAGE_SIZE + 1, (page - 1) * PAGE_SIZE)
-        except mal.MalError:
+        except mal.MalError as e:
+            if e.outage:
+                await redis().set("mal:search:failed", 1, ex=MAL_FAILURE_TTL_SECONDS)
             return None
         await set_json(key, nodes, MAL_SEARCH_TTL_SECONDS)
     return nodes

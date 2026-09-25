@@ -120,7 +120,11 @@ def catalogue_jobs(monkeypatch):
         from app.core.config import get_settings
 
         r = Redis.from_url(get_settings().redis_url)
-        keys = list(r.scan_iter("catalog:queued:*")) + list(r.scan_iter("mal:search:*"))
+        keys = [
+            k
+            for pattern in ("catalog:queued:*", "mal:search:*", "mal:ranking:*", "airing:failed:*")
+            for k in r.scan_iter(pattern)
+        ]
         if keys:
             r.delete(*keys)
     except Exception:

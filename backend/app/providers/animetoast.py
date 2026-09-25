@@ -17,6 +17,7 @@ from urllib.parse import quote, urlsplit
 
 import httpx
 
+from app.core import http
 from app.core.cache import get_json, set_json
 from app.providers.aniworld import SCRAPER_LANGUAGES
 from app.providers.base import (
@@ -75,12 +76,8 @@ class AnimeToastProvider:
 
     async def _api(self, path: str, params: dict[str, Any] | None = None) -> Any:
         """Parsed JSON, or None when AniScraper says it doesn't exist (4xx)."""
-        client = self._http or httpx.AsyncClient(timeout=httpx.Timeout(60, connect=5))
-        try:
-            resp = await client.get(f"{self.base_url}{path}", params=params)
-        finally:
-            if self._http is None:
-                await client.aclose()
+        client = self._http or http.shared("aniscraper", timeout=httpx.Timeout(60, connect=5))
+        resp = await client.get(f"{self.base_url}{path}", params=params)
         if 400 <= resp.status_code < 500:
             return None
         if resp.status_code >= 500:

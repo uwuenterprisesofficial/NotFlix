@@ -131,6 +131,8 @@ export function DirectVideo({
     save.current = (final) => {
       const video = ref.current;
       if (!video || !onSave || !loaded.current || !video.duration) return;
+      // Already saved there (leaving pauses the video and unmounts it: one save is enough).
+      if (Math.abs(video.currentTime - lastSave.current) < 0.5) return;
       lastSave.current = video.currentTime;
       onSave(video.currentTime, video.duration, final);
     };
