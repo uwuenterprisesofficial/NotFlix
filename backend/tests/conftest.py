@@ -101,3 +101,26 @@ def user(database):
         db.commit()
         app.dependency_overrides[current_user_optional] = lambda: u
         return u
+
+
+@pytest.fixture(autouse=True)
+def catalogue_jobs(monkeypatch):
+    """Catalogue jobs are recorded instead of queued, and nothing counts as queued already."""
+    from app.services import catalog_jobs
+
+    jobs: list[tuple[list[int], list[dict], bool]] = []
+    monkeypatch.setattr(
+        catalog_jobs, "_enqueue_job", lambda ids, rows, refresh: jobs.append((ids, rows, refresh))
+    )
+    try:
+        from redis import Redis
+
+        from app.core.config import get_settings
+
+        r = Redis.from_url(get_settings().redis_url)
+        keys = list(r.scan_iter("catalog:queued:*")) + list(r.scan_iter("mal:search:*"))
+        if keys:
+            r.delete(*keys)
+    except Exception:
+        pass
+    return jobs

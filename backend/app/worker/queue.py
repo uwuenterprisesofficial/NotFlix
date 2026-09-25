@@ -11,10 +11,17 @@ from app.core.config import get_settings
 log = logging.getLogger(__name__)
 
 ANALYSIS_QUEUE = "analysis"
+CATALOG_QUEUE = "catalog"
 
 
 def analysis_queue() -> Queue:
     return Queue(ANALYSIS_QUEUE, connection=Redis.from_url(get_settings().redis_url))
+
+
+def catalog_queue() -> Queue:
+    """Adds shows to the catalogue and completes them (see worker/catalog.py); its own queue so
+    a long intro/outro analysis never holds it up."""
+    return Queue(CATALOG_QUEUE, connection=Redis.from_url(get_settings().redis_url))
 
 
 def timeout_seconds() -> int:

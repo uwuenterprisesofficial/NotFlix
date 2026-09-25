@@ -90,6 +90,15 @@ def anime_row(item: dict[str, Any]) -> dict[str, Any]:
         "rank": item.get("rank"),
         "average_episode_duration": _duration_s(item.get("duration")),
         "start_year": year,
+        "alt_titles": [
+            t
+            for t in [
+                item.get("title_english"),
+                item.get("title_japanese"),
+                *(item.get("title_synonyms") or []),
+            ]
+            if t and t != item.get("title")
+        ],
     }
 
 

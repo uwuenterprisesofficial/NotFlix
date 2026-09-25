@@ -28,6 +28,8 @@ x-backend: &backend
     MEDIA_DIR: /media
     # An intro/outro analysis running longer than this is stopped and marked failed.
     ANALYSIS_TIMEOUT_MINUTES: ${ANALYSIS_TIMEOUT_MINUTES:-10}
+    CATALOG_REFRESH_DAYS: ${CATALOG_REFRESH_DAYS:-30}
+    CATALOG_SYNOPSIS_LANGUAGES: ${CATALOG_SYNOPSIS_LANGUAGES-de}
     # Genre search (MAL's own API can't list shows by genre). Empty: only known shows.
     JIKAN_URL: ${JIKAN_URL-https://api.jikan.moe/v4}
   # Lets the containers reach services running on your machine (Anivexa, ReAnime) at
@@ -82,6 +84,11 @@ services:
   worker:
     <<: *backend
     command: rq worker analysis --url redis://redis:6379/0
+
+  # Adds shows to the catalogue and completes them (MAL details, German synopses).
+  catalog-worker:
+    <<: *backend
+    command: rq worker catalog --url redis://redis:6379/0
 
   frontend:
     build:

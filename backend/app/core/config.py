@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     # The frontend proxies /api/* to this backend, so the callback lives on the frontend origin.
     mal_redirect_uri: str = "http://localhost:3000/api/auth/callback"
 
+    # The anime catalogue (the database) answers first; its MAL data is refreshed in the
+    # background after this many days (airing shows: after a day). 0 never refreshes.
+    catalog_refresh_days: float = 30
+    # Synopsis languages the catalogue worker looks up for every show it adds (see synopsis.py).
+    catalog_synopsis_languages: str = "de"
+
     # Jikan (unofficial MyAnimeList API) for the genre search, which MAL's own API lacks.
     # Empty disables it: the genre search then only finds shows already in the local catalog.
     jikan_url: str = "https://api.jikan.moe/v4"

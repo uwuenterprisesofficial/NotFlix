@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models import Anime, ListEntry, Recommendation, User
-from app.services import anilist_account, list_writer, mal, taste
+from app.services import anilist_account, catalog_jobs, list_writer, mal, taste
 from app.services.recommender import Candidate, ListItem, rank, seed_shows
 from app.services.sync_tokens import mal_token
 
@@ -17,8 +17,15 @@ MAX_CANDIDATE_LOOKUPS = 40
 MAL_CONCURRENCY = 4
 
 
-async def upsert_anime(db: AsyncSession, nodes: list[dict[str, Any]]) -> None:
-    rows = list({row["id"]: row for row in map(mal.anime_from_node, nodes)}.values())
+async def upsert_anime(
+    db: AsyncSession, nodes: list[dict[str, Any]], rows: list[dict[str, Any]] | None = None
+) -> None:
+    """Store MAL anime (API nodes, or `rows` already mapped with mal.anime_from_node)."""
+    rows = list(
+        {row["id"]: row for row in [*map(mal.anime_from_node, nodes), *(rows or [])]}.values()
+    )
+    if not rows:
+        return
     # Chunked to stay below Postgres' 65535 bind-parameter limit on large lists.
     for start in range(0, len(rows), 500):
         chunk = rows[start : start + 500]
@@ -157,6 +164,9 @@ async def sync_user(db: AsyncSession, user: User) -> dict[str, int]:
     )
     await db.commit()
     list_writer.start(user.id, to_mal, to_anilist)
+    # Complete the catalogue entries of everything on the list (e.g. German synopses).
+    await catalog_jobs.complete(list(titles.values()))
+    await catalog_jobs.enqueue([r.anime_id for r in ranked])
     return {
         "entries": len(items),
         "recommendations": len(ranked),

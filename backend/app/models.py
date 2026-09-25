@@ -98,6 +98,12 @@ class Anime(Base):
     rank: Mapped[int | None] = mapped_column(Integer)
     average_episode_duration: Mapped[int | None] = mapped_column(Integer)  # seconds
     start_year: Mapped[int | None] = mapped_column(Integer)
+    # Synonyms, English and Japanese titles, for searching the catalogue.
+    alt_titles: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    # When MAL's own data was last stored (None: only another source's so far, e.g. AniList).
+    mal_details_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the catalogue worker last completed the entry (MAL details, translated synopses).
+    enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

@@ -17,7 +17,7 @@ A Netflix-style front end for anime, backed by your MyAnimeList account:
 |----------|------|
 | Frontend | Next.js 16 (App Router, TypeScript), Tailwind CSS 4, hls.js |
 | API      | FastAPI, SQLAlchemy 2 (async, psycopg 3), Alembic |
-| Jobs     | RQ worker on Redis, running the audio analysis |
+| Jobs     | RQ workers on Redis: the audio analysis, and the catalogue (completing shows in the background) |
 | Analysis | ffmpeg for decoding, NumPy for fingerprinting and matching |
 | Data     | PostgreSQL (users, list cache, recommendations, stream sources, skip segments), Redis (queue and MAL ranking cache) |
 
@@ -46,6 +46,7 @@ uv sync
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload        # API on :8000
 uv run rq worker analysis                   # analysis worker
+uv run rq worker catalog                    # catalogue worker
 
 cd ../frontend
 npm install
@@ -118,6 +119,14 @@ What the worker does:
 The widget on the show page lists the saved fingerprints ("Intro from episode 1 (1:30)") above the per-episode results.
 
 **Stopping an analysis.** Every waiting or running job is listed in the widget ("Analysing episodes 2, 3… (1:05)") with a **✕**; the player's "Detecting intro & outro…" has a **Stop** link. A waiting job is taken out of the queue, a running one has its worker process killed (RQ's stop command, which also ends the ffmpeg it started); either way the job is marked failed ("Stopped"). This also clears a job that only looks like it's running because its worker died. A job running longer than `ANALYSIS_TIMEOUT_MINUTES` (default 10, in `.env`) is stopped by RQ and marked failed ("Stopped after 10 minutes"); one whose worker died without reporting is marked the same way a minute after that limit.
+
+## Catalogue
+
+Every show NotFlix sees is kept in the database (the `anime` table, plus `anime_synopses` for translated synopses and the stream tables): shows you open, search results, genre results, rankings, your lists and recommendations. The catalogue always answers first:
+
+- **Opening a show** reads it from the catalogue. Only a show that isn't in it yet is fetched from MAL right away (once). A catalogue entry is never re-fetched while you wait: when its MAL data is older than `CATALOG_REFRESH_DAYS` (default 30; airing shows after a day; `0` never), the catalogue worker refreshes it in the background.
+- **Search** looks in the catalogue (titles, English titles and alternative titles, e.g. Japanese or synonyms) and in MAL. MAL's results are cached per query for a week, so the same search doesn't ask MAL again. A show already in the catalogue is shown with the catalogue's data; catalogue matches MAL doesn't rank (e.g. found by another title) are added after MAL's first page. Without MAL, or for a query under 3 characters, the catalogue alone answers. The genre search works the same way with Jikan's results.
+- **New shows are added in the background.** Search results, genre results and anything else not yet complete are handed to the **catalogue worker** (`rq worker catalog`; the `catalog-worker` service in docker compose), 25 shows per job. It stores the data it was given, fetches MAL's details where they're missing or due, looks up the synopsis in every `CATALOG_SYNOPSIS_LANGUAGES` language (default `de`: AniWorld, then AnimeToast), and marks the show complete. A show is handed over at most once an hour. A source that's down isn't remembered as "no synopsis", so it's tried again.
 
 ## Designs
 

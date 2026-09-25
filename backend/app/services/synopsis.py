@@ -36,10 +36,11 @@ async def stored(db: AsyncSession, anime_id: int, language: str) -> AnimeSynopsi
     )
 
 
-async def _lookup(anime: AnimeInfo, language: str) -> tuple[str | None, str | None]:
-    """The first synopsis a provider has, and which provider it came from."""
+async def _lookup(anime: AnimeInfo, language: str) -> tuple[str | None, str | None, bool]:
+    """(synopsis, provider it came from, whether a provider failed). A failure (site down,
+    timeout) isn't evidence that there's no synopsis, so it isn't remembered as a miss."""
     enabled = {p.name: p for p in providers_base.enabled_providers()}
-    tried = None
+    tried, failed = None, False
     for name in SOURCES[language]:
         provider = enabled.get(name)
         if provider is None or not hasattr(provider, "description"):
@@ -47,12 +48,13 @@ async def _lookup(anime: AnimeInfo, language: str) -> tuple[str | None, str | No
         tried = name
         try:
             text = await asyncio.wait_for(provider.description(anime), LOOKUP_TIMEOUT_S)
-        except Exception as e:  # provider down, timeout, ...: counts as not found for now
+        except Exception as e:
             log.info("No %s synopsis for anime %s on %s: %s", language, anime.id, name, e)
+            failed = True
             continue
         if text:
-            return text, name
-    return None, tried
+            return text, name, False
+    return None, tried, failed
 
 
 async def localized(db: AsyncSession, anime: Anime, language: str) -> str | None:
@@ -71,7 +73,9 @@ async def localized(db: AsyncSession, anime: Anime, language: str) -> str | None
         task = asyncio.create_task(_lookup(AnimeInfo.from_model(anime), language))
         _lookups[key] = task
         task.add_done_callback(lambda _: _lookups.pop(key, None))
-    text, source = await asyncio.shield(task)
+    text, source, failed = await asyncio.shield(task)
+    if text is None and failed:
+        return None  # asked again next time
     stmt = insert(AnimeSynopsis).values(
         anime_id=anime.id, language=language, synopsis=text, source=source,
         fetched_at=datetime.now(UTC),

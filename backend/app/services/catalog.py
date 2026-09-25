@@ -1,4 +1,3 @@
-from datetime import UTC, datetime, timedelta
 from typing import TypeVar
 
 from sqlalchemy import select
@@ -8,13 +7,12 @@ from app.core.cache import get_json, set_json
 from app.core.config import get_settings
 from app.models import Anime, ListEntry
 from app.schemas import AnimeCard, AnimeDetail, PredictionOut, Progress, ReasonOut, TagOut
-from app.services import mal
+from app.services import catalog_jobs, mal
 from app.services.sync import upsert_anime
 from app.services.tags import category, tags_from_names
 from app.services.taste import Predictor, Show
 
 RANKING_TTL_SECONDS = 3600
-ANIME_STALE_AFTER = timedelta(days=7)
 
 
 def mal_configured() -> bool:
@@ -94,22 +92,28 @@ async def ranking(db: AsyncSession, ranking_type: str, limit: int = 20) -> list[
     await db.commit()
     ids = [n["id"] for n in nodes]
     await set_json(key, ids, RANKING_TTL_SECONDS)
-    return await anime_by_ids(db, ids)
+    found = await anime_by_ids(db, ids)
+    await catalog_jobs.complete(found)
+    return found
 
 
 async def get_anime(db: AsyncSession, anime_id: int) -> Anime | None:
+    """A show from the catalogue (the database). Only a show that isn't in it yet is fetched
+    from MAL right away; the catalogue worker completes it (and later refreshes stale data)
+    in the background."""
     anime = await db.get(Anime, anime_id)
-    fresh = anime is not None and datetime.now(UTC) - anime.updated_at < ANIME_STALE_AFTER
-    if fresh or not mal_configured():
+    if anime is not None:
+        if catalog_jobs.incomplete(anime):
+            await catalog_jobs.enqueue([anime_id], refresh=True)
         return anime
+    if not mal_configured():
+        return None
     try:
         async with mal.MalClient() as client:
             node = await client.anime(anime_id)
     except mal.MalError:
-        return anime
+        return None
     await upsert_anime(db, [node])
     await db.commit()
-    if anime is not None:
-        await db.refresh(anime)
-        return anime
+    await catalog_jobs.enqueue([anime_id])
     return await db.get(Anime, anime_id)

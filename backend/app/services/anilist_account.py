@@ -186,7 +186,7 @@ class AniListClient:
 
 _MEDIA = """
 id idMal episodes format status averageScore popularity duration source
-title { romaji english } coverImage { extraLarge large } description(asHtml: false)
+title { romaji english native } synonyms coverImage { extraLarge large } description(asHtml: false)
 genres season seasonYear startDate { year } studios(isMain: true) { nodes { name } }
 """
 
@@ -241,6 +241,11 @@ def anime_row(media: dict[str, Any]) -> dict[str, Any]:
         "source": (media.get("source") or "").lower() or None,
         "average_episode_duration": (media.get("duration") or 0) * 60 or None,
         "start_year": (media.get("startDate") or {}).get("year") or year,
+        "alt_titles": [
+            t
+            for t in [title.get("english"), title.get("native"), *(media.get("synonyms") or [])]
+            if t and t != title.get("romaji")
+        ],
     }
 
 

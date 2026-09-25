@@ -42,6 +42,12 @@ def authorize_url(state: str, code_verifier: str) -> str:
     return f"{AUTH_BASE}/authorize?{query}"
 
 
+def _alt_titles(node: dict[str, Any]) -> list[str]:
+    alt = node.get("alternative_titles") or {}
+    titles = [*(alt.get("synonyms") or []), alt.get("en"), alt.get("ja")]
+    return list(dict.fromkeys(t for t in titles if t and t != node.get("title")))
+
+
 def anime_from_node(node: dict[str, Any]) -> dict[str, Any]:
     """Map a MAL anime node onto the columns of models.Anime."""
     picture = node.get("main_picture") or {}
@@ -68,6 +74,8 @@ def anime_from_node(node: dict[str, Any]) -> dict[str, Any]:
         "rank": node.get("rank"),
         "average_episode_duration": node.get("average_episode_duration") or None,
         "start_year": _year(node.get("start_date"), season),
+        "alt_titles": _alt_titles(node),
+        "mal_details_at": datetime.now(UTC),
     }
 
 

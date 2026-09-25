@@ -107,3 +107,19 @@ async def test_animetoast_description_prefers_german_pages(database, monkeypatch
     monkeypatch.setattr(provider, "locate", locate)
     monkeypatch.setattr(provider, "_page", page)
     assert await provider.description(AnimeInfo(1, "Show")) == "Deutscher Text"
+
+
+async def test_a_failing_source_is_not_remembered_as_no_synopsis(client, show, monkeypatch):
+    from app.providers import base
+
+    class Down(FakeAniWorld):
+        async def description(self, anime):
+            self.calls += 1
+            raise ConnectionError("site down")
+
+    down = Down(None)
+    monkeypatch.setattr(base, "enabled_providers", lambda: [down])
+    for _ in range(2):
+        body = (await client.get("/anime/77/synopsis", params={"lang": "de"})).json()
+        assert body["language"] == "en"
+    assert down.calls == 2  # asked again: the outage wasn't stored as "none"
