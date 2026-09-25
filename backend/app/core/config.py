@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     anilist_client_id: str = ""
     anilist_client_secret: str = ""
     anilist_redirect_uri: str = "http://localhost:3000/api/auth/anilist/callback"
+    # Who may open the admin page: MAL/AniList names or NotFlix user ids, comma-separated.
+    # Empty: every signed-in user with a list (not guests).
+    admins: str = ""
 
     # Must match the redirect URL registered at https://myanimelist.net/apiconfig.
     # The frontend proxies /api/* to this backend, so the callback lives on the frontend origin.

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 
+from app.api.admin import is_admin
 from app.api.deps import DB, CurrentUser, ListUser
 from app.schemas import AccountOut, Me, StatsStatusOut, SyncResult
 from app.services import anilist_account, list_writer, mal, stats_jobs
@@ -16,6 +17,7 @@ async def me(user: CurrentUser):
         picture=user.picture,
         last_synced_at=user.last_synced_at,
         guest=user.is_guest,
+        admin=is_admin(user),
         mal=AccountOut(name=user.mal_name) if user.has_mal else None,
         anilist=AccountOut(name=user.anilist_name) if user.has_anilist else None,
         writing=list_writer.progress(user.id),

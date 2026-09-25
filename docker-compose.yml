@@ -34,6 +34,8 @@ x-backend: &backend
     JIKAN_URL: ${JIKAN_URL-https://api.jikan.moe/v4}
     # Stand-in opening/ending times until they're detected. Empty: off.
     ANISKIP_URL: ${ANISKIP_URL-https://api.aniskip.com}
+    # Who may open the admin page (MAL/AniList names or user ids). Empty: anyone with a list.
+    ADMINS: ${ADMINS:-}
   # Lets the containers reach services running on your machine (Anivexa, ReAnime) at
   # http://host.docker.internal:<port>; "localhost" inside a container is the container itself.
   extra_hosts:

@@ -38,6 +38,8 @@ def test_needs_scan():
     assert not needs_scan(_scan("running"), window, ttl, force=True)
     assert needs_scan(_scan("running", age=timedelta(minutes=11)), window, ttl)
     assert not needs_scan(_scan("failed", age=timedelta(seconds=30)), window, ttl)
+    # Asking to refresh retries a failure right away.
+    assert needs_scan(_scan("failed", age=timedelta(seconds=30)), window, ttl, force=True)
     assert needs_scan(_scan("failed", age=timedelta(minutes=3)), window, ttl)
 
 
@@ -318,3 +320,26 @@ async def test_listing_providers_cover_the_whole_show(client, monkeypatch, datab
     # One listing: every episode.
     [asked] = listing.scans
     assert sorted(asked) == list(range(1, 201)) and asked[0] == 100
+
+
+async def test_stream_failures_are_remembered(client, providers):
+    from app.models import StreamFailure
+
+    with sync_session() as db:
+        db.query(StreamFailure).delete()
+        db.commit()
+    body = {"option": "counting:en2", "stream": "HD"}
+    for _ in range(2):
+        res = await client.post("/anime/9/episodes/2/failures", json=body)
+        assert res.status_code == 204
+    shown = (await client.get("/anime/9/streams", params={"episode": 2})).json()["failures"]
+    assert [(f["episode"], f["option"], f["stream"], f["count"]) for f in shown] == [
+        (2, "counting:en2", "HD", 2)
+    ]
+    # Also in the changes-only answer.
+    cursor = (await client.get("/anime/9/streams")).json()["cursor"]
+    delta = (await client.get("/anime/9/streams", params={"after": cursor})).json()
+    assert len(delta["failures"]) == 1
+    # It played after all.
+    await client.delete("/anime/9/episodes/2/failures", params=body)
+    assert (await client.get("/anime/9/streams")).json()["failures"] == []

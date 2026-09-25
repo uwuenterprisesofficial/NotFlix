@@ -169,6 +169,8 @@ export type Me = {
   last_synced_at: string | null;
   /** Watch Together without a list (joined through an invite link with a name). */
   guest: boolean;
+  /** May open the admin page. */
+  admin?: boolean;
   /** Linked lists. */
   mal: { name: string | null } | null;
   anilist: { name: string | null } | null;

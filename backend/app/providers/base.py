@@ -213,6 +213,16 @@ def unreachable_hint(url: str) -> str:
     return ""
 
 
+def clear_backoff(name: str) -> None:
+    _down_until.pop(name, None)
+
+
+def backoffs() -> dict[str, float]:
+    """Providers skipped after a connection failure: name -> seconds left."""
+    now = time.monotonic()
+    return {name: until - now for name, until in _down_until.items() if until > now}
+
+
 async def guarded(provider: StreamProvider, call: Awaitable[T], timeout: float) -> T:
     """Run a provider call; after a connection failure the provider is skipped for a while
     instead of making every page wait for the same failure again."""
