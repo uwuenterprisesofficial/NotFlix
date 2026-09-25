@@ -21,6 +21,7 @@ list is used, with the show's general appeal (MAL score and popularity) standing
 missing side. Without any list, the rows are the catalogue's best rated and most popular shows.
 """
 
+import asyncio
 import math
 from dataclasses import dataclass
 from datetime import datetime
@@ -334,8 +335,9 @@ async def report(db: AsyncSession, connection_id: int, a: User, b: User) -> dict
 
     ma, mb = await _member(db, a), await _member(db, b)
     pool = await _pool(db, (a.id, b.id))
-    rows = build(ma, mb, pool)
-    compat = compatibility(ma, mb)
+    # CPU work: off the event loop, which also relays streams (/proxy).
+    rows = await asyncio.to_thread(build, ma, mb, pool)
+    compat = await asyncio.to_thread(compatibility, ma, mb)
     shows = dict(pool)
     for m in (ma, mb):
         if m is not None:
