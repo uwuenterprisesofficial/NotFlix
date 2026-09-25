@@ -7,6 +7,7 @@ import { AnimeToastMapping } from "@/components/AnimeToastMapping";
 import { AniWorldMapping } from "@/components/AniWorldMapping";
 import { EpisodeBrowser } from "@/components/EpisodeBrowser";
 import { PredictionPanel } from "@/components/PredictionPanel";
+import { WatchTogetherMenu } from "@/components/together/TogetherBar";
 import { apiOrNull } from "@/lib/api";
 import { Synopsis } from "@/components/Synopsis";
 import { displayTitle, formatTime, mediaType, playableEpisode, seasonText } from "@/lib/format";
@@ -113,6 +114,12 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
                     ? t("detail.resume", { episode: playableEpisode(anime) })
                     : t("detail.play1")}
               </Link>
+              {me && (
+                <WatchTogetherMenu
+                  href={`/watch/${anime.id}/${anime.resume?.episode ?? playableEpisode(anime)}`}
+                  large
+                />
+              )}
               {anime.next_episode && anime.next_episode_at && (
                 <span className="text-sm text-muted">
                   {t("airing.nextOn", { episode: anime.next_episode })}

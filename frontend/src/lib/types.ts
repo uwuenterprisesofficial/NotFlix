@@ -39,6 +39,16 @@ export type AnimeCard = {
   /** While airing: the next episode and its air time. */
   next_episode: number | null;
   next_episode_at: string | null;
+  /** Watch Together: both users' side of the show. */
+  pair?: { me: PairSide; partner: PairSide } | null;
+};
+
+/** One user's side of a show: their list status and score, else their predicted score. */
+export type PairSide = {
+  status: string | null;
+  score: number | null;
+  predicted: number | null;
+  appeal: number;
 };
 
 /** GET /anime/{id}/preview: a muted preview for the hover card. */
@@ -270,3 +280,66 @@ export type StatsStatus = {
 };
 
 export type CalendarResponse = { items: AnimeCard[]; refreshing: boolean };
+
+// Watch Together
+
+export type Person = { id: number; name: string; picture: string | null };
+
+export type RoomStream = {
+  language: string | null;
+  provider: string | null;
+  label: string | null;
+  server: string | null;
+};
+
+/** What a Watch Together room is playing: `position` at server time `at` (ms). */
+export type RoomState = {
+  rev: number;
+  anime_id: number;
+  episode: number;
+  title: string | null;
+  position: number;
+  playing: boolean;
+  at: number;
+  by: number;
+  action: "load" | "play" | "pause" | "seek" | "stream";
+  stream: RoomStream | null;
+};
+
+export type Presence = { user_id: number; anime_id: number | null; episode: number | null };
+
+export type RoomOut = { state: RoomState | null; members: Presence[]; now: number };
+
+export type Connection = {
+  id: number;
+  partner: Person;
+  created_at: string;
+  compatibility: number | null;
+  /** The partner is watching in the room (and you aren't): join them. */
+  partner_watching: RoomState | null;
+  partner_online: boolean;
+};
+
+export type InviteInfo = {
+  inviter: Person;
+  expires_at: string;
+  own: boolean;
+  connection_id: number | null;
+};
+
+export type Together = {
+  id: number;
+  me: Person;
+  partner: Person;
+  compatibility: {
+    score: number | null;
+    correlation: number | null;
+    genre_similarity: number | null;
+    shared: number;
+    both_scored: number;
+    shared_genres: string[];
+    disagreements: AnimeCard[];
+  };
+  rows: Row[];
+  computed_at: string;
+};

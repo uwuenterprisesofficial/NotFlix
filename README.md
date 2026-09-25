@@ -140,6 +140,31 @@ While a direct stream plays, the player remembers where you are in the show's cu
 
 API: `GET`/`PUT`/`DELETE /api/anime/{id}/position` (`POST` too, for the beacon).
 
+## Watch Together
+
+Connect with someone, get recommendations for both of you, and watch with a synced player (**Together** in the menu).
+
+**Connecting.** **Invite someone** creates a link (`/together/join/<code>`, valid once, for 7 days). Whoever opens it while signed in (with MyAnimeList, AniList or both) is connected with you; opened while signed out, the invite is taken up right after signing in. A connection can be removed from its page (**Disconnect**).
+
+**Recommendations for both** (`GET /api/together/{id}`). Each person's taste is their score predictor (see Statistics), or without one (too few scores) their genre profile plus MAL's score. How much someone would like a show is measured against their own average and spread of scores, so a generous and a strict scorer count the same. The rows:
+
+- **Continue together**: shows you're both watching (or have on hold).
+- **New for both of you**: shows neither has on their list, from the catalogue's popular shows and both of your recommendations, ranked so that both should like it (the lower of the two appeals weighs most).
+- **On your lists**: planned by both, or planned by one and a good match for the other.
+- **Show this to <name>** (one row for each of you): the other's favourites (a 9 or 10, or well above their average) that you haven't seen and would like.
+- **You both loved** and **Where you disagree** (shows you both scored at least 3 points apart).
+
+Each card shows both sides: a score (★9) or a predicted one (~8.4). The **taste match** combines how alike you score the shows you both watched (correlation) with how alike your genre tastes are. The result is cached until either of you syncs your list.
+
+**The synced player.** **Watch together** on a show's page or under the player opens it in your room with that person (`?together=<id>` on the watch page). Each connection has one room, kept in Redis: which episode, the position at a server time, and whether it's playing. Both players follow it through server-sent events (`GET /api/together/{id}/room/events`, proxied by Next like the rest of the API) and send their own play, pause and seeks (`POST /api/together/{id}/room`), last change wins.
+
+- Either of you can pause, play or seek; the other player does the same. A player that drifts is brought back in step: more than 1 s off it jumps, less than that it plays 10% faster or slower until it's caught up. Clocks are compared with the server's.
+- Starting another episode (Next Episode, autoplay, or picking one) takes the other person along. Opening the room on an episode starts it for both.
+- Joining a room that's playing starts at its position; when the browser doesn't allow playback without a click, **Join playback** starts it.
+- The bar under the player shows who you're watching with and whether they're there. When they use another stream (language or source), **Use the same** switches yours to it: different releases of an episode can be cut differently.
+- While someone is watching in your room without you, a notice anywhere in NotFlix offers to **Join**.
+- Only direct streams can be synced; an embedded third-party player can't be controlled.
+
 ## Catalogue
 
 Every show NotFlix sees is kept in the database (the `anime` table, plus `anime_synopses` for translated synopses and the stream tables): shows you open, search results, genre results, rankings, your lists and recommendations. The catalogue always answers first:

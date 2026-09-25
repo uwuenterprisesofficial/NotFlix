@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRef } from "react";
 import type { MessageKey } from "@/lib/i18n";
 import type { Row } from "@/lib/types";
-import { AnimeCard } from "./AnimeCard";
+import { AnimeCard, type PairNames } from "./AnimeCard";
 import { useT } from "./I18nProvider";
 
 // Row ids the backend sends, with their translated titles.
@@ -19,7 +19,7 @@ const ROW_TITLES = new Set([
   "row.new-episodes",
 ]);
 
-export function AnimeRow({ row }: { row: Row }) {
+export function AnimeRow({ row, pairNames }: { row: Row; pairNames?: PairNames }) {
   const { t } = useT();
   const scroller = useRef<HTMLDivElement>(null);
   const key = `row.${row.id}`;
@@ -46,7 +46,7 @@ export function AnimeRow({ row }: { row: Row }) {
         className="no-scrollbar flex gap-2 overflow-x-auto scroll-smooth px-4 py-4 md:px-12"
       >
         {row.items.map((anime) => (
-          <AnimeCard key={anime.id} anime={anime} />
+          <AnimeCard key={anime.id} anime={anime} pairNames={pairNames} />
         ))}
       </div>
       {[-1, 1].map((dir) => (

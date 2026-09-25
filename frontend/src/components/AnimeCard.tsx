@@ -5,7 +5,7 @@ import Link from "next/link";
 import { displayTitle, formatTime, reasonText, relativeTime } from "@/lib/format";
 import { formatNumber, genreName } from "@/lib/i18n";
 import { allowedImage } from "@/lib/images";
-import type { AnimeCard as AnimeCardType } from "@/lib/types";
+import type { AnimeCard as AnimeCardType, PairSide } from "@/lib/types";
 import { useNow } from "@/lib/useNow";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HoverPreview, previewPosition } from "./HoverPreview";
@@ -51,7 +51,18 @@ function useHoverPreview() {
   return { card, position, close, onPointerEnter, onPointerLeave };
 }
 
-export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; fluid?: boolean }) {
+/** Watch Together: the two names for a card's `pair` (both users' scores). */
+export type PairNames = { me: string; partner: string };
+
+export function AnimeCard({
+  anime,
+  fluid = false,
+  pairNames,
+}: {
+  anime: AnimeCardType;
+  fluid?: boolean;
+  pairNames?: PairNames;
+}) {
   const { card, position, close, onPointerEnter, onPointerLeave } = useHoverPreview();
   const { t, lang } = useT();
   const now = useNow();
@@ -140,9 +151,40 @@ export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; flui
             />
           </div>
         ) : null}
+        {anime.pair && pairNames && (
+          <PairScores me={anime.pair.me} partner={anime.pair.partner} names={pairNames} />
+        )}
       </Link>
       {/* Outside the link: clicks in the preview (it's portalled) mustn't reach it. */}
       {position && <HoverPreview anime={anime} position={position} onClose={close} />}
     </>
+  );
+}
+
+/** "You ★9 · Anna ~8.4": each user's score, else their predicted score. */
+function PairScores({ me, partner, names }: { me: PairSide; partner: PairSide; names: PairNames }) {
+  const { t, lang } = useT();
+  const side = (who: PairSide, name: string) => {
+    const value = who.score
+      ? `★${who.score}`
+      : who.predicted !== null
+        ? `~${formatNumber(lang, Math.round(who.predicted * 10) / 10)}`
+        : "–";
+    const title = who.score
+      ? t("together.scored", { name, score: who.score })
+      : who.predicted !== null
+        ? t("together.predicted", { name, score: formatNumber(lang, who.predicted) })
+        : name;
+    return (
+      <span title={title} className="truncate">
+        <span className="text-muted">{name}</span> {value}
+      </span>
+    );
+  };
+  return (
+    <p className="mt-1 flex justify-between gap-2 text-[11px] font-semibold">
+      {side(me, names.me)}
+      {side(partner, names.partner)}
+    </p>
   );
 }

@@ -184,6 +184,33 @@ class PlaybackPosition(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class Connection(Base):
+    """Two users who watch together: joint recommendations and a synced player (Watch
+    Together). Stored once per pair, with the lower user id first."""
+
+    __tablename__ = "connections"
+    __table_args__ = (UniqueConstraint("user_a_id", "user_b_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_a_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_b_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    def partner_of(self, user_id: int) -> int:
+        return self.user_b_id if user_id == self.user_a_id else self.user_a_id
+
+
+class ConnectionInvite(Base):
+    """A link one user sends another to connect (Watch Together). Used once."""
+
+    __tablename__ = "connection_invites"
+
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class TasteModel(Base):
     """A user's fitted score predictor (see services.taste), refitted on every list sync."""
 

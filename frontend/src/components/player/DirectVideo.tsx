@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { formatTime } from "@/lib/format";
 import type { SkipSegment, Stream } from "@/lib/types";
 import { useT } from "../I18nProvider";
+import type { Party } from "../together/WatchParty";
+import { usePartySync } from "../together/usePartySync";
 import { FullscreenButton, useFrameFullscreen } from "./PlayerFrame";
 
 function useStream(
@@ -82,6 +84,8 @@ export function DirectVideo({
   onPosition,
   resumedAt = null,
   onSave,
+  onPlayState,
+  sync = null,
 }: {
   stream: Stream;
   segments: SkipSegment[];
@@ -101,6 +105,9 @@ export function DirectVideo({
   /** Remember the position: every little while, on pause, and when the tab goes away
    * (`final`: the page may be closing, so it must go out right away). */
   onSave?: (position: number, duration: number, final: boolean) => void;
+  onPlayState?: (playing: boolean) => void;
+  /** Watch Together: play in step with the room. */
+  sync?: { party: Party; animeId: number; episode: number } | null;
 }) {
   const { t } = useT();
   const ref = useRef<HTMLVideoElement>(null);
@@ -155,6 +162,12 @@ export function DirectVideo({
   }, [canFullscreen, toggleFullscreen]);
   useEffect(() => () => clearTimeout(idleTimer.current), []);
   useStream(ref, stream.url, stream.format === "hls", fail);
+  const partySync = usePartySync(
+    ref,
+    sync?.party ?? null,
+    sync?.animeId ?? null,
+    sync?.episode ?? null,
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => loaded.current || fail.current(), LOAD_TIMEOUT_MS);
@@ -205,12 +218,17 @@ export function DirectVideo({
           e.preventDefault();
           fullscreen.toggle();
         }}
-        onPlay={() => setPaused(false)}
+        onPlay={() => {
+          setPaused(false);
+          onPlayState?.(true);
+        }}
         onPause={() => {
           setPaused(true);
+          onPlayState?.(false);
           if (!ref.current?.ended) save.current(false);
         }}
-        autoPlay
+        // In a Watch Together room, the room starts it.
+        autoPlay={!sync}
         playsInline
         onTimeUpdate={onTimeUpdate}
         onLoadedMetadata={() => {
@@ -243,6 +261,17 @@ export function DirectVideo({
           />
         ))}
       </video>
+
+      {partySync.blocked && (
+        <button
+          onClick={partySync.unblock}
+          className="absolute inset-0 z-10 grid place-items-center bg-black/60 text-lg font-semibold"
+        >
+          <span className="rounded bg-white px-6 py-3 text-black shadow-lg">
+            ▶ {t("together.joinPlayback")}
+          </span>
+        </button>
+      )}
 
       {resumeNote && resumedAt && (
         <div className="absolute top-4 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded bg-black/75 px-4 py-2 text-sm backdrop-blur">
