@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import anime, auth, browse, calendar, me, proxy, search, streams, together
+from app.api import admin, anime, auth, browse, calendar, me, proxy, search, streams, together
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -26,6 +26,7 @@ app.include_router(streams.router)
 app.include_router(streams.providers_router)
 app.include_router(proxy.router)
 app.include_router(together.router)
+app.include_router(admin.router)
 
 
 @app.get("/health", tags=["meta"])

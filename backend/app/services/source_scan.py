@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.core import cache
 from app.db.session import AsyncSessionLocal
-from app.models import EpisodeSource, ResolvedSource, SourceScan
+from app.models import EpisodeSource, ResolvedSource, SourceScan, StreamFailure
 from app.providers import base as providers_base
 from app.providers.base import (
     AnimeInfo,
@@ -96,7 +96,8 @@ def needs_scan(
     if scan.status == "running":
         return now - scan.started_at > RUNNING_STALE_AFTER
     if scan.status == "failed":
-        return now - (scan.finished_at or scan.started_at) > FAILED_RETRY_AFTER
+        # A failure isn't retried on every page view; asking to refresh retries it right away.
+        return force or now - (scan.finished_at or scan.started_at) > FAILED_RETRY_AFTER
     if force or not set(window) <= set(scan.episodes):
         return True
     return scan.finished_at is None or now - scan.finished_at > ttl
@@ -266,6 +267,8 @@ async def ensure_scan(
         key = (anime.id, p.name)
         if key in _running:
             continue
+        if force:
+            providers_base.clear_backoff(p.name)  # "unreachable" may be over: try it now
         wanted = whole if whole and providers_base.lists_whole_show(p) else window
         previous = scans.get(p.name)
         episodes = _due(previous, wanted, ttl, force)
@@ -514,3 +517,54 @@ async def cached_resolutions(
         )
         for r in rows
     ]
+
+
+# Streams that wouldn't play: remembered this long (hosters come back, links get fixed).
+FAILURE_TTL = timedelta(days=7)
+
+
+async def report_failure(anime_id: int, episode: int, option_id: str, stream: str) -> None:
+    """A stream wouldn't play: the player tries the others first from now on."""
+    now = datetime.now(UTC)
+    stmt = insert(StreamFailure).values(
+        anime_id=anime_id, episode=episode, option_id=option_id, stream=stream, count=1,
+        failed_at=now,
+    )  # fmt: skip
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            stmt.on_conflict_do_update(
+                index_elements=["anime_id", "episode", "option_id", "stream"],
+                set_={"count": StreamFailure.count + 1, "failed_at": now},
+            )
+        )
+        await db.commit()
+
+
+async def clear_failure(anime_id: int, episode: int, option_id: str, stream: str) -> None:
+    """It played after all."""
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            delete(StreamFailure).where(
+                StreamFailure.anime_id == anime_id,
+                StreamFailure.episode == episode,
+                StreamFailure.option_id == option_id,
+                StreamFailure.stream == stream,
+            )
+        )
+        await db.commit()
+
+
+async def failures(anime_id: int) -> list[StreamFailure]:
+    """A show's recent stream failures (older ones are forgotten)."""
+    since = datetime.now(UTC) - FAILURE_TTL
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            delete(StreamFailure).where(
+                StreamFailure.anime_id == anime_id, StreamFailure.failed_at < since
+            )
+        )
+        rows = list(
+            await db.scalars(select(StreamFailure).where(StreamFailure.anime_id == anime_id))
+        )
+        await db.commit()
+    return rows

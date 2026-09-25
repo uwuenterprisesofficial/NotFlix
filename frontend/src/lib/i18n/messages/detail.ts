@@ -52,8 +52,8 @@ export const detail = {
     de: "Suche Folgen auf {providers}…",
   },
   "episodes.unreachable": {
-    en: "{providers} couldn’t be reached; retrying later.",
-    de: "{providers} nicht erreichbar; wird später erneut versucht.",
+    en: "{providers} failed; retrying later (or now with Refresh sources).",
+    de: "{providers} fehlgeschlagen; neuer Versuch später (oder jetzt mit „Quellen aktualisieren“).",
   },
   "episodes.withoutStream": {
     en: (v: { count: number }) =>

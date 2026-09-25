@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { AccountSettings } from "@/components/AccountSettings";
 import { SettingsForm } from "@/components/SettingsForm";
 import { cookies } from "next/headers";
@@ -29,6 +30,18 @@ export default async function SettingsPage() {
         <AccountSettings me={me} providers={providers} />
       </section>
       <SettingsForm design={isDesign(chosen) ? chosen : "standard"} />
+      {me?.admin && (
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold">{t("admin.title")}</h2>
+          <p className="mt-1 text-sm text-muted">{t("admin.link")}</p>
+          <Link
+            href="/admin"
+            className="mt-3 inline-block rounded bg-surface-raised px-4 py-2 text-sm font-semibold hover:bg-neutral-700"
+          >
+            {t("admin.open")} ›
+          </Link>
+        </section>
+      )}
     </div>
   );
 }

@@ -225,6 +225,7 @@ class Me(ORM):
     picture: str | None
     last_synced_at: datetime | None
     guest: bool = False  # Watch Together without a list
+    admin: bool = False  # may open the admin page
     mal: AccountOut | None = None  # linked MyAnimeList account
     anilist: AccountOut | None = None  # linked AniList account
     # Entries being added to the other list after a sync, while that runs.
@@ -308,6 +309,19 @@ class ScanProgressOut(BaseModel):
     total: int
 
 
+class StreamFailureOut(ORM):
+    episode: int
+    option: str = Field(validation_alias="option_id")
+    stream: str
+    count: int
+    failed_at: datetime
+
+
+class StreamFailureIn(BaseModel):
+    option: str = Field(max_length=200)
+    stream: str = Field(max_length=100)
+
+
 class ShowStreamsOut(BaseModel):
     """Everything the player needs for a show, to keep in the browser until `expires_at`."""
 
@@ -317,6 +331,8 @@ class ShowStreamsOut(BaseModel):
     cursor: int = 0  # server time (ms): pass as `after` for what changed since
     partial: bool = False  # only the episodes that changed (see `after`)
     progress: ScanProgressOut | None = None
+    # Streams that wouldn't play recently: tried after the others (always the whole list).
+    failures: list[StreamFailureOut] = []
     episodes: list[EpisodeOptionsOut]
     resolutions: list[CachedResolutionOut]
 

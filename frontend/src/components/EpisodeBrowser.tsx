@@ -196,6 +196,14 @@ export function EpisodeBrowser({
         {broken.length > 0 && (
           <span className="block text-amber-400/80">
             {t("episodes.unreachable", { providers: providerNames(broken) })}
+            {/* Why, per provider (a scan's error), e.g. to tell an outage from a broken page. */}
+            {broken
+              .filter((s) => s.error)
+              .map((s) => (
+                <span key={s.provider} className="block text-xs text-muted">
+                  {providerNames([s])}: {s.error}
+                </span>
+              ))}
           </span>
         )}
         {!scanning && noneCount > 0 && (

@@ -4,6 +4,7 @@ import {
   getShowStreams,
   isFresh,
   type ShowStreams,
+  reportStream,
   saveEpisodeOptions,
   loadShowChanges,
   loadShowStreams,
@@ -177,9 +178,16 @@ export function useSources(
     return r?.ok ? r.resolved.streams : [];
   };
   const working = (s: Stream) => !failedStreams[s.url];
+  // Wouldn't play last time (here or on another device): tried after the others.
+  const knownBad = (o: SourceOption, s: Stream) =>
+    !!show?.failures?.some(
+      (f) => f.episode === episode && f.option === o.id && f.stream === s.label,
+    );
   const hasWorking = (o: SourceOption) => streamsOf(o).some(working);
   const hasDirect = (o: SourceOption) =>
     streamsOf(o).some((s) => s.kind === "direct" && working(s));
+  const hasGoodDirect = (o: SourceOption) =>
+    streamsOf(o).some((s) => s.kind === "direct" && working(s) && !knownBad(o, s));
   const failed = (o: SourceOption) => {
     const r = resolutionOf(o);
     return !!r && (!r.ok || !hasWorking(o));
@@ -204,10 +212,11 @@ export function useSources(
     if (playing && (hasDirect(playing) || !resolutionOf(playing) || !usable.some(hasDirect)))
       return playing;
     if (waitForPreferred) return null;
-    const direct = usable.find(hasDirect);
+    const direct = usable.find(hasGoodDirect);
     if (direct && !preferredResolving) return direct;
     if (stillLooking && search.patient) return null;
-    return usable.find(hasWorking) ?? null;
+    // Direct streams that failed before are the fallback before embedded players.
+    return usable.find(hasDirect) ?? usable.find(hasWorking) ?? null;
   }
 
   const chosen = candidates.find((o) => o.id === chosenId) ?? null;
@@ -215,8 +224,12 @@ export function useSources(
   const activeResolution = active ? resolutionOf(active) : undefined;
 
   const streams = active ? streamsOf(active).filter(working) : [];
+  // Direct before embedded, ones that played before those that failed, the previous server
+  // first among equals.
   const streamRank = (s: Stream) =>
-    (s.kind === "direct" ? 0 : 2) + (s.label === prefer.server ? 0 : 1);
+    (s.kind === "direct" ? 0 : 4) +
+    (active && knownBad(active, s) ? 2 : 0) +
+    (s.label === prefer.server ? 0 : 1);
   const stream =
     streams.find((s) => active && s.url === streamChoice[active.id]) ??
     [...streams].sort((a, b) => streamRank(a) - streamRank(b))[0] ??
@@ -304,6 +317,9 @@ export function useSources(
       return;
     }
     setFailedStreams((f) => ({ ...f, [url]: true }));
+    const stream = owner && streamsOf(owner).find((s) => s.url === url);
+    if (owner && stream)
+      reportStream(animeId, { episode, option: owner.id, stream: stream.label }, true);
   }
 
   return {
@@ -331,9 +347,13 @@ export function useSources(
     failStream,
     /** Load every source of the language, e.g. to list them all in the stream menu. */
     showAll: () => setShowAll(true),
-    /** The active source started playing: keep it even if a "better" one answers later. */
+    /** The active source started playing: keep it even if a "better" one answers later. A
+     * stream remembered as broken that plays after all is cleared. */
     started: () => {
-      if (active) setPlayingId(active.id);
+      if (!active) return;
+      setPlayingId(active.id);
+      if (stream && knownBad(active, stream))
+        reportStream(animeId, { episode, option: active.id, stream: stream.label }, false);
     },
     streamFailed: (s: Stream) => !working(s),
     searching: !active && !loadError && !waitForPreferred && stillLooking && search.patient,

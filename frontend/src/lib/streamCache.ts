@@ -7,6 +7,7 @@ import type { Resolved, SourceOption } from "./types";
 
 export type ProviderCoverage = { name: string; status: string; episodes: number[] };
 export type StoredResolution = { episode: number; option: string; resolved: Resolved };
+export type StreamFailure = { episode: number; option: string; stream: string };
 export type ShowStreams = {
   providers: ProviderCoverage[];
   scanning: boolean;
@@ -15,6 +16,8 @@ export type ShowStreams = {
   cursor?: number;
   /** Running scans: episodes stored so far of those asked for. */
   progress?: { stored: number; total: number } | null;
+  /** Streams (a source's server, per episode) that wouldn't play recently: tried last. */
+  failures?: StreamFailure[];
   episodes: { episode: number; options: SourceOption[] }[];
   resolutions: StoredResolution[];
 };
@@ -114,6 +117,7 @@ export function loadShowChanges(animeId: number, episode: number): Promise<ShowS
           expires_at: changes.expires_at,
           cursor: changes.cursor,
           progress: changes.progress,
+          failures: changes.failures,
           episodes: [
             ...current.episodes.filter((e) => !changed.has(e.episode)),
             ...changes.episodes.filter((e) => e.options.length),
@@ -153,6 +157,28 @@ export function saveEpisodeOptions(
       { episode, options: merged },
     ].sort((a, b) => a.episode - b.episode),
   });
+}
+
+/** A stream wouldn't play (`failed`), or played after all: kept here and on the server, so it's
+ * tried after the others from now on (also on other devices). */
+export function reportStream(animeId: number, failure: StreamFailure, failed: boolean): void {
+  const url = `/api/anime/${animeId}/episodes/${failure.episode}/failures`;
+  if (failed) {
+    fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ option: failure.option, stream: failure.stream }),
+    }).catch(() => {});
+  } else {
+    const params = new URLSearchParams({ option: failure.option, stream: failure.stream });
+    fetch(`${url}?${params}`, { method: "DELETE" }).catch(() => {});
+  }
+  const show = getShowStreams(animeId);
+  if (!show) return;
+  const same = (f: StreamFailure) =>
+    f.episode === failure.episode && f.option === failure.option && f.stream === failure.stream;
+  const others = (show.failures ?? []).filter((f) => !same(f));
+  write(animeId, { ...show, failures: failed ? [...others, failure] : others });
 }
 
 export function saveResolution(

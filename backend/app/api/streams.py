@@ -37,6 +37,8 @@ from app.schemas import (
     ShowStreamsOut,
     SkipSegmentOut,
     SourceOptionOut,
+    StreamFailureIn,
+    StreamFailureOut,
     StreamOut,
     SubtitleOut,
 )
@@ -247,6 +249,7 @@ async def show_streams(
         expires_at=expires_at,
         cursor=cursor,
         partial=changed is not None,
+        failures=[StreamFailureOut.model_validate(f) for f in await source_scan.failures(info.id)],
         progress=_progress(info.id),
         episodes=[
             EpisodeOptionsOut(episode=ep, options=[_option_out(o) for o in found])
@@ -259,6 +262,19 @@ async def show_streams(
             for r in resolutions
         ],
     )
+
+
+@router.post("/episodes/{episode}/failures", status_code=status.HTTP_204_NO_CONTENT)
+async def report_stream_failure(anime_id: int, episode: int, body: StreamFailureIn) -> None:
+    """A stream wouldn't play: the player tries the others first from now on (on any device),
+    and this one only after them."""
+    await source_scan.report_failure(anime_id, episode, body.option, body.stream)
+
+
+@router.delete("/episodes/{episode}/failures", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_stream_failure(anime_id: int, episode: int, option: str, stream: str) -> None:
+    """It played after all."""
+    await source_scan.clear_failure(anime_id, episode, option, stream)
 
 
 async def _availability(anime_id: int) -> AvailabilityOut:

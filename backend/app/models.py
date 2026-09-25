@@ -272,6 +272,22 @@ class ResolvedSource(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class StreamFailure(Base):
+    """A stream that wouldn't play (a source's server for one episode), so the player tries the
+    others first next time. Cleared when it plays again."""
+
+    __tablename__ = "stream_failures"
+    __table_args__ = (UniqueConstraint("anime_id", "episode", "option_id", "stream"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anime_id: Mapped[int] = mapped_column(Integer, index=True)
+    episode: Mapped[int] = mapped_column(Integer)
+    option_id: Mapped[str] = mapped_column(String(200))
+    stream: Mapped[str] = mapped_column(String(100))  # the stream's label (server/hoster)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    failed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class SourceScan(Base):
     """Which episodes of an anime a provider was last checked for, and how that went."""
 
