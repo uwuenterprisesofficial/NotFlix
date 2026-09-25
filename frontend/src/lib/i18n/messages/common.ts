@@ -183,8 +183,25 @@ export const common = {
   "settings.savedHere": { en: "Saved in this browser.", de: "In diesem Browser gespeichert." },
   "settings.language": { en: "Language", de: "Sprache" },
   "settings.languageInfo": {
-    en: "The language of NotFlix, of synopses where one is available (German ones come from AniWorld), and the stream language picked first: dub, then sub in this language, then dub, then sub in the other.",
-    de: "Die Sprache von NotFlix, der Beschreibungen, wo es eine gibt (deutsche kommen von AniWorld), und die zuerst gewählte Stream-Sprache: Synchro, dann Untertitel in dieser Sprache, danach Synchro, dann Untertitel in der anderen.",
+    en: "The language of NotFlix, of synopses where one is available (German ones come from AniWorld or AnimeToast), and the stream language picked first: dub, then sub in this language, then dub, then sub in the other.",
+    de: "Die Sprache von NotFlix, der Beschreibungen, wo es eine gibt (deutsche kommen von AniWorld oder AnimeToast), und die zuerst gewählte Stream-Sprache: Synchro, dann Untertitel in dieser Sprache, danach Synchro, dann Untertitel in der anderen.",
+  },
+  "settings.design": { en: "Design", de: "Design" },
+  "settings.designInfo": { en: "How NotFlix looks.", de: "Wie NotFlix aussieht." },
+  "design.standard": { en: "Standard", de: "Standard" },
+  "design.standardInfo": {
+    en: "Black and red, like the original.",
+    de: "Schwarz und Rot, wie das Original.",
+  },
+  "design.communism": { en: "Communism", de: "Kommunismus" },
+  "design.communismInfo": {
+    en: "Red and gold, bold capitals, a star on top.",
+    de: "Rot und Gold, fette Großbuchstaben, ein Stern obendrauf.",
+  },
+  "design.miku": { en: "Miku", de: "Miku" },
+  "design.mikuInfo": {
+    en: "Teal and pink, rounded letters, ♪.",
+    de: "Türkis und Pink, runde Buchstaben, ♪.",
   },
   "settings.predictions": { en: "Predictions", de: "Prognosen" },
   "settings.predictionsInfo": {

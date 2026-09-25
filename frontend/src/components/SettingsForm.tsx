@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
+import { DESIGNS, type Design, saveDesign } from "@/lib/design";
 import { type Lang, saveLang } from "@/lib/i18n";
 import { TIER_CLASS } from "@/lib/prediction";
 import { useShowPredictedScore, useShowTierLabels } from "@/lib/preferences";
@@ -48,12 +49,24 @@ function Toggle({
   );
 }
 
-export function SettingsForm() {
+// Swatches of each design: surface, raised surface, brand, accent.
+const SWATCHES: Record<Design, string[]> = {
+  standard: ["#141414", "#232323", "#e50914", "#ffffff"],
+  communism: ["#170405", "#2c0a0b", "#d7141a", "#f5c518"],
+  miku: ["#081a21", "#10303a", "#39c5bb", "#e12885"],
+};
+
+export function SettingsForm({ design }: { design: Design }) {
   const { t, lang } = useT();
   const router = useRouter();
   const [switching, startTransition] = useTransition();
   const [labels, setLabels] = useShowTierLabels();
   const [score, setScore] = useShowPredictedScore();
+
+  function chooseDesign(next: Design) {
+    saveDesign(next); // switches at once; the refresh keeps server-rendered parts in step
+    startTransition(() => router.refresh());
+  }
 
   function chooseLanguage(next: Lang) {
     saveLang(next);
@@ -77,6 +90,34 @@ export function SettingsForm() {
             >
               <LanguageFlag language={l.flag} />
               {l.name}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold">{t("settings.design")}</h2>
+        <p className="mt-1 text-sm text-muted">{t("settings.designInfo")}</p>
+        <div
+          role="radiogroup"
+          aria-label={t("settings.design")}
+          className="mt-3 grid gap-3 sm:grid-cols-3"
+        >
+          {DESIGNS.map((d) => (
+            <button
+              key={d}
+              role="radio"
+              aria-checked={d === design}
+              onClick={() => chooseDesign(d)}
+              className={`rounded-lg p-3 text-left ring-2 transition ${d === design ? "bg-surface-raised ring-white" : "bg-surface-raised/60 ring-transparent hover:ring-white/30"}`}
+            >
+              <span className="flex gap-1" aria-hidden>
+                {SWATCHES[d].map((c) => (
+                  <span key={c} className="h-6 flex-1 rounded-sm" style={{ background: c }} />
+                ))}
+              </span>
+              <span className="mt-2 block font-semibold">{t(`design.${d}`)}</span>
+              <span className="block text-xs text-muted">{t(`design.${d}Info`)}</span>
             </button>
           ))}
         </div>

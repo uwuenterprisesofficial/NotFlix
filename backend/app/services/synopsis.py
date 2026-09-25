@@ -1,6 +1,6 @@
 """Synopses in the UI's language. MAL's are English; German ones come from AniWorld (the
-series page of the show's AniWorld mapping). Found (or not found) texts are stored, so each
-show is looked up once; a miss is retried after a week."""
+series page of the show's AniWorld mapping), else from its animetoast page. Found (or not
+found) texts are stored, so each show is looked up once; a miss is retried after a week."""
 
 import asyncio
 import logging
@@ -16,8 +16,8 @@ from app.providers.base import AnimeInfo
 
 log = logging.getLogger(__name__)
 
-# Which provider has synopses in which language.
-SOURCES = {"de": "aniworld"}
+# Which providers have synopses in which language, tried in this order.
+SOURCES = {"de": ("aniworld", "animetoast")}
 RETRY_MISSING_AFTER = timedelta(days=7)
 LOOKUP_TIMEOUT_S = 45
 
@@ -37,16 +37,22 @@ async def stored(db: AsyncSession, anime_id: int, language: str) -> AnimeSynopsi
 
 
 async def _lookup(anime: AnimeInfo, language: str) -> tuple[str | None, str | None]:
-    name = SOURCES[language]
-    provider = next((p for p in providers_base.enabled_providers() if p.name == name), None)
-    if provider is None or not hasattr(provider, "description"):
-        return None, None
-    try:
-        text = await asyncio.wait_for(provider.description(anime), LOOKUP_TIMEOUT_S)
-    except Exception as e:  # provider down, timeout, ...: counts as not found for now
-        log.info("No %s synopsis for anime %s: %s", language, anime.id, e)
-        return None, name
-    return text, name
+    """The first synopsis a provider has, and which provider it came from."""
+    enabled = {p.name: p for p in providers_base.enabled_providers()}
+    tried = None
+    for name in SOURCES[language]:
+        provider = enabled.get(name)
+        if provider is None or not hasattr(provider, "description"):
+            continue
+        tried = name
+        try:
+            text = await asyncio.wait_for(provider.description(anime), LOOKUP_TIMEOUT_S)
+        except Exception as e:  # provider down, timeout, ...: counts as not found for now
+            log.info("No %s synopsis for anime %s on %s: %s", language, anime.id, name, e)
+            continue
+        if text:
+            return text, name
+    return None, tried
 
 
 async def localized(db: AsyncSession, anime: Anime, language: str) -> str | None:

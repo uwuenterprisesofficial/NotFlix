@@ -18,8 +18,15 @@ export async function Navbar() {
   return (
     <header className="fixed inset-x-0 top-0 z-50 bg-gradient-to-b from-black/90 to-transparent">
       <nav className="mx-auto flex h-16 items-center gap-8 px-4 md:px-12">
-        <Link href="/" className="text-2xl font-black tracking-tight text-brand md:text-3xl">
+        <Link href="/" className="logo text-2xl font-black tracking-tight text-brand md:text-3xl">
+          <span aria-hidden className="logo-mark star">
+            ★{" "}
+          </span>
           NOTFLIX
+          <span aria-hidden className="logo-mark note">
+            {" "}
+            ♪
+          </span>
         </Link>
         <div className="hidden gap-5 text-sm text-neutral-200 sm:flex">
           <Link href="/" className="hover:text-white">

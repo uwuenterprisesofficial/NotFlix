@@ -136,7 +136,8 @@ class AnimeToastProvider:
             await save_mapping(anime.id, self.name, ",".join(pages) or None)
         return (pages, 0) if pages else None
 
-    async def _show(self, slug: str) -> tuple[Language, dict[int, dict[str, Any]]] | None:
+    async def _page(self, slug: str) -> dict[str, Any] | None:
+        """One show page (episodes, language, description), cached."""
         key = f"{self.name}:show:{slug}"
         data = await get_json(key)
         if data is None:
@@ -144,6 +145,25 @@ class AnimeToastProvider:
             if not data:
                 return None
             await set_json(key, data, SHOW_CACHE_TTL)
+        return data
+
+    async def description(self, anime: AnimeInfo) -> str | None:
+        """The show's German description from its animetoast page (German pages first)."""
+        located = await self.locate(anime)
+        if located is None:
+            return None
+        slugs = sorted(located[0], key=lambda s: "ger" not in s.lower())
+        for slug in slugs:
+            data = await self._page(slug)
+            text = str((data or {}).get("description") or "").strip()
+            if text:
+                return text
+        return None
+
+    async def _show(self, slug: str) -> tuple[Language, dict[int, dict[str, Any]]] | None:
+        data = await self._page(slug)
+        if data is None:
+            return None
         language = SCRAPER_LANGUAGES.get(str(data.get("language") or "").lower(), "unknown")
         episodes = {
             e["episode"]: e

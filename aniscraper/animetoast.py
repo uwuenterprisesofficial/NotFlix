@@ -6,6 +6,7 @@ Layout assumed:
   show page   /<slug>/             -> hoster tabs (ul.nav-tabs a[href="#multi_link_tabN"]),
                                       each tab pane lists episode links (?link=N, "Ep. 1")
   episode     /<slug>/?link=N      -> player with the hoster embed (iframe or link)
+  description the show page's post text (German), see parse_description
 """
 from __future__ import annotations
 
@@ -37,6 +38,36 @@ def detect_language(title: str) -> str | None:
         if pattern.search(title):
             return name
     return None
+
+
+DESCRIPTION_SELECTORS = (
+    ".entry-content p, .post-content p, .single-content p, .the_content p, "
+    ".video-details p, .post-entry p, article p"
+)
+DESCRIPTION_LABEL_RE = re.compile(r"^(beschreibung|inhalt|handlung|story|plot)\s*:?\s*", re.I)
+MIN_DESCRIPTION = 60
+
+
+def parse_description(soup: BeautifulSoup) -> str | None:
+    """The show's description: the longest real paragraph of the post (not the episode link
+    lists), else the page's og:description."""
+    best = ""
+    for p in soup.select(DESCRIPTION_SELECTORS):
+        if p.find_parent(class_="tab-pane") or p.find_parent("nav"):
+            continue
+        text = p.get_text(" ", strip=True)
+        links = sum(len(a.get_text(strip=True)) for a in p.select("a"))
+        if links > len(text) / 2 or EPISODE_RE.match(text):
+            continue  # mostly links: an episode list or navigation
+        text = DESCRIPTION_LABEL_RE.sub("", text)
+        if len(text) > len(best):
+            best = text
+    if len(best) < MIN_DESCRIPTION:
+        meta = soup.select_one("meta[property='og:description'], meta[name='description']")
+        content = (meta.get("content") or "").strip() if meta else ""
+        if len(content) > len(best):
+            best = content
+    return re.sub(r"\s+", " ", best).strip() or None
 
 
 def base_title(title: str) -> str:
@@ -131,6 +162,7 @@ class AnimeToastScraper:
             "title": title,
             "language": language,
             "url": f"{BASE_URL}/{slug}/",
+            "description": parse_description(soup),
             "seasons": [{"season": 1, "name": "Season 1", "episodes": ep_list}],
         }
 

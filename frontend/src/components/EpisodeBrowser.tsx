@@ -8,6 +8,8 @@ import { forgetShowStreams } from "@/lib/streamCache";
 import { pickLanguage, useStreamLanguage } from "@/lib/streamLanguage";
 import type { Availability, Language } from "@/lib/types";
 import { useT } from "./I18nProvider";
+import { LanguageFlag } from "./LanguageFlag";
+import { Dropdown } from "./player/Dropdown";
 
 const POLL_MS = 3000;
 export const SCAN_FINISHED_EVENT = "notflix:scan-finished";
@@ -109,26 +111,44 @@ export function EpisodeBrowser({
     <section className="mt-12">
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h2 className="mr-2 text-xl font-semibold">{t("episodes.title")}</h2>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t("episodes.language")}>
-          {shownLanguages.map((lang) => (
-            <button
-              key={lang}
-              role="radio"
-              aria-checked={lang === language}
-              onClick={() => choose(lang)}
-              className={`rounded-full px-3 py-1 text-sm font-semibold ${
-                lang === language
-                  ? "bg-white text-black"
-                  : perLanguage.has(lang)
-                    ? "bg-surface-raised hover:bg-neutral-700"
-                    : "bg-surface-raised text-muted hover:bg-neutral-700"
-              }`}
-            >
-              {t(`lang.${lang}`)}
-              <span className="ml-1.5 text-xs opacity-60">{perLanguage.get(lang) ?? 0}</span>
-            </button>
-          ))}
-        </div>
+        <Dropdown
+          align="left"
+          className="w-64"
+          label={`${t("episodes.language")}: ${t(`lang.${language}`)}`}
+          button={
+            <>
+              <LanguageFlag language={language} />
+              <span className="truncate font-semibold">{t(`lang.${language}`)}</span>
+              <span className="text-xs text-muted">{perLanguage.get(language) ?? 0}</span>
+            </>
+          }
+        >
+          {(close) =>
+            shownLanguages.map((lang) => {
+              const current = lang === language;
+              const count = perLanguage.get(lang) ?? 0;
+              return (
+                <button
+                  key={lang}
+                  role="menuitemradio"
+                  aria-checked={current}
+                  onClick={() => {
+                    choose(lang);
+                    close();
+                  }}
+                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left ${current ? "bg-white/10" : "hover:bg-white/5"} ${count ? "" : "text-muted"}`}
+                >
+                  <span aria-hidden className="w-3 text-xs">
+                    {current ? "✓" : ""}
+                  </span>
+                  <LanguageFlag language={lang} />
+                  <span className="flex-1 truncate">{t(`lang.${lang}`)}</span>
+                  <span className="text-xs text-muted">{t("anime.episodes", { count })}</span>
+                </button>
+              );
+            })
+          }
+        </Dropdown>
         {signedIn && (
           <button
             onClick={refresh}

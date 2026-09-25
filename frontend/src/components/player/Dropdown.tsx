@@ -8,9 +8,12 @@ export function Dropdown({
   align,
   className = "w-80",
   onOpen,
+  label,
   children,
 }: {
   button: ReactNode;
+  /** Accessible name when the button's content doesn't say what it's for. */
+  label?: string;
   align: "left" | "right";
   className?: string;
   onOpen?: () => void;
@@ -44,6 +47,7 @@ export function Dropdown({
         }}
         aria-expanded={open}
         aria-haspopup="menu"
+        aria-label={label}
         className="flex max-w-[20rem] items-center gap-2 rounded bg-surface-raised px-3 py-1.5 hover:bg-neutral-700"
       >
         {button}

@@ -23,3 +23,80 @@ html {
 body {
   @apply bg-surface text-white antialiased;
 }
+
+/* ---------------------------------------------------------------- designs (Settings → Design)
+ * Each design overrides the theme's colour variables; the markup stays the same. */
+
+.logo-mark {
+  display: none;
+}
+
+/* Communism: red and gold, heavy condensed capitals, sunburst behind everything. */
+html[data-design="communism"] {
+  --color-brand: #d7141a;
+  --color-brand-dark: #9e0b0f;
+  --color-surface: #170405;
+  --color-surface-raised: #2c0a0b;
+  --color-muted: #d8b98a;
+  --color-neutral-700: #4a1415;
+  --color-neutral-800: #360d0e;
+  --color-neutral-900: #210607;
+  --color-gold: #f5c518;
+  --font-display: var(--font-oswald), Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+}
+html[data-design="communism"] body {
+  background:
+    repeating-conic-gradient(from 0deg at 0% 0%, #ffffff05 0deg 6deg, transparent 6deg 12deg),
+    radial-gradient(ellipse at top left, #5a0a0c 0%, transparent 55%), var(--color-surface);
+  background-attachment: fixed;
+}
+html[data-design="communism"] :is(h1, h2) {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+html[data-design="communism"] .logo {
+  color: var(--color-gold);
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0.06em;
+}
+html[data-design="communism"] .logo-mark.star {
+  display: inline;
+  color: var(--color-brand);
+}
+
+/* Miku: teal and pink, rounded type, the sleeve stripes of her outfit. */
+html[data-design="miku"] {
+  --color-brand: #0f9f96;
+  --color-brand-dark: #0a7a73;
+  --color-surface: #081a21;
+  --color-surface-raised: #10303a;
+  --color-muted: #9fd3d0;
+  --color-neutral-700: #1b4854;
+  --color-neutral-800: #133a44;
+  --color-neutral-900: #0c2830;
+  --color-pink: #e12885;
+  --font-sans:
+    var(--font-nunito), ui-rounded, "SF Pro Rounded", "Hiragino Maru Gothic ProN",
+    var(--font-geist-sans), sans-serif;
+}
+html[data-design="miku"] body {
+  background:
+    repeating-linear-gradient(135deg, #39c5bb08 0 2px, transparent 2px 22px),
+    radial-gradient(ellipse at top right, #39c5bb33 0%, transparent 50%),
+    radial-gradient(ellipse at bottom left, #e1288522 0%, transparent 45%), var(--color-surface);
+  background-attachment: fixed;
+}
+html[data-design="miku"] .logo {
+  color: #39c5bb;
+  text-shadow: 0 0 18px #39c5bb66;
+}
+html[data-design="miku"] .logo-mark.note {
+  display: inline;
+  color: var(--color-pink);
+}
+html[data-design="miku"] :is(h1, h2) {
+  letter-spacing: 0.01em;
+}

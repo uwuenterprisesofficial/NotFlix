@@ -70,3 +70,40 @@ async def test_missing_german_synopsis_falls_back_to_english(client, show, monke
     assert fake.calls == 1  # a miss is remembered too
     body = (await client.get("/anime/77/synopsis", params={"lang": "fr"})).json()
     assert body["language"] == "en"
+
+
+async def test_animetoast_is_asked_when_aniworld_has_no_synopsis(client, show, monkeypatch):
+    from app.providers import base
+
+    aniworld = FakeAniWorld(None)
+
+    class FakeAnimeToast(FakeAniWorld):
+        name = "animetoast"
+
+    toast = FakeAnimeToast("Beschreibung von animetoast.")
+    monkeypatch.setattr(base, "enabled_providers", lambda: [aniworld, toast])
+    body = (await client.get("/anime/77/synopsis", params={"lang": "de"})).json()
+    assert body == {"language": "de", "synopsis": "Beschreibung von animetoast."}
+    assert (aniworld.calls, toast.calls) == (1, 1)
+
+
+async def test_animetoast_description_prefers_german_pages(database, monkeypatch):
+    from app.providers.animetoast import AnimeToastProvider
+    from app.providers.base import AnimeInfo
+
+    provider = AnimeToastProvider("http://scraper")
+
+    async def locate(anime):
+        return ["show-eng-sub", "show-ger-sub"], 0
+
+    pages = {
+        "show-eng-sub": {"description": "English page text"},
+        "show-ger-sub": {"description": "Deutscher Text"},
+    }
+
+    async def page(slug):
+        return pages[slug]
+
+    monkeypatch.setattr(provider, "locate", locate)
+    monkeypatch.setattr(provider, "_page", page)
+    assert await provider.description(AnimeInfo(1, "Show")) == "Deutscher Text"

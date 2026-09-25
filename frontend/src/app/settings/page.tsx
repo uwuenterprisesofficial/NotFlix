@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { AccountSettings } from "@/components/AccountSettings";
 import { SettingsForm } from "@/components/SettingsForm";
+import { cookies } from "next/headers";
 import { api, apiOrNull } from "@/lib/api";
+import { DESIGN_COOKIE, isDesign } from "@/lib/design";
 import type { Me } from "@/lib/types";
 import { getT } from "@/lib/i18n/server";
 
@@ -11,6 +13,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function SettingsPage() {
+  const chosen = (await cookies()).get(DESIGN_COOKIE)?.value;
   const [{ t }, me, providers] = await Promise.all([
     getT(),
     apiOrNull<Me>("/me"),
@@ -25,7 +28,7 @@ export default async function SettingsPage() {
         <p className="mt-1 text-sm text-muted">{t("accounts.info")}</p>
         <AccountSettings me={me} providers={providers} />
       </section>
-      <SettingsForm />
+      <SettingsForm design={isDesign(chosen) ? chosen : "standard"} />
     </div>
   );
 }
