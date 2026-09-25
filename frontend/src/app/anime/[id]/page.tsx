@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AirTime } from "@/components/AirTime";
 import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { AnimeToastMapping } from "@/components/AnimeToastMapping";
 import { AniWorldMapping } from "@/components/AniWorldMapping";
@@ -8,7 +9,7 @@ import { EpisodeBrowser } from "@/components/EpisodeBrowser";
 import { PredictionPanel } from "@/components/PredictionPanel";
 import { apiOrNull } from "@/lib/api";
 import { Synopsis } from "@/components/Synopsis";
-import { displayTitle, mediaType, nextEpisode, seasonText } from "@/lib/format";
+import { displayTitle, mediaType, playableEpisode, seasonText } from "@/lib/format";
 import { type T, formatNumber, genreName, tagName } from "@/lib/i18n";
 import { getT } from "@/lib/i18n/server";
 import type { AnimeDetail, Me } from "@/lib/types";
@@ -85,12 +86,36 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
             className="mt-5 whitespace-pre-line text-neutral-200"
             note
           />
-          <Link
-            href={`/watch/${anime.id}/${nextEpisode(anime)}`}
-            className="mt-6 inline-flex items-center gap-2 rounded bg-white px-6 py-2 font-semibold text-black hover:bg-white/80"
-          >
-            ▶ {watched ? t("detail.resume", { episode: nextEpisode(anime) }) : t("detail.play1")}
-          </Link>
+          {anime.aired_episodes === 0 ? (
+            // Nothing has aired: nothing to play, and no streams are looked for.
+            <p className="mt-6 inline-flex flex-wrap items-center gap-2 rounded bg-surface-raised px-4 py-2 text-sm">
+              <span className="font-semibold">{t("airing.notAired")}</span>
+              {anime.next_episode_at && (
+                <span className="text-muted">
+                  · {t("airing.firstOn")}
+                  <AirTime at={anime.next_episode_at} />
+                </span>
+              )}
+            </p>
+          ) : (
+            <div className="mt-6 flex flex-wrap items-center gap-4">
+              <Link
+                href={`/watch/${anime.id}/${playableEpisode(anime)}`}
+                className="inline-flex items-center gap-2 rounded bg-white px-6 py-2 font-semibold text-black hover:bg-white/80"
+              >
+                ▶{" "}
+                {watched
+                  ? t("detail.resume", { episode: playableEpisode(anime) })
+                  : t("detail.play1")}
+              </Link>
+              {anime.next_episode && anime.next_episode_at && (
+                <span className="text-sm text-muted">
+                  {t("airing.nextOn", { episode: anime.next_episode })}
+                  <AirTime at={anime.next_episode_at} />
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -99,6 +124,8 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
         numEpisodes={anime.num_episodes}
         watched={watched}
         signedIn={me !== null}
+        aired={anime.aired_episodes}
+        nextAt={anime.next_episode_at}
       />
 
       {me && (

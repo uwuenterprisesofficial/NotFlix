@@ -30,12 +30,18 @@ export type AnimeCard = {
   progress: Progress | null;
   reason: string | null;
   prediction: Prediction | null;
+  /** In the release calendar / New Episodes: this episode and its (Japanese) air time. */
+  airing?: { episode: number; airing_at: string } | null;
 };
 
 export type AnimeDetail = AnimeCard & {
   synopsis: string | null;
   /** "en" is MAL's; another language when a translation was found. */
   synopsis_language: string;
+  /** Episodes aired so far (null: no limit known, e.g. finished) and the next one's air time. */
+  aired_episodes: number | null;
+  next_episode: number | null;
+  next_episode_at: string | null;
   status: string | null;
   start_season: string | null;
   tags: { id: number; name: string; category: TagCategory }[];
@@ -248,3 +254,5 @@ export type StatsStatus = {
   stats: Stats | null;
   computed_at: string | null;
 };
+
+export type CalendarResponse = { items: AnimeCard[]; refreshing: boolean };

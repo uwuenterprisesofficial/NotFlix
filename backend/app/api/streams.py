@@ -36,6 +36,7 @@ from app.schemas import (
     StreamOut,
     SubtitleOut,
 )
+from app.services import airing as airing_info
 from app.services import catalog, source_scan
 from app.services.mappings import delete_mapping, save_mapping
 from app.services.proxy import TOKEN_MAX_AGE_S, proxy_url
@@ -116,10 +117,23 @@ async def _start_scan(
         around = entry.episodes_watched + 1 if entry else 1
     num_episodes = anime.num_episodes if anime else None
     airing = anime is None or num_episodes is None or anime.status == "currently_airing"
-    await source_scan.ensure_scan(
-        info, source_scan.scan_window(num_episodes, around), airing, force
+    # Episodes that haven't aired have no streams yet: they aren't looked for.
+    aired = await airing_info.aired_episodes(db, anime)
+    if aired == 0:
+        return info
+    window = source_scan.scan_window(
+        min(num_episodes or aired, aired) if aired else num_episodes, around
     )
+    if aired:
+        window = [ep for ep in window if ep <= aired]
+    await source_scan.ensure_scan(info, window, airing, force)
     return info
+
+
+async def _not_aired(db: DB, anime_id: int, episode: int) -> bool:
+    anime = await catalog.get_anime(db, anime_id)
+    aired = await airing_info.aired_episodes(db, anime)
+    return aired is not None and episode > aired
 
 
 def _option_out(o: SourceOption) -> SourceOptionOut:
@@ -157,7 +171,9 @@ async def episode_sources(
     anime_id: int, episode: int, db: DB, user: OptionalUser, provider: str | None = None
 ):
     """Ways to watch this episode (from one provider, or all). Options without `resolved`
-    need a /resolve call."""
+    need a /resolve call. None for an episode that hasn't aired."""
+    if await _not_aired(db, anime_id, episode):
+        return []
     info = await _start_scan(db, anime_id, user, around=episode)
     names = [p.name for p in providers_base.enabled_providers() if provider in (None, p.name)]
     found = await asyncio.gather(*(_options(info, episode, name) for name in names))
@@ -239,6 +255,8 @@ async def refresh_availability(anime_id: int, db: DB, user: CurrentUser):
 async def resolve_source(anime_id: int, episode: int, option: str, db: DB, fresh: bool = False):
     """The option's playable streams: stored ones while they're valid (unless `fresh`, e.g.
     because they stopped working), otherwise asked from the provider and stored."""
+    if await _not_aired(db, anime_id, episode):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Episode {episode} hasn't aired yet")
     if not fresh:
         for stored in await source_scan.cached_resolutions(anime_id, episode, option):
             return resolved_out(stored.resolved, stored)

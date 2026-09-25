@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { T } from "@/lib/i18n";
+import { LOCALE, type T } from "@/lib/i18n";
 import { PROVIDER_LABELS } from "@/lib/languages";
 import { forgetShowStreams } from "@/lib/streamCache";
 import { pickLanguage, useStreamLanguage } from "@/lib/streamLanguage";
 import type { Availability, Language } from "@/lib/types";
+import { useNow } from "@/lib/useNow";
 import { useT } from "./I18nProvider";
 import { LanguageFlag } from "./LanguageFlag";
 import { Dropdown } from "./player/Dropdown";
@@ -18,7 +19,7 @@ export const SOURCES_CHANGED_EVENT = "notflix:sources-changed";
 // Airing shows have no episode count on MAL yet; show at least this many.
 const UNKNOWN_EPISODE_COUNT = 12;
 
-type Status = "available" | "other-language" | "none" | "checking" | "unknown";
+type Status = "available" | "other-language" | "none" | "checking" | "unknown" | "upcoming";
 
 /**
  * Episode grid with per-language availability. Opening the page makes the backend scan every
@@ -29,11 +30,17 @@ export function EpisodeBrowser({
   numEpisodes,
   watched,
   signedIn,
+  aired = null,
+  nextAt = null,
 }: {
   animeId: number;
   numEpisodes: number | null;
   watched: number;
   signedIn: boolean;
+  /** Episodes aired so far (null: no limit known); later ones aren't looked for. */
+  aired?: number | null;
+  /** When the next episode airs. */
+  nextAt?: string | null;
 }) {
   const [data, setData] = useState<Availability | null>(null);
   const [failed, setFailed] = useState(false);
@@ -41,7 +48,9 @@ export function EpisodeBrowser({
   const { t } = useT();
   const { order, chosen, choose } = useStreamLanguage(animeId);
 
-  const scanning = data?.scanning ?? true;
+  // Nothing has aired: there's nothing to look for.
+  const nothingAired = aired === 0;
+  const scanning = !nothingAired && (data?.scanning ?? true);
   useEffect(() => {
     if (!scanning) return;
     let cancelled = false;
@@ -85,7 +94,9 @@ export function EpisodeBrowser({
   const languagesByEpisode = new Map(data?.episodes.map((e) => [e.episode, e.languages]));
   const checked = new Set(data?.checked);
   const lastAvailable = Math.max(0, ...languagesByEpisode.keys());
-  const count = numEpisodes ?? Math.max(UNKNOWN_EPISODE_COUNT, watched + 1, lastAvailable);
+  const count =
+    numEpisodes ??
+    Math.max(UNKNOWN_EPISODE_COUNT, watched + 1, lastAvailable, aired !== null ? aired + 1 : 0);
   const episodes = Array.from({ length: count }, (_, i) => i + 1);
 
   const perLanguage = new Map<Language, number>();
@@ -96,6 +107,7 @@ export function EpisodeBrowser({
   const language = pickLanguage(order, perLanguage.keys(), chosen);
 
   function status(ep: number): Status {
+    if (aired !== null && ep > aired) return "upcoming";
     const langs = languagesByEpisode.get(ep) ?? [];
     if (langs.includes(language)) return "available";
     if (langs.length) return "other-language";
@@ -161,6 +173,7 @@ export function EpisodeBrowser({
       </div>
 
       <div className="mb-3 min-h-5 text-sm text-muted" aria-live="polite">
+        {nothingAired && t("airing.notAired")}
         {failed && t("episodes.loadFailed")}
         {running.length > 0 && t("episodes.looking", { providers: providerNames(running) })}
         {broken.length > 0 && (
@@ -183,6 +196,7 @@ export function EpisodeBrowser({
             status={status(ep)}
             languages={languagesByEpisode.get(ep) ?? []}
             t={t}
+            airsAt={aired !== null && ep === aired + 1 ? nextAt : null}
           />
         ))}
       </div>
@@ -211,6 +225,7 @@ const TILE: Record<Status, string> = {
   none: "bg-neutral-900 text-neutral-600",
   checking: "animate-pulse bg-neutral-800 text-neutral-400",
   unknown: "bg-neutral-800 text-neutral-400 hover:bg-neutral-700",
+  upcoming: "border border-dashed border-white/15 text-neutral-500",
 };
 
 const DOT: Partial<Record<Status, string>> = {
@@ -226,6 +241,7 @@ function EpisodeTile({
   status,
   languages,
   t,
+  airsAt,
 }: {
   animeId: number;
   episode: number;
@@ -233,13 +249,16 @@ function EpisodeTile({
   status: Status;
   languages: Language[];
   t: T;
+  airsAt: string | null;
 }) {
   const title =
-    status === "none"
-      ? t("episodes.noStreamFound")
-      : status === "checking"
-        ? t("episodes.lookingStreams")
-        : languages.map((l) => t(`lang.${l}`)).join(", ") || undefined;
+    status === "upcoming"
+      ? t("airing.upcoming")
+      : status === "none"
+        ? t("episodes.noStreamFound")
+        : status === "checking"
+          ? t("episodes.lookingStreams")
+          : languages.map((l) => t(`lang.${l}`)).join(", ") || undefined;
   const content = (
     <>
       {DOT[status] && (
@@ -259,16 +278,25 @@ function EpisodeTile({
           {t("episodes.noStream")}
         </span>
       )}
+      {status === "upcoming" && airsAt && (
+        <span className="block text-[10px] leading-tight font-normal">
+          <AirDay at={airsAt} />
+        </span>
+      )}
     </>
   );
   const className = `relative block rounded py-3 text-center text-sm font-semibold transition-colors ${TILE[status]}`;
 
-  if (status === "none") {
+  if (status === "none" || status === "upcoming") {
     return (
       <span
         className={className}
         title={title}
-        aria-label={t("episodes.noStreamLabel", { episode })}
+        aria-label={
+          status === "upcoming"
+            ? `${t("player.episodeTitle", { episode })}: ${t("airing.upcoming")}`
+            : t("episodes.noStreamLabel", { episode })
+        }
       >
         {content}
       </span>
@@ -283,4 +311,12 @@ function EpisodeTile({
 
 function providerNames(scans: { provider: string }[]): string {
   return scans.map((s) => PROVIDER_LABELS[s.provider] ?? s.provider).join(", ");
+}
+
+/** "Sat 27" in the viewer's time zone (browser only). */
+function AirDay({ at }: { at: string }) {
+  const { lang } = useT();
+  const now = useNow();
+  if (now === null) return null;
+  return <>{new Date(at).toLocaleDateString(LOCALE[lang], { weekday: "short", day: "numeric" })}</>;
 }

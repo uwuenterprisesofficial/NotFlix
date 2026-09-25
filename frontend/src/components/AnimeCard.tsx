@@ -2,22 +2,27 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { displayTitle, reasonText } from "@/lib/format";
+import { displayTitle, reasonText, relativeTime } from "@/lib/format";
 import { formatNumber, genreName } from "@/lib/i18n";
 import type { AnimeCard as AnimeCardType } from "@/lib/types";
+import { useNow } from "@/lib/useNow";
 import { useT } from "./I18nProvider";
 import { PredictionBadge } from "./PredictionBadge";
 import { allowedImage } from "@/lib/images";
 
 export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; fluid?: boolean }) {
   const { t, lang } = useT();
+  const now = useNow();
+  const airing = anime.airing;
+  // New Episodes: the (released) episode opens the player directly.
+  const href = airing ? `/watch/${anime.id}/${airing.episode}` : `/anime/${anime.id}`;
   const watched = anime.progress?.episodes_watched ?? 0;
   const showProgress = anime.progress?.status === "watching" && anime.num_episodes;
   const title = displayTitle(anime);
 
   return (
     <Link
-      href={`/anime/${anime.id}`}
+      href={href}
       className={`group/card relative block shrink-0 transition-transform duration-200 hover:z-10 hover:scale-110 ${fluid ? "w-full" : "w-36 md:w-44"}`}
       title={anime.reason ? reasonText(t, anime.reason) : title}
     >
@@ -36,6 +41,17 @@ export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; flui
         <div className="absolute top-1.5 left-1.5">
           <PredictionBadge prediction={anime.prediction} />
         </div>
+        {airing && (
+          <span className="absolute right-1.5 bottom-1.5 rounded bg-black/80 px-1.5 py-0.5 text-[11px] font-semibold shadow">
+            {t("airing.episode", { episode: airing.episode })}
+            {now !== null && (
+              <span className="font-normal text-neutral-300">
+                {" · "}
+                {relativeTime(lang, airing.airing_at, now)}
+              </span>
+            )}
+          </span>
+        )}
         <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/90 via-black/20 to-transparent p-2 opacity-0 transition-opacity group-hover/card:opacity-100">
           <p className="line-clamp-2 text-sm font-semibold">{title}</p>
           <p className="text-xs text-muted">

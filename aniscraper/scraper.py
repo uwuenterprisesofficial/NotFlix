@@ -56,6 +56,28 @@ class _TTLCache:
         self._data[key] = (time.time(), value)
 
 
+class UnexpectedResponse(httpx.HTTPError):
+    """The site answered, but not with what it should (e.g. an HTML error or rate-limit page
+    instead of JSON): treated like the site being unreachable, not like "nothing found"."""
+
+
+def _search_items(r: httpx.Response) -> list[dict]:
+    """aniworld's search results. It answers an empty body when nothing matches."""
+    body = r.text.strip()
+    if not body:
+        return []
+    try:
+        data = r.json()
+    except ValueError as e:
+        raise UnexpectedResponse(
+            f"search answered {r.headers.get('content-type', 'no content type')} instead of "
+            f"JSON: {body[:80]!r}"
+        ) from e
+    if not isinstance(data, list):
+        raise UnexpectedResponse(f"search answered {type(data).__name__} instead of a list")
+    return [item for item in data if isinstance(item, dict)]
+
+
 class AniWorldScraper:
     def __init__(self, max_concurrency: int = 5, cache_ttl: int = 900):
         self.client = httpx.AsyncClient(
@@ -89,7 +111,7 @@ class AniWorldScraper:
         r.raise_for_status()
         results = []
         seen = set()
-        for item in r.json():
+        for item in _search_items(r):
             link = item.get("link", "")
             m = SERIES_RE.match(link)
             if not m or m.group(1) in seen:

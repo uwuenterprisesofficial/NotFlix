@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRef } from "react";
 import type { MessageKey } from "@/lib/i18n";
 import type { Row } from "@/lib/types";
@@ -15,6 +16,7 @@ const ROW_TITLES = new Set([
   "row.airing",
   "row.bypopularity",
   "row.upcoming",
+  "row.new-episodes",
 ]);
 
 export function AnimeRow({ row }: { row: Row }) {
@@ -29,9 +31,16 @@ export function AnimeRow({ row }: { row: Row }) {
 
   return (
     <section id={row.id} className="group/row relative scroll-mt-20">
-      <h2 className="mb-2 px-4 text-lg font-semibold md:px-12 md:text-xl">
-        {ROW_TITLES.has(key) ? t(key as MessageKey) : row.title}
-      </h2>
+      <div className="mb-2 flex items-baseline gap-4 px-4 md:px-12">
+        <h2 className="text-lg font-semibold md:text-xl">
+          {ROW_TITLES.has(key) ? t(key as MessageKey) : row.title}
+        </h2>
+        {row.id === "new-episodes" && (
+          <Link href="/calendar" className="text-sm text-muted hover:text-white">
+            {t("row.calendar")}
+          </Link>
+        )}
+      </div>
       <div
         ref={scroller}
         className="no-scrollbar flex gap-2 overflow-x-auto scroll-smooth px-4 py-4 md:px-12"

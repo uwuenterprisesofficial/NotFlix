@@ -102,6 +102,10 @@ class Anime(Base):
     alt_titles: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     # When MAL's own data was last stored (None: only another source's so far, e.g. AniList).
     mal_details_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Airing: the next episode and when it airs (AniList's schedule), checked at airing_checked_at.
+    next_episode: Mapped[int | None] = mapped_column(Integer)
+    next_episode_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    airing_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # When the catalogue worker last completed the entry (MAL details, translated synopses).
     enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
@@ -150,6 +154,18 @@ class AnimeSynopsis(Base):
     synopsis: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str | None] = mapped_column(String(20))
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AiringEpisode(Base):
+    """One episode's (Japanese) air time, from AniList's airing schedule."""
+
+    __tablename__ = "airing_schedule"
+    __table_args__ = (UniqueConstraint("anime_id", "episode"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anime_id: Mapped[int] = mapped_column(Integer, index=True)  # MAL id
+    episode: Mapped[int] = mapped_column(Integer)
+    airing_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class TasteModel(Base):

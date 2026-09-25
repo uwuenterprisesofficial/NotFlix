@@ -92,6 +92,44 @@ export const common = {
   "row.airing": { en: "Top Airing", de: "Aktuell beliebt" },
   "row.bypopularity": { en: "Most Popular", de: "Am beliebtesten" },
   "row.upcoming": { en: "Coming Soon", de: "Demnächst" },
+  "row.new-episodes": { en: "New Episodes", de: "Neue Folgen" },
+  "row.calendar": { en: "Release calendar ›", de: "Veröffentlichungskalender ›" },
+  "nav.calendar": { en: "Calendar", de: "Kalender" },
+  "airing.episode": { en: "E{episode}", de: "F{episode}" },
+  "airing.notAired": { en: "Not aired yet", de: "Noch nicht ausgestrahlt" },
+  // The air time follows these (formatted in the browser, in the viewer's time zone).
+  "airing.firstOn": { en: "episode 1 airs ", de: "Folge 1 erscheint am " },
+  "airing.nextOn": { en: "Episode {episode} airs ", de: "Folge {episode} erscheint am " },
+  "airing.notYetTitle": {
+    en: "Episode {episode} hasn't aired yet",
+    de: "Folge {episode} wurde noch nicht ausgestrahlt",
+  },
+  "airing.notYetInfo": {
+    en: "There are no streams before it airs, so none are looked for.",
+    de: "Vor der Ausstrahlung gibt es keine Streams, deshalb wird auch nicht danach gesucht.",
+  },
+  "airing.upcoming": { en: "Not aired yet", de: "Noch nicht erschienen" },
+  "airing.back": { en: "‹ Back to the show", de: "‹ Zurück zur Serie" },
+
+  // Calendar
+  "calendar.title": { en: "Release calendar", de: "Veröffentlichungskalender" },
+  "calendar.info": {
+    en: "When new episodes air in Japan (times in your time zone). Streams usually follow within hours; German releases often later.",
+    de: "Wann neue Folgen in Japan ausgestrahlt werden (Zeiten in deiner Zeitzone). Streams folgen meist nach ein paar Stunden, deutsche Fassungen oft später.",
+  },
+  "calendar.prev": { en: "‹ Previous week", de: "‹ Vorherige Woche" },
+  "calendar.next": { en: "Next week ›", de: "Nächste Woche ›" },
+  "calendar.thisWeek": { en: "This week", de: "Diese Woche" },
+  "calendar.mine": { en: "Only my list", de: "Nur meine Liste" },
+  "calendar.loading": { en: "Loading the schedule…", de: "Lade den Sendeplan…" },
+  "calendar.updating": { en: "Updating the schedule…", de: "Sendeplan wird aktualisiert…" },
+  "calendar.empty": { en: "Nothing airs", de: "Nichts läuft" },
+  "calendar.failed": {
+    en: "Couldn't load the schedule.",
+    de: "Der Sendeplan konnte nicht geladen werden.",
+  },
+  "calendar.today": { en: "Today", de: "Heute" },
+  "calendar.aired": { en: "aired", de: "erschienen" },
   "row.scrollLeft": { en: "Scroll left", de: "Nach links scrollen" },
   "row.scrollRight": { en: "Scroll right", de: "Nach rechts scrollen" },
   "reason.becauseYouLiked": {

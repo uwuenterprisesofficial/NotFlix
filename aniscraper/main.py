@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Query
 
 from animetoast import AnimeToastScraper
 from download_client import DownloadClient
-from scraper import AniWorldScraper
+from scraper import AniWorldScraper, UnexpectedResponse
 
 aniworld: AniWorldScraper
 animetoast: AnimeToastScraper
@@ -47,8 +47,12 @@ async def _wrap(coro, site: str):
     except httpx.HTTPStatusError as e:
         code = e.response.status_code
         raise HTTPException(404 if code == 404 else 502, f"{site} returned {code}")
+    except UnexpectedResponse as e:
+        raise HTTPException(502, f"{site} sent an unexpected answer: {e}")
     except httpx.HTTPError as e:
         raise HTTPException(502, f"Could not reach {site}: {e}")
+    except ValueError as e:  # a page that couldn't be parsed (e.g. JSON that isn't)
+        raise HTTPException(502, f"{site} sent something unexpected: {e}")
 
 
 async def _search_aniworld(q: str, season: int | None, streams: bool) -> dict:

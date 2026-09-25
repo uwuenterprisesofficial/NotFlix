@@ -2,6 +2,7 @@
 
 A Netflix-style front end for anime, backed by your MyAnimeList account:
 
+- **Release calendar**: a **New Episodes** row on the home page and a week calendar (**Calendar** in the top bar) of what airs when (see below).
 - **Browse**: hero banner plus rows for Continue Watching, Recommended for You, My List, Watch Again, and MAL's Top Airing / Most Popular / Coming Soon.
 - **Sync with MyAnimeList and/or AniList**: sign in with either or both (see **Lists** below); more can be linked in Settings. With MyAnimeList: sign in with MAL OAuth. "Sync MAL" imports your list and watch progress. Finishing an episode writes your progress back to MAL. Clicking **✓ Watched** again unwatches it: MAL only stores a count, so progress goes back to the episode before.
 - **Recommendations**: MAL community recommendations of your best-rated shows, ranked by your predicted score (see below), community votes and MAL's score.
@@ -127,6 +128,15 @@ Every show NotFlix sees is kept in the database (the `anime` table, plus `anime_
 - **Opening a show** reads it from the catalogue. Only a show that isn't in it yet is fetched from MAL right away (once). A catalogue entry is never re-fetched while you wait: when its MAL data is older than `CATALOG_REFRESH_DAYS` (default 30; airing shows after a day; `0` never), the catalogue worker refreshes it in the background.
 - **Search** looks in the catalogue (titles, English titles and alternative titles, e.g. Japanese or synonyms) and in MAL. MAL's results are cached per query for a week, so the same search doesn't ask MAL again. A show already in the catalogue is shown with the catalogue's data; catalogue matches MAL doesn't rank (e.g. found by another title) are added after MAL's first page. Without MAL, or for a query under 3 characters, the catalogue alone answers. The genre search works the same way with Jikan's results.
 - **New shows are added in the background.** Search results, genre results and anything else not yet complete are handed to the **catalogue worker** (`rq worker catalog`; the `catalog-worker` service in docker compose), 25 shows per job. It stores the data it was given, fetches MAL's details where they're missing or due, looks up the synopsis in every `CATALOG_SYNOPSIS_LANGUAGES` language (default `de`: AniWorld, then AnimeToast), and marks the show complete. A show is handed over at most once an hour. A source that's down isn't remembered as "no synopsis", so it's tried again.
+
+## Release calendar
+
+The schedule comes from AniList's public airing schedule (`airingSchedules`: every episode's Japanese air time, with the show's MAL id), stored in the `airing_schedule` table. A week is fetched from AniList when it's first shown and then at most once an hour (past weeks once a day), in the background; shows that aren't in the catalogue yet are added from AniList's data and completed by the catalogue worker. Adult shows are left out.
+
+- **New Episodes** (home page, after Continue Watching): each show's latest episode aired in the last 3 days, newest first, shows on your list first. A card opens that episode.
+- **Calendar** (`/calendar`): Monday to Sunday in your time zone, with air times, what has aired and what's coming ("in 20 h"), and a filter for your list. Streams usually follow the Japanese broadcast within hours; German releases often later.
+
+**Episodes that haven't aired aren't looked for.** A show's next episode comes from the schedule, or from AniList for that show (checked every 3 hours, and again once the next episode's time has passed). Episodes after the last aired one aren't scanned, asked for or resolved on the streaming sites; a show that hasn't started isn't scanned at all. The show page has no Play button before episode 1 airs and says when it does, the episode grid shows upcoming episodes greyed out with their air day, and the player shows when an unaired episode airs instead of looking for sources.
 
 ## Designs
 
