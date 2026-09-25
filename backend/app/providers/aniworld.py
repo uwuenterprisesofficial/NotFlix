@@ -16,6 +16,7 @@ from app.core.cache import get_json, set_json
 from app.providers.base import (
     SCAN_CONCURRENCY,
     AnimeInfo,
+    Found,
     Language,
     ProviderError,
     Resolved,
@@ -276,12 +277,14 @@ class AniWorldProvider:
     async def options(self, anime: AnimeInfo, episode: int) -> list[SourceOption]:
         return self._options(await self.episode_links(anime, episode))
 
-    async def scan(self, anime: AnimeInfo, episodes: list[int]) -> dict[int, list[SourceOption]]:
+    async def scan(
+        self, anime: AnimeInfo, episodes: list[int], found: Found | None = None
+    ) -> dict[int, list[SourceOption]]:
         """The season page says which episodes exist, so only those episode pages are fetched."""
-        found: dict[int, list[SourceOption]] = {ep: [] for ep in episodes}
+        results: dict[int, list[SourceOption]] = {ep: [] for ep in episodes}
         located = await self.locate(anime)
         if located is None:
-            return found
+            return results
         slug, season, offset = located
         listed = await self.season_episodes(slug, season) or set()
         wanted = [ep for ep in episodes if not listed or ep + offset in listed]
@@ -289,10 +292,12 @@ class AniWorldProvider:
 
         async def one(ep: int) -> None:
             async with limit:
-                found[ep] = self._options(await self.episode_links(anime, ep))
+                results[ep] = self._options(await self.episode_links(anime, ep))
+            if found is not None:
+                await found({ep: results[ep]})
 
         await asyncio.gather(*(one(ep) for ep in wanted))
-        return found
+        return results
 
     async def follow_redirect(self, url: str) -> str:
         """Play links redirect to the hoster's embed page. Resolving that here avoids loading
@@ -334,9 +339,12 @@ class AniWorldApiProvider(AniWorldProvider):
     GET /api/series/{title}/episodes/{season}            -> episodes with hosters and languages
     GET /api/series/{title}/episodes/{season}/{episode}  -> the episode's play links
 
-    Scans need one request per season. Options are one per language; the episode's hosters
+    Scans need one request per season (so they cover the whole show). Options are one per
+    language; the episode's hosters
     (VOE, Doodstream, ...) become that option's streams when it is played.
     """
+
+    lists_whole_show = True
 
     async def description(self, anime: AnimeInfo) -> str | None:
         return None  # not part of this API
@@ -384,7 +392,9 @@ class AniWorldApiProvider(AniWorldProvider):
             for lang in languages
         ]
 
-    async def scan(self, anime: AnimeInfo, episodes: list[int]) -> dict[int, list[SourceOption]]:
+    async def scan(
+        self, anime: AnimeInfo, episodes: list[int], found: Found | None = None
+    ) -> dict[int, list[SourceOption]]:
         found: dict[int, list[SourceOption]] = {ep: [] for ep in episodes}
         located = await self.locate(anime)
         if located is None:

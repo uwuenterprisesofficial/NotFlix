@@ -22,6 +22,7 @@ from app.core.cache import get_json, set_json
 from app.providers.aniworld import SCRAPER_LANGUAGES
 from app.providers.base import (
     AnimeInfo,
+    Found,
     Language,
     ProviderError,
     Resolved,
@@ -69,6 +70,7 @@ def pick_pages(results: list[dict[str, Any]], titles: list[str]) -> list[str]:
 
 class AnimeToastProvider:
     name = "animetoast"
+    lists_whole_show = True  # a scan lists every episode in a request or two
 
     def __init__(self, base_url: str, http: httpx.AsyncClient | None = None):
         self.base_url = base_url.rstrip("/")
@@ -170,7 +172,9 @@ class AnimeToastProvider:
         }
         return language, episodes
 
-    async def scan(self, anime: AnimeInfo, episodes: list[int]) -> dict[int, list[SourceOption]]:
+    async def scan(
+        self, anime: AnimeInfo, episodes: list[int], found: Found | None = None
+    ) -> dict[int, list[SourceOption]]:
         found: dict[int, list[SourceOption]] = {ep: [] for ep in episodes}
         located = await self.locate(anime)
         if located is None:

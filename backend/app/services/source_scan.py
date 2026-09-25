@@ -3,11 +3,18 @@
 Opening a show (or an episode) calls `ensure_scan`, which starts an asyncio task in the API
 process for each provider whose cached data is missing, stale or doesn't cover the episodes the
 user is near. Reads always come from the cache first; scans only refresh it.
+
+Results are stored as they come in (a few episodes at a time, the ones nearest to the user
+first), not when a provider is done, so a long show's first episodes are there in seconds.
+Providers that list a whole show in a request or two cover every aired episode; the others
+cover a window around the user. A later scan of fresh data only asks for what's missing. Every
+stored episode is noted in a change log, so the browser can fetch just what changed.
 """
 
 import asyncio
 import logging
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -41,9 +48,30 @@ RESOLVED_EMBED_TTL = timedelta(days=7)
 WINDOW = 60  # episodes per scan
 LOOKBEHIND = 5
 UNKNOWN_COUNT_LOOKAHEAD = 12
+# A scan stores what it found once it has this many episodes, or after this long.
+FLUSH_EPISODES = 3
+FLUSH_AFTER_S = 1.0
+CHANGES_TTL_S = 24 * 3600
 
-# (anime id, provider) -> (task, episodes it covers)
-_running: dict[tuple[int, str], tuple[asyncio.Task, list[int]]] = {}
+
+@dataclass
+class _Scan:
+    """A running scan: its task, the episodes it's asked for, and those stored so far."""
+
+    task: asyncio.Task
+    episodes: list[int]
+    # Goes episode by episode (so progress means something); a listing arrives all at once.
+    stepwise: bool = True
+    stored: set[int] = field(default_factory=set)
+
+
+# (anime id, provider) -> the running scan
+_running: dict[tuple[int, str], _Scan] = {}
+
+
+def by_distance(episodes: list[int], around: int) -> list[int]:
+    """The episodes nearest to `around` first (the next ones before the previous ones)."""
+    return sorted(episodes, key=lambda ep: (abs(ep - around) + (ep < around) * 0.5, ep))
 
 
 def scan_window(num_episodes: int | None, next_episode: int) -> list[int]:
@@ -91,6 +119,30 @@ async def _upsert_scan(anime_id: int, provider: str, **values) -> None:
         await db.commit()
 
 
+def _changes_key(anime_id: int) -> str:
+    return f"streams:changed:{anime_id}"
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+async def _note_changes(anime_id: int, episodes: list[int]) -> None:
+    if not episodes:
+        return
+    stamp = now_ms()
+    pipe = cache.redis().pipeline()
+    pipe.zadd(_changes_key(anime_id), {str(ep): stamp for ep in episodes})
+    pipe.expire(_changes_key(anime_id), CHANGES_TTL_S)
+    await pipe.execute()
+
+
+async def changed_since(anime_id: int, after_ms: int) -> list[int]:
+    """Episodes whose cached options were stored at or after this time (ms)."""
+    found = await cache.redis().zrangebyscore(_changes_key(anime_id), after_ms, "+inf")
+    return sorted(int(ep) for ep in found)
+
+
 async def _store(anime_id: int, provider: str, results: dict[int, list[SourceOption]]) -> list[int]:
     """Replace the cached options of these episodes; returns the scan's new episode coverage."""
     episodes = list(results)
@@ -122,50 +174,109 @@ async def _store(anime_id: int, provider: str, results: dict[int, list[SourceOpt
             )
         )
         covered = sorted(set(scan.episodes if scan else []) | set(episodes))
+        if scan is not None:
+            scan.episodes = covered
         await db.commit()
+    await _note_changes(anime_id, episodes)
     return covered
 
 
-async def _scan_provider(provider: StreamProvider, anime: AnimeInfo, window: list[int]) -> None:
+class _Writer:
+    """Stores a scan's results as they come in: a few episodes at a time, or after a moment."""
+
+    def __init__(self, anime_id: int, provider: str, running: _Scan | None):
+        self.anime_id, self.provider, self.running = anime_id, provider, running
+        self.pending: dict[int, list[SourceOption]] = {}
+        self.written: set[int] = set()
+        self.last = time.monotonic()
+        self.lock = asyncio.Lock()
+
+    async def add(self, results: dict[int, list[SourceOption]]) -> None:
+        self.pending.update(results)
+        if len(self.pending) >= FLUSH_EPISODES or time.monotonic() - self.last >= FLUSH_AFTER_S:
+            await self.flush()
+
+    async def flush(self) -> None:
+        async with self.lock:
+            if not self.pending:
+                return
+            batch, self.pending = self.pending, {}
+            # _store also extends the scan's coverage, so these count as checked right away.
+            await _store(self.anime_id, self.provider, batch)
+            self.written |= set(batch)
+            if self.running is not None:
+                self.running.stored |= set(batch)
+            self.last = time.monotonic()
+
+
+async def _scan_provider(provider: StreamProvider, anime: AnimeInfo, episodes: list[int]) -> None:
+    writer = _Writer(anime.id, provider.name, _running.get((anime.id, provider.name)))
     try:
         results = await providers_base.guarded(
-            provider, providers_base.scan(provider, anime, window), SCAN_TIMEOUT_S
+            provider, providers_base.scan(provider, anime, episodes, writer.add), SCAN_TIMEOUT_S
         )
     except Exception as e:
         log.warning("Scan of %s for anime %s failed: %s", provider.name, anime.id, e)
+        await writer.flush()  # what was found before the failure is kept
         await _upsert_scan(
             anime.id, provider.name, status="failed", error=str(e)[:500],
             finished_at=datetime.now(UTC),
         )  # fmt: skip
         return
-    covered = await _store(anime.id, provider.name, results)
+    # What the provider returned without reporting it along the way (e.g. one listing).
+    await writer.add({ep: o for ep, o in results.items() if ep not in writer.written})
+    await writer.flush()
     await _upsert_scan(
-        anime.id, provider.name, status="done", episodes=covered, error=None,
-        finished_at=datetime.now(UTC),
-    )  # fmt: skip
+        anime.id, provider.name, status="done", error=None, finished_at=datetime.now(UTC)
+    )
+
+
+def _due(scan: SourceScan | None, wanted: list[int], ttl: timedelta, force: bool) -> list[int]:
+    """The episodes a scan should ask for: none when the cache is good; only the missing ones
+    when it's fresh but doesn't cover them all; else all of them."""
+    if not needs_scan(scan, wanted, ttl, force):
+        return []
+    fresh = (
+        not force
+        and scan is not None
+        and scan.status == "done"
+        and scan.finished_at is not None
+        and datetime.now(UTC) - scan.finished_at <= ttl
+    )
+    if fresh:
+        covered = set(scan.episodes)
+        return [ep for ep in wanted if ep not in covered]
+    return wanted
 
 
 async def ensure_scan(
-    anime: AnimeInfo, window: list[int], airing: bool, force: bool = False
+    anime: AnimeInfo,
+    window: list[int],
+    airing: bool,
+    force: bool = False,
+    whole: list[int] | None = None,
 ) -> None:
-    """Start a background scan for every provider whose cached data isn't good enough."""
+    """Start a background scan for every provider whose cached data isn't good enough. `window`
+    is in the order to scan (nearest to the user first); providers that list a whole show get
+    `whole` (every aired episode) when it's known."""
     ttl = scan_ttl(airing)
     scans = await _scans(anime.id)
-    due = [
-        p
-        for p in providers_base.enabled_providers()
-        if (anime.id, p.name) not in _running and needs_scan(scans.get(p.name), window, ttl, force)
-    ]
     now = datetime.now(UTC)
-    for p in due:
+    for p in providers_base.enabled_providers():
+        key = (anime.id, p.name)
+        if key in _running:
+            continue
+        wanted = whole if whole and providers_base.lists_whole_show(p) else window
         previous = scans.get(p.name)
+        episodes = _due(previous, wanted, ttl, force)
+        if not episodes:
+            continue
         await _upsert_scan(
             anime.id, p.name, status="running", started_at=now, error=None,
             episodes=previous.episodes if previous else [],
         )  # fmt: skip
-        key = (anime.id, p.name)
-        task = asyncio.create_task(_scan_provider(p, anime, window))
-        _running[key] = (task, window)
+        task = asyncio.create_task(_scan_provider(p, anime, episodes))
+        _running[key] = _Scan(task, episodes, stepwise=not providers_base.lists_whole_show(p))
         task.add_done_callback(lambda _, key=key: _running.pop(key, None))
 
 
@@ -173,10 +284,31 @@ def scan_ttl(airing: bool) -> timedelta:
     return AIRING_TTL if airing else FINISHED_TTL
 
 
-def running_scan(anime_id: int, provider: str, episode: int) -> asyncio.Task | None:
+def running_scan(anime_id: int, provider: str, episode: int) -> _Scan | None:
     """The in-progress scan that will cover this episode, if any."""
-    task, window = _running.get((anime_id, provider), (None, []))
-    return task if task is not None and episode in window else None
+    found = _running.get((anime_id, provider))
+    return found if found is not None and episode in found.episodes else None
+
+
+async def wait_for_episode(scan: _Scan, episode: int, timeout: float) -> bool:
+    """Wait (at most `timeout`) until a running scan has stored this episode. False when it
+    didn't get there in time (or ended without it)."""
+    deadline = time.monotonic() + timeout
+    while episode not in scan.stored:
+        left = deadline - time.monotonic()
+        if scan.task.done() or left <= 0:
+            return episode in scan.stored
+        await asyncio.wait({scan.task}, timeout=min(0.25, left))
+    return True
+
+
+def progress(anime_id: int) -> tuple[int, int] | None:
+    """Running episode-by-episode scans of a show: (episodes stored, episodes asked for), or
+    None. (A listing arrives all at once: nothing to count.)"""
+    scans = [s for key, s in _running.items() if key[0] == anime_id and s.stepwise]
+    if not scans:
+        return None
+    return sum(len(s.stored) for s in scans), sum(len(s.episodes) for s in scans)
 
 
 def scanning(anime_id: int) -> bool:
@@ -186,7 +318,7 @@ def scanning(anime_id: int) -> bool:
 async def wait_idle() -> None:
     """Wait for running scans (tests, shutdown)."""
     while _running:
-        await asyncio.gather(*(task for task, _ in list(_running.values())), return_exceptions=True)
+        await asyncio.gather(*(s.task for s in list(_running.values())), return_exceptions=True)
 
 
 async def cached_options(anime_id: int, episode: int, provider: str) -> list[SourceOption] | None:
@@ -289,16 +421,18 @@ async def availability(anime_id: int) -> Availability:
 
 
 async def cached_sources(
-    anime_id: int, providers: list[str]
+    anime_id: int, providers: list[str], episodes: list[int] | None = None
 ) -> tuple[dict[str, SourceScan], dict[int, list[SourceOption]]]:
-    """Every cached option of a show, per episode, in provider order: what the player needs."""
+    """Every cached option of a show (or of these episodes), per episode, in provider order:
+    what the player needs."""
     scans = await _scans(anime_id)
+    query = select(EpisodeSource).where(
+        EpisodeSource.anime_id == anime_id, EpisodeSource.provider.in_(providers)
+    )
+    if episodes is not None:
+        query = query.where(EpisodeSource.episode.in_(episodes))
     async with AsyncSessionLocal() as db:
-        rows = await db.scalars(
-            select(EpisodeSource)
-            .where(EpisodeSource.anime_id == anime_id, EpisodeSource.provider.in_(providers))
-            .order_by(EpisodeSource.episode, EpisodeSource.position)
-        )
+        rows = await db.scalars(query.order_by(EpisodeSource.episode, EpisodeSource.position))
         by_episode: dict[int, list[EpisodeSource]] = {}
         for r in rows:
             by_episode.setdefault(r.episode, []).append(r)

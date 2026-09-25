@@ -8,6 +8,7 @@ from app.core import http
 from app.core.cache import get_json, set_json
 from app.providers.base import (
     AnimeInfo,
+    Found,
     Language,
     ProviderError,
     Resolved,
@@ -123,6 +124,7 @@ def parse_watch(data: dict[str, Any], provider: str) -> Resolved:
 
 class AnivexaProvider:
     name = "anivexa"
+    lists_whole_show = True  # a scan lists every episode in a request or two
 
     def __init__(self, base_url: str, providers: list[str], http: httpx.AsyncClient | None = None):
         self.base_url = base_url.rstrip("/")
@@ -161,7 +163,9 @@ class AnivexaProvider:
         except AniListUnavailable as e:
             raise ProviderError("Anivexa needs AniList ids and AniList is unreachable") from e
 
-    async def scan(self, anime: AnimeInfo, episodes: list[int]) -> dict[int, list[SourceOption]]:
+    async def scan(
+        self, anime: AnimeInfo, episodes: list[int], found: Found | None = None
+    ) -> dict[int, list[SourceOption]]:
         """One /episodes request lists every episode of every Anivexa provider."""
         al_id = await self._anilist_id(anime)
         if al_id is None or not self.providers:

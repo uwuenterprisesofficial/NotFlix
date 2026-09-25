@@ -114,8 +114,8 @@ async def test_unaired_episodes_are_not_looked_for(client, schedule, monkeypatch
 
     windows = []
 
-    async def ensure_scan(info, window, airing_now, force=False):
-        windows.append(window)
+    async def ensure_scan(info, window, airing_now, force=False, whole=None):
+        windows.append(window + (whole or []))
 
     async def no_provider(*args):
         raise AssertionError("providers must not be asked for an unaired episode")
