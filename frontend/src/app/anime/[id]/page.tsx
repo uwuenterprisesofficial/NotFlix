@@ -12,6 +12,7 @@ import { displayTitle, mediaType, nextEpisode, seasonText } from "@/lib/format";
 import { type T, formatNumber, genreName, tagName } from "@/lib/i18n";
 import { getT } from "@/lib/i18n/server";
 import type { AnimeDetail, Me } from "@/lib/types";
+import { allowedImage } from "@/lib/images";
 
 export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
   const { id } = await params;
@@ -29,9 +30,9 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
   return (
     <div className="px-4 pt-24 pb-16 md:px-12">
       <div className="flex flex-col gap-8 md:flex-row">
-        {anime.picture_url && (
+        {allowedImage(anime.picture_url) && (
           <Image
-            src={anime.picture_url}
+            src={allowedImage(anime.picture_url)!}
             alt={title}
             width={240}
             height={340}

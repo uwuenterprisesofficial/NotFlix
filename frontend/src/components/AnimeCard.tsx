@@ -7,6 +7,7 @@ import { formatNumber, genreName } from "@/lib/i18n";
 import type { AnimeCard as AnimeCardType } from "@/lib/types";
 import { useT } from "./I18nProvider";
 import { PredictionBadge } from "./PredictionBadge";
+import { allowedImage } from "@/lib/images";
 
 export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; fluid?: boolean }) {
   const { t, lang } = useT();
@@ -21,9 +22,9 @@ export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; flui
       title={anime.reason ? reasonText(t, anime.reason) : title}
     >
       <div className="relative aspect-[2/3] overflow-hidden rounded-md bg-surface-raised">
-        {anime.picture_url ? (
+        {allowedImage(anime.picture_url) ? (
           <Image
-            src={anime.picture_url}
+            src={allowedImage(anime.picture_url)!}
             alt={title}
             fill
             sizes={fluid ? "(min-width: 768px) 220px, 180px" : "(min-width: 768px) 176px, 144px"}

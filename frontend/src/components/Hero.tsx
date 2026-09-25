@@ -6,6 +6,7 @@ import { getT } from "@/lib/i18n/server";
 import type { AnimeDetail } from "@/lib/types";
 import { PredictionBadge } from "./PredictionBadge";
 import { Synopsis } from "./Synopsis";
+import { allowedImage } from "@/lib/images";
 
 export async function Hero({ anime }: { anime: AnimeDetail }) {
   const { t, lang } = await getT();
@@ -13,10 +14,10 @@ export async function Hero({ anime }: { anime: AnimeDetail }) {
 
   return (
     <section className="relative h-[70vh] min-h-[420px] w-full overflow-hidden">
-      {anime.picture_url && (
+      {allowedImage(anime.picture_url) && (
         // MAL only has portrait posters, so a blurred copy fills the wide banner.
         <Image
-          src={anime.picture_url}
+          src={allowedImage(anime.picture_url)!}
           alt=""
           fill
           priority
@@ -73,9 +74,9 @@ export async function Hero({ anime }: { anime: AnimeDetail }) {
             </Link>
           </div>
         </div>
-        {anime.picture_url && (
+        {allowedImage(anime.picture_url) && (
           <Image
-            src={anime.picture_url}
+            src={allowedImage(anime.picture_url)!}
             alt={displayTitle(anime)}
             width={260}
             height={370}

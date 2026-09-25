@@ -6,6 +6,7 @@ import { useState, useSyncExternalStore, useTransition } from "react";
 import { LOCALE } from "@/lib/i18n";
 import type { Me } from "@/lib/types";
 import { useT } from "./I18nProvider";
+import { allowedImage } from "@/lib/images";
 
 const noop = () => () => {};
 
@@ -72,9 +73,9 @@ export function UserMenu({ me }: { me: Me }) {
       <button onClick={logout} className="text-muted hover:text-white">
         {t("user.signOut")}
       </button>
-      {me.picture ? (
+      {allowedImage(me.picture) ? (
         <Image
-          src={me.picture}
+          src={allowedImage(me.picture)!}
           alt={me.name}
           width={32}
           height={32}

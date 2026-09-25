@@ -11,6 +11,7 @@ import { YOU } from "@/components/stats/colors";
 import { displayTitle } from "@/lib/format";
 import { featureName, formatNumber, type Lang, type MessageKey, type T } from "@/lib/i18n";
 import type { HotTake, ShowRef, Stats, TagStat } from "@/lib/types";
+import { allowedImage } from "@/lib/images";
 
 /** Number formatting for the page's language; "–" for missing values. */
 function numbers(lang: Lang) {
@@ -303,9 +304,9 @@ function HotTakeCard({ take }: { take: HotTake }) {
   const { title, text } = hotTakeText(t, lang, take);
   const body = (
     <div className="flex h-full gap-3 rounded-lg bg-surface-raised p-4 transition-colors hover:bg-white/10">
-      {take.anime?.picture_url && (
+      {allowedImage(take.anime?.picture_url) && (
         <Image
-          src={take.anime.picture_url}
+          src={allowedImage(take.anime?.picture_url)!}
           alt=""
           width={56}
           height={80}
@@ -332,9 +333,9 @@ function ShowRow({ show, rank }: { show: ShowRef; rank: number }) {
       className="flex items-center gap-3 rounded p-1 hover:bg-white/5"
     >
       <span className="w-5 text-right text-sm text-muted tabular-nums">{rank}</span>
-      {show.picture_url ? (
+      {allowedImage(show.picture_url) ? (
         <Image
-          src={show.picture_url}
+          src={allowedImage(show.picture_url)!}
           alt=""
           width={40}
           height={56}
