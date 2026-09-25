@@ -20,8 +20,8 @@ export const stats = {
     de: "Melde dich mit MyAnimeList an, um Statistiken zu deiner Liste zu sehen.",
   },
   "stats.syncFirst": {
-    en: "Press “Sync MAL” to import your list first.",
-    de: "Importiere zuerst deine Liste mit „MAL synchronisieren“.",
+    en: "Press “Sync lists” to import your list first.",
+    de: "Importiere zuerst deine Liste mit „Listen synchronisieren“.",
   },
 
   // Loading

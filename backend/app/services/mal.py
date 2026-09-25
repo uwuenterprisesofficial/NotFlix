@@ -102,7 +102,10 @@ class MalClient:
         await self._http.aclose()
 
     async def _get(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        resp = await self._http.get(url, params=params, headers=self._headers)
+        try:
+            resp = await self._http.get(url, params=params, headers=self._headers)
+        except httpx.HTTPError as e:
+            raise MalError(f"MAL unreachable: {e}") from e
         if resp.status_code >= 400:
             raise MalError(f"MAL {resp.status_code} for {url}: {resp.text[:200]}")
         return resp.json()
@@ -145,9 +148,12 @@ class MalClient:
         return [item["node"] for item in page.get("data", [])]
 
     async def update_my_list_status(self, anime_id: int, **fields: Any) -> dict[str, Any]:
-        resp = await self._http.patch(
-            f"{API_BASE}/anime/{anime_id}/my_list_status", data=fields, headers=self._headers
-        )
+        try:
+            resp = await self._http.patch(
+                f"{API_BASE}/anime/{anime_id}/my_list_status", data=fields, headers=self._headers
+            )
+        except httpx.HTTPError as e:
+            raise MalError(f"MAL unreachable: {e}") from e
         if resp.status_code >= 400:
             raise MalError(f"MAL {resp.status_code}: {resp.text[:200]}")
         return resp.json()

@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
+import { AccountSettings } from "@/components/AccountSettings";
 import { SettingsForm } from "@/components/SettingsForm";
+import { api, apiOrNull } from "@/lib/api";
+import type { Me } from "@/lib/types";
 import { getT } from "@/lib/i18n/server";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -8,11 +11,20 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function SettingsPage() {
-  const { t } = await getT();
+  const [{ t }, me, providers] = await Promise.all([
+    getT(),
+    apiOrNull<Me>("/me"),
+    api<{ mal: boolean; anilist: boolean }>("/auth/providers"),
+  ]);
   return (
     <div className="mx-auto max-w-2xl px-4 pt-24 pb-16">
       <h1 className="text-3xl font-black">{t("settings.title")}</h1>
       <p className="mt-1 text-sm text-muted">{t("settings.savedHere")}</p>
+      <section className="mt-8">
+        <h2 className="text-lg font-semibold">{t("accounts.title")}</h2>
+        <p className="mt-1 text-sm text-muted">{t("accounts.info")}</p>
+        <AccountSettings me={me} providers={providers} />
+      </section>
       <SettingsForm />
     </div>
   );

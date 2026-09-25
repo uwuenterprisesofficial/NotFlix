@@ -9,8 +9,8 @@ export const common = {
   "nav.stats": { en: "Statistics", de: "Statistiken" },
   "nav.search": { en: "Search", de: "Suche" },
   "nav.settings": { en: "Settings", de: "Einstellungen" },
-  "nav.signIn": { en: "Sign in with MyAnimeList", de: "Mit MyAnimeList anmelden" },
-  "user.sync": { en: "Sync MAL", de: "MAL synchronisieren" },
+  "nav.signIn": { en: "Sign in", de: "Anmelden" },
+  "user.sync": { en: "Sync lists", de: "Listen synchronisieren" },
   "user.syncing": { en: "Syncing…", de: "Synchronisiere…" },
   "user.synced": {
     en: (v: { entries: number; recommendations: number }) =>
@@ -19,6 +19,66 @@ export const common = {
       `${n(v.entries, "Serie", "Serien")} synchronisiert · ${n(v.recommendations, "Empfehlung", "Empfehlungen")}`,
   },
   "user.syncFailed": { en: "Sync failed", de: "Synchronisierung fehlgeschlagen" },
+  "user.adding": {
+    en: (v: { count: number; list: string }) =>
+      `adding ${n(v.count, "entry", "entries")} to ${v.list}`,
+    de: (v: { count: number; list: string }) =>
+      `${n(v.count, "Eintrag wird", "Einträge werden")} zu ${v.list} hinzugefügt`,
+  },
+  "user.skipped": {
+    en: (v: { count: number }) =>
+      `${n(v.count, "AniList entry", "AniList entries")} without a MAL id skipped`,
+    de: (v: { count: number }) =>
+      `${n(v.count, "AniList-Eintrag", "AniList-Einträge")} ohne MAL-ID übersprungen`,
+  },
+  "list.mal": { en: "MyAnimeList", de: "MyAnimeList" },
+  "list.anilist": { en: "AniList", de: "AniList" },
+
+  // Sign-in
+  "login.title": { en: "Sign in", de: "Anmelden" },
+  "login.info": {
+    en: "Use your MyAnimeList list, your AniList list, or both. With both, each list gets what only the other has on every sync, and your progress is saved to both.",
+    de: "Nutze deine MyAnimeList-Liste, deine AniList-Liste oder beide. Mit beiden bekommt jede Liste bei jeder Synchronisierung, was nur die andere hat, und dein Fortschritt wird in beiden gespeichert.",
+  },
+  "login.mal": { en: "Sign in with MyAnimeList", de: "Mit MyAnimeList anmelden" },
+  "login.anilist": { en: "Sign in with AniList", de: "Mit AniList anmelden" },
+  "login.both": { en: "Sign in with both", de: "Mit beiden anmelden" },
+  "login.bothInfo": {
+    en: "MyAnimeList first, then AniList. MAL's show data is used; changes go to both.",
+    de: "Erst MyAnimeList, dann AniList. MALs Seriendaten werden verwendet; Änderungen gehen an beide.",
+  },
+  "login.notConfigured": {
+    en: "{list} isn't set up on this server ({vars} in .env).",
+    de: "{list} ist auf diesem Server nicht eingerichtet ({vars} in .env).",
+  },
+  "login.failed": {
+    en: "Signing in failed. Try again.",
+    de: "Anmeldung fehlgeschlagen. Versuch es nochmal.",
+  },
+
+  // Accounts in Settings
+  "accounts.title": { en: "Your lists", de: "Deine Listen" },
+  "accounts.info": {
+    en: "Linked lists are synced together: each gets what only the other has, show data comes from MyAnimeList, and progress is saved to all of them.",
+    de: "Verknüpfte Listen werden gemeinsam synchronisiert: Jede bekommt, was nur die andere hat, Seriendaten kommen von MyAnimeList, und Fortschritt wird in allen gespeichert.",
+  },
+  "accounts.linked": { en: "Linked as {name}", de: "Verknüpft als {name}" },
+  "accounts.notLinked": { en: "Not linked", de: "Nicht verknüpft" },
+  "accounts.link": { en: "Link", de: "Verknüpfen" },
+  "accounts.unlink": { en: "Remove", de: "Entfernen" },
+  "accounts.unlinkConfirm": {
+    en: "Remove {list}? Its entries stay on {list}; NotFlix just stops syncing it.",
+    de: "{list} entfernen? Die Einträge bleiben auf {list}; NotFlix synchronisiert sie nur nicht mehr.",
+  },
+  "accounts.lastOne": { en: "Your only list", de: "Deine einzige Liste" },
+  "accounts.writing": {
+    en: "Adding to {list}: {done} of {total}",
+    de: "Wird zu {list} hinzugefügt: {done} von {total}",
+  },
+  "accounts.signInFirst": {
+    en: "Sign in to link your lists.",
+    de: "Melde dich an, um deine Listen zu verknüpfen.",
+  },
   "user.neverSynced": { en: "Never synced", de: "Noch nie synchronisiert" },
   "user.lastSynced": { en: "Last synced {when}", de: "Zuletzt synchronisiert: {when}" },
   "user.lastSyncedShort": { en: "Last synced", de: "Zuletzt synchronisiert" },
@@ -40,17 +100,20 @@ export const common = {
   },
   "home.emptyTitle": { en: "Nothing here yet", de: "Noch nichts hier" },
   "home.emptyBody": {
-    en: "Press “Sync MAL” to import your MyAnimeList list and build recommendations.",
-    de: "Klicke auf „MAL synchronisieren“, um deine MyAnimeList-Liste zu importieren und Empfehlungen zu erstellen.",
+    en: "Press “Sync lists” to import your list and build recommendations.",
+    de: "Klicke auf „Listen synchronisieren“, um deine Liste zu importieren und Empfehlungen zu erstellen.",
   },
-  "home.connectTitle": { en: "Connect MyAnimeList", de: "MyAnimeList verbinden" },
+  "home.connectTitle": {
+    en: "Connect MyAnimeList or AniList",
+    de: "MyAnimeList oder AniList verbinden",
+  },
   "home.connectBody": {
-    en: "Create an API client at myanimelist.net/apiconfig, then set MAL_CLIENT_ID and MAL_CLIENT_SECRET in .env and restart the backend.",
-    de: "Lege unter myanimelist.net/apiconfig einen API-Client an, trage MAL_CLIENT_ID und MAL_CLIENT_SECRET in .env ein und starte das Backend neu.",
+    en: "Create an API client at myanimelist.net/apiconfig (MAL_CLIENT_ID, MAL_CLIENT_SECRET) or anilist.co/settings/developer (ANILIST_CLIENT_ID, ANILIST_CLIENT_SECRET), put it in .env and restart the backend.",
+    de: "Lege einen API-Client unter myanimelist.net/apiconfig (MAL_CLIENT_ID, MAL_CLIENT_SECRET) oder anilist.co/settings/developer (ANILIST_CLIENT_ID, ANILIST_CLIENT_SECRET) an, trage ihn in .env ein und starte das Backend neu.",
   },
   "home.signInBody": {
-    en: "Sign in with MyAnimeList to see your list and personal recommendations.",
-    de: "Melde dich mit MyAnimeList an, um deine Liste und persönliche Empfehlungen zu sehen.",
+    en: "Sign in with MyAnimeList or AniList to see your list and personal recommendations.",
+    de: "Melde dich mit MyAnimeList oder AniList an, um deine Liste und persönliche Empfehlungen zu sehen.",
   },
 
   // Hero / cards

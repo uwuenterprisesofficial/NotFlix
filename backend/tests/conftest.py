@@ -6,6 +6,7 @@ os.environ.setdefault(
     "DATABASE_URL", "postgresql+psycopg://notflix:notflix@localhost:5432/notflix_test"
 )
 os.environ["MAL_CLIENT_ID"] = ""
+os.environ["ANILIST_CLIENT_ID"] = ""
 # Tests never reach external streaming sites; provider tests inject their own HTTP clients.
 os.environ["ANIWORLD_URL"] = ""
 os.environ["ANIVEXA_URL"] = ""
@@ -44,12 +45,13 @@ async def client(database):
     from app.core import cache
     from app.db.session import async_engine
     from app.main import app
-    from app.services import source_scan, stats_jobs
+    from app.services import list_writer, source_scan, stats_jobs
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     await source_scan.wait_idle()
     await stats_jobs.wait_idle()
+    await list_writer.wait_idle()
     app.dependency_overrides.clear()
     # Pooled async connections (Postgres and Redis) are bound to this test's event loop.
     await async_engine.dispose()
@@ -90,6 +92,7 @@ def user(database):
         u = User(
             mal_user_id=1,
             name="tester",
+            mal_name="tester",
             access_token="a",
             refresh_token="r",
             token_expires_at=datetime(2100, 1, 1, tzinfo=UTC),

@@ -29,8 +29,16 @@ export function UserMenu({ me }: { me: Me }) {
     const res = await fetch("/api/me/sync", { method: "POST" });
     setSyncing(false);
     if (res.ok) {
-      const { entries, recommendations } = await res.json();
-      setMessage(t("user.synced", { entries, recommendations }));
+      const result = await res.json();
+      const parts = [
+        t("user.synced", { entries: result.entries, recommendations: result.recommendations }),
+      ];
+      if (result.adding_to_mal)
+        parts.push(t("user.adding", { count: result.adding_to_mal, list: "MyAnimeList" }));
+      if (result.adding_to_anilist)
+        parts.push(t("user.adding", { count: result.adding_to_anilist, list: "AniList" }));
+      if (result.skipped) parts.push(t("user.skipped", { count: result.skipped }));
+      setMessage(parts.join(" · "));
       startTransition(() => router.refresh());
     } else {
       setMessage(t("user.syncFailed"));

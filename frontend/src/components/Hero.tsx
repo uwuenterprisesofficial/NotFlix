@@ -37,7 +37,11 @@ export async function Hero({ anime }: { anime: AnimeDetail }) {
           <h1 className="text-4xl font-black drop-shadow md:text-6xl">{displayTitle(anime)}</h1>
           <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-neutral-300">
             <PredictionBadge prediction={anime.prediction} size="md" />
-            {anime.mean && <span className="font-semibold text-green-400">★ {formatNumber(lang, anime.mean)}</span>}
+            {anime.mean && (
+              <span className="font-semibold text-green-400">
+                ★ {formatNumber(lang, anime.mean)}
+              </span>
+            )}
             {anime.start_season && <span>{seasonText(t, anime.start_season)}</span>}
             {anime.num_episodes && (
               <span>{t("anime.episodes", { count: anime.num_episodes })}</span>

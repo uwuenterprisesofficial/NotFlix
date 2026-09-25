@@ -32,7 +32,13 @@ async def test_health(client):
 async def test_browse_anonymous_without_mal_credentials(client):
     resp = await client.get("/browse")
     assert resp.status_code == 200
-    assert resp.json() == {"hero": None, "rows": [], "signed_in": False, "mal_configured": False}
+    assert resp.json() == {
+        "hero": None,
+        "rows": [],
+        "signed_in": False,
+        "mal_configured": False,
+        "anilist_configured": False,
+    }
 
 
 async def test_login_requires_mal_client_id(client):

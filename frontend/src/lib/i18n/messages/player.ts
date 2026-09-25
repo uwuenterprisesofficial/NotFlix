@@ -14,6 +14,7 @@ export const player = {
   "player.unwatchTitle": { en: "Mark as unwatched", de: "Als ungesehen markieren" },
   "player.saving": { en: "Saving…", de: "Speichere…" },
   "player.saveFailed": { en: "Couldn’t save, retry", de: "Speichern fehlgeschlagen, nochmal" },
+  "player.notSavedTo": { en: "Not saved to {lists}", de: "Nicht gespeichert auf {lists}" },
   "player.watched": { en: "✓ Watched", de: "✓ Gesehen" },
   "player.unwatch": { en: "✕ Unwatch", de: "✕ Ungesehen" },
   "player.markWatched": { en: "Mark as watched", de: "Als gesehen markieren" },

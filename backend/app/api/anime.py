@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -30,11 +31,12 @@ from app.schemas import (
     SkipSegmentOut,
     SynopsisOut,
 )
-from app.services import catalog, mal, synopsis
-from app.services.sync import access_token
+from app.services import anilist, anilist_account, catalog, mal, synopsis
+from app.services.sync_tokens import mal_token
 from app.services.taste import predictor_for
 from app.worker.queue import analysis_queue, stop_job, timeout_message, timeout_seconds
 
+log = logging.getLogger(__name__)
 router = APIRouter(tags=["anime"])
 # How long past the timeout a running job may go unreported before it counts as dead.
 TIMEOUT_GRACE = timedelta(minutes=1)
@@ -89,20 +91,40 @@ async def episode_detail(anime_id: int, episode: int, db: DB):
 
 @router.put("/anime/{anime_id}/progress", response_model=Progress)
 async def update_progress(anime_id: int, body: ProgressUpdate, user: CurrentUser, db: DB):
-    """Record watched episodes locally and on MyAnimeList."""
+    """Record watched episodes locally and on every linked list (MyAnimeList, AniList)."""
     anime = await catalog.get_anime(db, anime_id)
     if anime is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Anime not found")
     finished = anime.num_episodes is not None and body.episodes_watched >= anime.num_episodes
     new_status = ListStatus.completed if finished else ListStatus.watching
+    episodes = body.episodes_watched
 
-    try:
-        async with mal.MalClient(await access_token(db, user)) as client:
-            result = await client.update_my_list_status(
-                anime_id, status=new_status.value, num_watched_episodes=body.episodes_watched
+    async def to_mal() -> dict:
+        async with mal.MalClient(await mal_token(db, user)) as client:
+            return await client.update_my_list_status(
+                anime_id, status=new_status.value, num_watched_episodes=episodes
             )
-    except mal.MalError as e:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+
+    async def to_anilist() -> dict:
+        media_id = await anilist.anilist_id(anime_id)
+        if media_id is None:
+            raise anilist_account.AniListError("This show isn't on AniList")
+        async with anilist_account.AniListClient(user.anilist_token) as client:
+            saved = await client.save_entry(media_id, new_status.value, episodes)
+        return {"num_episodes_watched": saved.get("progress", episodes)}
+
+    writes = {"mal": to_mal} if user.has_mal else {}
+    if user.has_anilist:
+        writes["anilist"] = to_anilist
+    results = await asyncio.gather(*(w() for w in writes.values()), return_exceptions=True)
+    outcome = dict(zip(writes, results, strict=True))
+    failed = [name for name, r in outcome.items() if isinstance(r, Exception)]
+    for name in failed:
+        log.warning("Saving progress to %s failed: %s", name, outcome[name])
+    if writes and len(failed) == len(writes):
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(outcome[failed[0]]))
+    # MAL's answer counts when there is one.
+    result = next((r for r in outcome.values() if not isinstance(r, Exception)), {})
 
     entry = await db.scalar(
         select(ListEntry).where(ListEntry.user_id == user.id, ListEntry.anime_id == anime_id)
@@ -111,10 +133,15 @@ async def update_progress(anime_id: int, body: ProgressUpdate, user: CurrentUser
         entry = ListEntry(user_id=user.id, anime_id=anime_id)
         db.add(entry)
     entry.status = result.get("status", new_status)
-    entry.episodes_watched = result.get("num_episodes_watched", body.episodes_watched)
+    entry.episodes_watched = result.get("num_episodes_watched", episodes)
     entry.score = result.get("score", entry.score or 0)
     await db.commit()
-    return Progress(status=entry.status, episodes_watched=entry.episodes_watched, score=entry.score)
+    return Progress(
+        status=entry.status,
+        episodes_watched=entry.episodes_watched,
+        score=entry.score,
+        failed=failed,
+    )
 
 
 @router.post("/anime/{anime_id}/analyze", response_model=AnalyzeResponse)

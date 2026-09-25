@@ -17,6 +17,11 @@ class Settings(BaseSettings):
 
     mal_client_id: str = ""
     mal_client_secret: str = ""
+    # AniList API client (https://anilist.co/settings/developer); empty disables AniList.
+    anilist_client_id: str = ""
+    anilist_client_secret: str = ""
+    anilist_redirect_uri: str = "http://localhost:3000/api/auth/anilist/callback"
+
     # Must match the redirect URL registered at https://myanimelist.net/apiconfig.
     # The frontend proxies /api/* to this backend, so the callback lives on the frontend origin.
     mal_redirect_uri: str = "http://localhost:3000/api/auth/callback"

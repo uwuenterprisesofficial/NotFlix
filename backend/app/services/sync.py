@@ -1,27 +1,20 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models import Anime, ListEntry, Recommendation, User
-from app.services import mal, taste
+from app.services import anilist_account, list_writer, mal, taste
 from app.services.recommender import Candidate, ListItem, rank, seed_shows
+from app.services.sync_tokens import mal_token
 
 MAX_CANDIDATE_LOOKUPS = 40
 MAL_CONCURRENCY = 4
-
-
-async def access_token(db: AsyncSession, user: User) -> str:
-    if user.token_expires_at - datetime.now(UTC) < timedelta(minutes=5):
-        tokens = await mal.refresh_tokens(user.refresh_token)
-        user.access_token = tokens.access_token
-        user.refresh_token = tokens.refresh_token
-        user.token_expires_at = tokens.expires_at
-        await db.commit()
-    return user.access_token
 
 
 async def upsert_anime(db: AsyncSession, nodes: list[dict[str, Any]]) -> None:
@@ -52,40 +45,109 @@ async def _gather_limited(coros):
     return await asyncio.gather(*(run(c) for c in coros))
 
 
+@dataclass
+class _Entry:
+    """One show on the merged list."""
+
+    anime_id: int
+    status: str
+    score: int
+    episodes_watched: int
+    updated_at: datetime | None
+
+
+async def insert_missing_anime(db: AsyncSession, rows: list[dict[str, Any]]) -> None:
+    """Add shows that aren't in the catalog yet; ones that are keep their (MAL) data."""
+    rows = list({row["id"]: row for row in rows}.values())
+    for start in range(0, len(rows), 500):
+        stmt = insert(Anime).values(rows[start : start + 500])
+        await db.execute(stmt.on_conflict_do_nothing(index_elements=[Anime.id]))
+
+
+def _anime_client(token: str | None) -> mal.MalClient | None:
+    """MAL, as the user when their MAL account is linked, else with the app's client id."""
+    if token:
+        return mal.MalClient(token)
+    return mal.MalClient() if catalog_configured() else None
+
+
+def catalog_configured() -> bool:
+    return bool(get_settings().mal_client_id)
+
+
 async def sync_user(db: AsyncSession, user: User) -> dict[str, int]:
-    """Pull the user's MAL list into the database and recompute their recommendations."""
-    async with mal.MalClient(await access_token(db, user)) as client:
-        entries = await client.my_animelist()
-        await upsert_anime(db, [e["node"] for e in entries])
+    """Pull the user's lists (MAL, AniList or both) into the database and recompute their
+    recommendations. With both, each list is completed with what only the other has (in the
+    background); where both have a show, MAL's entry counts. Show data comes from MAL."""
+    token = await mal_token(db, user) if user.has_mal else None
+    mal_entries: dict[int, _Entry] = {}
+    al_entries: dict[int, anilist_account.AniListEntry] = {}
+    skipped = 0
 
-        await db.execute(delete(ListEntry).where(ListEntry.user_id == user.id))
-        items: list[ListItem] = []
-        for e in entries:
+    if token:
+        async with mal.MalClient(token) as client:
+            raw = await client.my_animelist()
+        await upsert_anime(db, [e["node"] for e in raw])
+        for e in raw:
             node, status = e["node"], e["list_status"]
-            db.add(
-                ListEntry(
-                    user_id=user.id,
-                    anime_id=node["id"],
-                    status=status["status"],
-                    score=status.get("score", 0),
-                    episodes_watched=status.get("num_episodes_watched", 0),
-                    updated_at=_parse_time(status.get("updated_at")),
-                )
-            )
-            items.append(
-                ListItem(
-                    anime_id=node["id"],
-                    title=node["title"],
-                    genres=[g["name"] for g in node.get("genres") or []],
-                    status=status["status"],
-                    score=status.get("score", 0),
-                )
-            )
+            mal_entries[node["id"]] = _Entry(
+                node["id"], status["status"], status.get("score", 0),
+                status.get("num_episodes_watched", 0), _parse_time(status.get("updated_at")),
+            )  # fmt: skip
+    if user.has_anilist:
+        async with anilist_account.AniListClient(user.anilist_token) as client:
+            raw_al = await client.animelist(user.anilist_user_id)
+        parsed, skipped = anilist_account.parse_entries(raw_al)
+        al_entries = {e.mal_id: e for e in parsed}
+        # Shows only AniList has: its data for now; MAL's details are filled in later.
+        await insert_missing_anime(
+            db, [anilist_account.anime_row(e.media) for e in parsed if e.mal_id not in mal_entries]
+        )
 
-        await db.flush()
-        user.last_synced_at = datetime.now(UTC)
-        predictor = await taste.refit(db, user)
-        candidates = await _collect_candidates(db, client, items, predictor)
+    merged: dict[int, _Entry] = {
+        mal_id: _Entry(e.mal_id, e.status, e.score, e.episodes_watched, e.updated_at)
+        for mal_id, e in al_entries.items()
+    } | mal_entries
+    await db.flush()
+
+    to_mal = to_anilist = []
+    if token and user.has_anilist:
+        to_mal = [
+            list_writer.Missing(i, e.status, e.episodes_watched, e.score)
+            for i, e in al_entries.items()
+            if i not in mal_entries
+        ]
+        to_anilist = [
+            list_writer.Missing(i, e.status, e.episodes_watched, e.score)
+            for i, e in mal_entries.items()
+            if i not in al_entries
+        ]
+
+    titles = {
+        a.id: a for a in (await db.scalars(select(Anime).where(Anime.id.in_(list(merged))))).all()
+    }
+    await db.execute(delete(ListEntry).where(ListEntry.user_id == user.id))
+    items: list[ListItem] = []
+    for e in merged.values():
+        anime = titles.get(e.anime_id)
+        if anime is None:
+            continue
+        db.add(
+            ListEntry(
+                user_id=user.id, anime_id=e.anime_id, status=e.status, score=e.score,
+                episodes_watched=e.episodes_watched, updated_at=e.updated_at,
+            )
+        )  # fmt: skip
+        items.append(ListItem(e.anime_id, anime.title, anime.genres or [], e.status, e.score))
+
+    await db.flush()
+    user.last_synced_at = datetime.now(UTC)
+    predictor = await taste.refit(db, user)
+    candidates: list[Candidate] = []
+    client = _anime_client(token)
+    if client is not None:
+        async with client:
+            candidates = await _collect_candidates(db, client, items, predictor)
 
     ranked = rank(items, candidates)
     await db.execute(delete(Recommendation).where(Recommendation.user_id == user.id))
@@ -94,7 +156,14 @@ async def sync_user(db: AsyncSession, user: User) -> dict[str, int]:
         for r in ranked
     )
     await db.commit()
-    return {"entries": len(items), "recommendations": len(ranked)}
+    list_writer.start(user.id, to_mal, to_anilist)
+    return {
+        "entries": len(items),
+        "recommendations": len(ranked),
+        "adding_to_mal": len(to_mal),
+        "adding_to_anilist": len(to_anilist),
+        "skipped": skipped,
+    }
 
 
 async def _collect_candidates(

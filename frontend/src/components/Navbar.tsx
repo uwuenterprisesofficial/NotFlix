@@ -76,13 +76,12 @@ export async function Navbar() {
           {me ? (
             <UserMenu me={me} />
           ) : (
-            // Plain anchor: this is a full-page redirect to MyAnimeList, not a client navigation.
-            <a
-              href="/api/auth/login"
+            <Link
+              href="/login"
               className="rounded bg-brand px-4 py-1.5 text-sm font-semibold hover:bg-brand-dark"
             >
               {t("nav.signIn")}
-            </a>
+            </Link>
           )}
         </div>
       </nav>

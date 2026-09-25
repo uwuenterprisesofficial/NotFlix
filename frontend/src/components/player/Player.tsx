@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { formatTime } from "@/lib/format";
-import type { Progress, SkipSegment } from "@/lib/types";
+import type { ListProvider, Progress, SkipSegment } from "@/lib/types";
 import { useT } from "../I18nProvider";
 import { DirectVideo } from "./DirectVideo";
 import { LanguageMenu } from "./LanguageMenu";
@@ -45,6 +45,8 @@ export function Player({
   const [progress, setProgress] = useState(watched);
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  // Linked lists the last change didn't reach (the others have it).
+  const [partial, setPartial] = useState<ListProvider[] | null>(null);
   const savingNow = useRef(false);
   const isWatched = episode <= progress;
   const autoMarked = useRef(false);
@@ -84,6 +86,7 @@ export function Player({
     if (res?.ok) {
       const saved: Progress = await res.json();
       setProgress(saved.episodes_watched);
+      setPartial(saved.failed?.length ? saved.failed : null);
     } else {
       setSaveFailed(true);
     }
@@ -196,7 +199,14 @@ export function Player({
             {t("player.autoNext")}
           </label>
         )}
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex items-center gap-2">
+          {partial && (
+            <span className="text-xs text-amber-400">
+              {t("player.notSavedTo", {
+                lists: partial.map((p) => t(`list.${p}`)).join(", "),
+              })}
+            </span>
+          )}
           {signedIn && (
             <button
               onClick={() => setWatched(!isWatched)}

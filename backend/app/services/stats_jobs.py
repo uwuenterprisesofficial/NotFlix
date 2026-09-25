@@ -19,7 +19,8 @@ from app.core.cache import get_json, redis, set_json
 from app.db.session import AsyncSessionLocal
 from app.models import Anime, ListEntry, User
 from app.services import catalog, mal, stats, taste
-from app.services.sync import MAL_CONCURRENCY, access_token, upsert_anime
+from app.services.sync import MAL_CONCURRENCY, upsert_anime
+from app.services.sync_tokens import mal_token
 
 log = logging.getLogger(__name__)
 
@@ -135,13 +136,15 @@ async def _fill_details(db, user: User) -> None:
     if not missing or not catalog.mal_configured():
         return
     state.update(step="details", done=0, total=len(missing))
-    token = await access_token(db, user)
+    # As the user when their MAL account is linked, else with the app's client id.
+    token = await mal_token(db, user) if user.has_mal else None
     async with mal.MalClient(token) as client:
         # The list endpoint returns most details for every show in a request or two.
         try:
-            entries = await client.my_animelist()
-            await upsert_anime(db, [e["node"] for e in entries])
-            await db.commit()
+            if token:
+                entries = await client.my_animelist()
+                await upsert_anime(db, [e["node"] for e in entries])
+                await db.commit()
         except mal.MalError as e:
             log.warning("Refreshing the list of user %s failed: %s", user.id, e)
         missing = (await _missing(db, user.id))[:MAX_DETAIL_FETCHES]

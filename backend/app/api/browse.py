@@ -4,7 +4,7 @@ from sqlalchemy import select
 from app.api.deps import DB, OptionalUser
 from app.models import Anime, ListEntry, ListStatus, Recommendation
 from app.schemas import AnimeDetail, BrowseResponse, Row
-from app.services import catalog, mal
+from app.services import anilist_account, catalog, mal
 from app.services.taste import predictor_for
 
 router = APIRouter(tags=["browse"])
@@ -103,4 +103,5 @@ async def browse(user: OptionalUser, db: DB):
         rows=[r for r in rows if r.items],
         signed_in=user is not None,
         mal_configured=catalog.mal_configured(),
+        anilist_configured=anilist_account.configured(),
     )

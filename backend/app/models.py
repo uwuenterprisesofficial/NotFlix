@@ -41,17 +41,34 @@ class JobStatus(StrEnum):
 
 
 class User(Base):
+    """A NotFlix user, signed in with MyAnimeList, AniList or both (linked accounts)."""
+
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    mal_user_id: Mapped[int] = mapped_column(Integer, unique=True)
     name: Mapped[str] = mapped_column(String(100))
     picture: Mapped[str | None] = mapped_column(Text)
-    access_token: Mapped[str] = mapped_column(Text)
-    refresh_token: Mapped[str] = mapped_column(Text)
-    token_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # MyAnimeList account (the column names predate AniList support).
+    mal_user_id: Mapped[int | None] = mapped_column(Integer, unique=True)
+    mal_name: Mapped[str | None] = mapped_column(String(100))
+    access_token: Mapped[str | None] = mapped_column(Text)
+    refresh_token: Mapped[str | None] = mapped_column(Text)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # AniList account. Its tokens last a year and can't be refreshed.
+    anilist_user_id: Mapped[int | None] = mapped_column(Integer, unique=True)
+    anilist_name: Mapped[str | None] = mapped_column(String(100))
+    anilist_token: Mapped[str | None] = mapped_column(Text)
+    anilist_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def has_mal(self) -> bool:
+        return self.mal_user_id is not None and self.access_token is not None
+
+    @property
+    def has_anilist(self) -> bool:
+        return self.anilist_user_id is not None and self.anilist_token is not None
 
 
 class Anime(Base):

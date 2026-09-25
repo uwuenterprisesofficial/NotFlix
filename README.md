@@ -3,7 +3,7 @@
 A Netflix-style front end for anime, backed by your MyAnimeList account:
 
 - **Browse**: hero banner plus rows for Continue Watching, Recommended for You, My List, Watch Again, and MAL's Top Airing / Most Popular / Coming Soon.
-- **Sync with MyAnimeList**: sign in with MAL OAuth. "Sync MAL" imports your list and watch progress. Finishing an episode writes your progress back to MAL. Clicking **✓ Watched** again unwatches it: MAL only stores a count, so progress goes back to the episode before.
+- **Sync with MyAnimeList and/or AniList**: sign in with either or both (see **Lists** below); more can be linked in Settings. With MyAnimeList: sign in with MAL OAuth. "Sync MAL" imports your list and watch progress. Finishing an episode writes your progress back to MAL. Clicking **✓ Watched** again unwatches it: MAL only stores a count, so progress goes back to the episode before.
 - **Recommendations**: MAL community recommendations of your best-rated shows, ranked by your predicted score (see below), community votes and MAL's score.
 - **Statistics** (`/stats`): your list compared with MAL: score distribution next to MAL's for the same shows, favourite and disliked genres/themes, a sortable breakdown by genre, theme, demographic, studio, source, type and decade, hot takes (shows you rate far above or below MAL, acclaimed shows you dropped, hidden gems, genres you judge differently), and what drives your scores.
 - **Predicted scores and labels**: every show you haven't scored gets a predicted score and a label: **MUST WATCH**, **RECOMMENDED**, **MAYBE**, **PROBABLY SKIP** or **AVOID**. Labels show on posters, the banner and the detail page (with what moved the prediction). In **Settings** (gear icon) you can turn the poster labels off or show the predicted score next to them.
@@ -118,6 +118,16 @@ What the worker does:
 The widget on the show page lists the saved fingerprints ("Intro from episode 1 (1:30)") above the per-episode results.
 
 **Stopping an analysis.** Every waiting or running job is listed in the widget ("Analysing episodes 2, 3… (1:05)") with a **✕**; the player's "Detecting intro & outro…" has a **Stop** link. A waiting job is taken out of the queue, a running one has its worker process killed (RQ's stop command, which also ends the ffmpeg it started); either way the job is marked failed ("Stopped"). This also clears a job that only looks like it's running because its worker died. A job running longer than `ANALYSIS_TIMEOUT_MINUTES` (default 10, in `.env`) is stopped by RQ and marked failed ("Stopped after 10 minutes"); one whose worker died without reporting is marked the same way a minute after that limit.
+
+## Lists: MyAnimeList and AniList
+
+Sign in (**Sign in** in the top bar) with MyAnimeList, AniList or both; under **Settings → Your lists** you can link the other one later or remove one (not the last). Set up AniList with a client from <https://anilist.co/settings/developer> (redirect URL `http://localhost:3000/api/auth/anilist/callback`) as `ANILIST_CLIENT_ID` / `ANILIST_CLIENT_SECRET` in `.env`. An account belongs to one NotFlix user: linking one another user has moves it over.
+
+**Sync lists** reads every linked list:
+
+- **Show data comes from MyAnimeList**, whose ids NotFlix uses everywhere. AniList entries are matched by their MAL id (AniList's `idMal`); the few without one are skipped (the sync message says how many). A show only AniList has is shown with AniList's data at first, and its MAL details are filled in the background (the same job the statistics use; with the app's MAL client id when you have no MAL account).
+- **With both lists, each is completed with what only the other has**: an entry missing on MAL is added there with the other list's status, progress and score, and the same for AniList. This runs in the background after the sync (AniList allows only a few dozen requests a minute); **Settings → Your lists** shows how far it is. Where both lists have a show, MAL's entry is what NotFlix shows; nothing already on a list is changed.
+- **Progress is written to every linked list.** If one of them fails, the player says which one; it fails only when none could be saved.
 
 ## Languages
 

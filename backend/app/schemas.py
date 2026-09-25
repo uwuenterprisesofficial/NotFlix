@@ -12,6 +12,7 @@ class Progress(BaseModel):
     status: str
     episodes_watched: int
     score: int
+    failed: list[str] = []  # linked lists ("mal", "anilist") the change couldn't be saved to
 
 
 class ReasonOut(BaseModel):
@@ -177,6 +178,17 @@ class BrowseResponse(BaseModel):
     rows: list[Row]
     signed_in: bool
     mal_configured: bool
+    anilist_configured: bool = False
+
+
+class AccountOut(BaseModel):
+    name: str | None
+
+
+class ListWriteOut(BaseModel):
+    done: int
+    total: int
+    failed: int
 
 
 class Me(ORM):
@@ -184,11 +196,19 @@ class Me(ORM):
     name: str
     picture: str | None
     last_synced_at: datetime | None
+    mal: AccountOut | None = None  # linked MyAnimeList account
+    anilist: AccountOut | None = None  # linked AniList account
+    # Entries being added to the other list after a sync, while that runs.
+    writing: dict[str, ListWriteOut] | None = None
 
 
 class SyncResult(BaseModel):
     entries: int
     recommendations: int
+    # With both lists linked: entries only one list had, being added to the other now.
+    adding_to_mal: int = 0
+    adding_to_anilist: int = 0
+    skipped: int = 0  # AniList entries without a MyAnimeList id
 
 
 class SkipSegmentOut(ORM):

@@ -2,6 +2,8 @@ export type Progress = {
   status: "watching" | "completed" | "on_hold" | "dropped" | "plan_to_watch";
   episodes_watched: number;
   score: number;
+  /** Linked lists the change couldn't be saved to (progress updates only). */
+  failed?: ListProvider[];
 };
 
 export type Tier = "must_watch" | "recommended" | "maybe" | "skip" | "avoid";
@@ -125,13 +127,21 @@ export type BrowseResponse = {
   rows: Row[];
   signed_in: boolean;
   mal_configured: boolean;
+  anilist_configured: boolean;
 };
+
+export type ListProvider = "mal" | "anilist";
 
 export type Me = {
   id: number;
   name: string;
   picture: string | null;
   last_synced_at: string | null;
+  /** Linked lists. */
+  mal: { name: string | null } | null;
+  anilist: { name: string | null } | null;
+  /** Entries being added to the other list after a sync. */
+  writing: Record<ListProvider, { done: number; total: number; failed: number }> | null;
 };
 
 export type SkipSegment = {

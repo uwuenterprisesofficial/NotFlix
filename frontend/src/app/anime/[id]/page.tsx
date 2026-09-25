@@ -44,7 +44,11 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
             <p className="mt-1 text-muted">{anime.title}</p>
           )}
           <div className="mt-3 flex flex-wrap gap-3 text-sm text-neutral-300">
-            {anime.mean && <span className="font-semibold text-green-400">★ {formatNumber(lang, anime.mean)}</span>}
+            {anime.mean && (
+              <span className="font-semibold text-green-400">
+                ★ {formatNumber(lang, anime.mean)}
+              </span>
+            )}
             {anime.media_type && <span>{mediaType(lang, anime.media_type)}</span>}
             {anime.start_season && <span>{seasonText(t, anime.start_season)}</span>}
             {anime.status && <span>{statusText(t, anime.status)}</span>}
