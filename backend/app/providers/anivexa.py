@@ -161,7 +161,10 @@ class AnivexaProvider:
         try:
             return await anilist_id(anime.id)
         except AniListUnavailable as e:
-            raise ProviderError("Anivexa needs AniList ids and AniList is unreachable") from e
+            # With AniList's own error: a scan's error is shown on the show page and in Admin.
+            raise ProviderError(
+                f"Anivexa needs AniList ids and AniList is unreachable ({e})"
+            ) from e
 
     async def scan(
         self, anime: AnimeInfo, episodes: list[int], found: Found | None = None
