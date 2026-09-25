@@ -72,6 +72,7 @@ class AnimeCard(ORM):
     start_season: str | None = None
     next_episode: int | None = None  # when airing: the next episode and its air time
     next_episode_at: datetime | None = None  # in the release calendar / New Episodes: this episode
+    pair: "PairOut | None" = None  # Watch Together: both users' side of the show
 
 
 class AnimeDetail(AnimeCard):
@@ -451,3 +452,113 @@ class PreviewOut(BaseModel):
     url: str
     format: Literal["hls", "file"] | None
     start_s: float
+
+
+# Watch Together
+
+
+class PairSide(BaseModel):
+    """One user's side of a show: their list status and score, else their predicted score."""
+
+    status: str | None = None
+    score: int | None = None
+    predicted: float | None = None
+    appeal: float = 0.0  # how much they'd like it, in standard deviations of their scores
+
+
+class PairOut(BaseModel):
+    me: PairSide
+    partner: PairSide
+
+
+class PersonOut(BaseModel):
+    id: int
+    name: str
+    picture: str | None = None
+
+
+class InviteOut(BaseModel):
+    code: str
+    expires_at: datetime
+
+
+class InviteInfo(BaseModel):
+    inviter: PersonOut
+    expires_at: datetime
+    own: bool = False  # the viewer made it
+    connection_id: int | None = None  # already connected with the inviter
+
+
+class RoomStream(BaseModel):
+    language: str | None = None
+    provider: str | None = None
+    label: str | None = None  # the source
+    server: str | None = None  # the stream within it
+
+
+class RoomState(BaseModel):
+    rev: int
+    anime_id: int
+    episode: int
+    title: str | None = None
+    position: float
+    playing: bool
+    at: int  # server time of `position`, ms since the epoch
+    by: int
+    action: str
+    stream: RoomStream | None = None
+
+
+class Presence(BaseModel):
+    user_id: int
+    anime_id: int | None = None
+    episode: int | None = None
+
+
+class RoomOut(BaseModel):
+    state: RoomState | None
+    members: list[Presence]
+    now: int  # server time, ms
+
+
+class RoomUpdate(BaseModel):
+    action: Literal["load", "play", "pause", "seek", "stream"]
+    anime_id: int
+    episode: int = Field(ge=1)
+    position: float = Field(ge=0)
+    playing: bool | None = None
+    stream: RoomStream | None = None
+
+
+class ConnectionOut(BaseModel):
+    id: int
+    partner: PersonOut
+    created_at: datetime
+    compatibility: int | None = None
+    # The partner has a watch page open in the room (and the viewer doesn't): join them.
+    partner_watching: RoomState | None = None
+    partner_online: bool = False
+
+
+class CompatibilityOut(BaseModel):
+    score: int | None  # 0-100
+    correlation: float | None  # of the scores both gave
+    genre_similarity: float | None
+    shared: int  # shows both have seen
+    both_scored: int
+    shared_genres: list[str]
+    disagreements: list[AnimeCard]
+
+
+class TogetherOut(BaseModel):
+    id: int
+    me: PersonOut
+    partner: PersonOut
+    compatibility: CompatibilityOut
+    rows: list[Row]
+    computed_at: datetime
+
+
+# AnimeCard.pair refers to PairOut, defined after it.
+AnimeCard.model_rebuild()
+AnimeDetail.model_rebuild()

@@ -6,6 +6,7 @@ import { player } from "./messages/player";
 import { search } from "./messages/search";
 import { stats } from "./messages/stats";
 import { mediaTypes, sources, tags } from "./messages/tags";
+import { together } from "./messages/together";
 
 export * from "./core";
 
@@ -16,6 +17,7 @@ const messages = {
   ...analysis,
   ...search,
   ...stats,
+  ...together,
 } satisfies Messages;
 
 export type MessageKey = keyof typeof messages;

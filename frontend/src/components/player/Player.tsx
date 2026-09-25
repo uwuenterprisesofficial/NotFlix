@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { formatTime } from "@/lib/format";
 import type { ListProvider, Progress, SkipSegment } from "@/lib/types";
 import { useT } from "../I18nProvider";
+import { streamOf, TogetherBar } from "../together/TogetherBar";
+import { useWatchParty } from "../together/WatchParty";
 import { DirectVideo } from "./DirectVideo";
 import { LanguageMenu } from "./LanguageMenu";
 import { FullscreenButton, useFrameFullscreen, usePlayerFrame } from "./PlayerFrame";
@@ -55,6 +57,8 @@ export function Player({
   const autoMarked = useRef(false);
   // Where playback is, so a replacement for a stream that broke continues from there.
   const position = useRef(resumeAt ?? 0);
+  const playing = useRef(false);
+  const party = useWatchParty();
   const { stream } = sources;
   // The video area renders into the layout's frame, which survives moving to the next episode.
   const frame = usePlayerFrame();
@@ -67,6 +71,7 @@ export function Player({
     nextParams.set("option", sources.active.label);
   }
   if (stream) nextParams.set("server", stream.label);
+  if (party) nextParams.set("together", String(party.connectionId));
   const nextHref = `/watch/${animeId}/${episode + 1}${nextParams.size ? `?${nextParams}` : ""}`;
   const analysis = useAutoAnalysis(animeId, episode, signedIn);
   // Timestamps from the source itself match its exact cut; analysed ones are the fallback
@@ -74,6 +79,39 @@ export function Player({
   const skipSegments = sources.resolved?.skip_segments.length
     ? sources.resolved.skip_segments
     : (analysis.segments ?? segments);
+
+  // Watch Together: this page starts its episode in the room (the partner follows), unless the
+  // room is on it already (e.g. this page followed the partner).
+  const claimed = useRef(false);
+  useEffect(() => {
+    if (!party?.ready || claimed.current) return;
+    claimed.current = true;
+    const s = party.state;
+    if (s && s.anime_id === animeId && s.episode === episode) return;
+    party.send({
+      action: "load",
+      anime_id: animeId,
+      episode,
+      position: position.current,
+      playing: playing.current,
+      stream: streamOf(sources),
+    });
+  }, [party, animeId, episode, sources]);
+
+  /** The first to play the episode tells the room which stream, so the partner can take it. */
+  function shareStream() {
+    const s = party?.state;
+    const mine = streamOf(sources);
+    if (!party || !mine || !s || s.anime_id !== animeId || s.episode !== episode) return;
+    if (s.stream?.label) return; // the partner's (they may take ours from the bar instead)
+    party.send({
+      action: "stream",
+      anime_id: animeId,
+      episode,
+      position: position.current,
+      stream: mine,
+    });
+  }
 
   async function setWatched(value: boolean) {
     if (!signedIn || savingNow.current) return;
@@ -139,6 +177,7 @@ export function Player({
                 onNearEnd={autoMarkWatched}
                 onStart={() => {
                   sources.started();
+                  shareStream();
                   // Only direct streams can be analysed; this one is known to play.
                   analysis.start(sources.language);
                 }}
@@ -147,6 +186,8 @@ export function Player({
                 onPosition={(t) => (position.current = t)}
                 resumedAt={resumeAt}
                 onSave={savePosition}
+                onPlayState={(p) => (playing.current = p)}
+                sync={party ? { party, animeId, episode } : null}
               />
             )}
             {stream?.kind === "embed" && (
@@ -158,7 +199,10 @@ export function Player({
                 // already block top-level redirects from cross-origin frames without a user click.
                 allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
                 allowFullScreen
-                onLoad={sources.started}
+                onLoad={() => {
+                  sources.started();
+                  shareStream();
+                }}
                 className="h-full w-full border-0"
               />
             )}
@@ -196,6 +240,14 @@ export function Player({
           </div>
         </div>
       )}
+
+      <TogetherBar
+        party={party}
+        animeId={animeId}
+        episode={episode}
+        sources={sources}
+        signedIn={signedIn}
+      />
 
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
         {stream?.kind === "direct" && (
