@@ -111,6 +111,20 @@ export const common = {
   "airing.upcoming": { en: "Not aired yet", de: "Noch nicht erschienen" },
   "airing.back": { en: "‹ Back to the show", de: "‹ Zurück zur Serie" },
 
+  // Hover preview
+  "preview.play": { en: "Play", de: "Abspielen" },
+  "preview.add": { en: "Add to Plan to watch", de: "Zu „Geplant“ hinzufügen" },
+  "preview.added": { en: "Added to Plan to watch", de: "Zu „Geplant“ hinzugefügt" },
+  "preview.onList": { en: "On your list: {status}", de: "Auf deiner Liste: {status}" },
+  "preview.addFailed": { en: "Couldn't add it", de: "Hinzufügen fehlgeschlagen" },
+  "preview.more": { en: "More info", de: "Mehr Infos" },
+  "preview.mute": { en: "Sound on", de: "Ton an" },
+  "preview.unmute": { en: "Sound off", de: "Ton aus" },
+  "preview.airing": { en: "Airing", de: "Läuft" },
+  "preview.finished": { en: "Finished", de: "Abgeschlossen" },
+  "preview.upcoming": { en: "Coming soon", de: "Demnächst" },
+  "preview.nextEpisode": { en: "E{episode} {when}", de: "F{episode} {when}" },
+
   // Calendar
   "calendar.title": { en: "Release calendar", de: "Veröffentlichungskalender" },
   "calendar.info": {

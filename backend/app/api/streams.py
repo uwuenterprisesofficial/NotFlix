@@ -1,12 +1,14 @@
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser, OptionalUser
-from app.models import ListEntry, ProviderMapping, User
+from app.core.cache import redis
+from app.models import ListEntry, ProviderMapping, SkipSegment, User
 from app.providers import base as providers_base
 from app.providers.base import (
     OPTIONS_TIMEOUT_S,
@@ -27,6 +29,7 @@ from app.schemas import (
     EpisodeLanguages,
     EpisodeOptionsOut,
     MappingOut,
+    PreviewOut,
     ProviderCoverageOut,
     ProviderScanOut,
     ResolvedOut,
@@ -313,3 +316,83 @@ async def reset_animetoast_mapping(anime_id: int, user: CurrentUser):
     """Forget the mapping so the pages are searched again on the next request."""
     await delete_mapping(anime_id, "animetoast")
     await source_scan.forget(anime_id, "animetoast")
+
+
+PREVIEW_EPISODE = 1
+PREVIEW_RESOLVE_TRIES = 2
+PREVIEW_MISS_TTL_S = 30 * 60
+LANGUAGE_ORDER = {
+    "de": ("de-dub", "de-sub", "en-dub", "en-sub", "unknown"),
+    "en": ("en-dub", "en-sub", "de-dub", "de-sub", "unknown"),
+}
+
+
+def _direct(resolved: Resolved | None) -> Stream | None:
+    return next((s for s in resolved.streams if s.kind == "direct"), None) if resolved else None
+
+
+@router.get("/preview", response_model=PreviewOut)
+async def preview(anime_id: int, db: DB, lang: Literal["de", "en"] = "en"):
+    """A direct stream of episode 1 for the hover card, in the UI's language order, starting
+    at its opening when that's known. Only sources already found for the episode are used
+    (hovering never starts a scan); at most two are resolved, and a show without any isn't
+    tried again for half an hour."""
+    anime = await catalog.get_anime(db, anime_id)
+    if anime is None or await airing_info.aired_episodes(db, anime) == 0:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Nothing has aired")
+    episode = PREVIEW_EPISODE
+    order = LANGUAGE_ORDER[lang]
+    names = [p.name for p in providers_base.enabled_providers()]
+    options = [
+        o
+        for found in await asyncio.gather(
+            *(source_scan.cached_options(anime_id, episode, n) for n in names)
+        )
+        for o in found or []
+    ]
+    options.sort(key=lambda o: order.index(o.language) if o.language in order else len(order))
+    stored = {
+        r.option_id: r.resolved for r in await source_scan.cached_resolutions(anime_id, episode)
+    }
+
+    chosen: tuple[SourceOption, Resolved, Stream] | None = None
+    for o in options:
+        resolved = o.resolved or stored.get(o.id)
+        if stream := _direct(resolved):
+            chosen = (o, resolved, stream)
+            break
+    miss_key = f"preview:miss:{anime_id}:{lang}"
+    if chosen is None and options and not await redis().exists(miss_key):
+        info = AnimeInfo.from_model(anime)
+        for o in [o for o in options if o.id not in stored][:PREVIEW_RESOLVE_TRIES]:
+            try:
+                resolved = await resolve_option(info, episode, o.id)
+            except Exception as e:
+                log.info("Preview of %s: %s failed: %s", anime_id, o.id, e)
+                continue
+            if resolved.streams:
+                await source_scan.store_resolution(anime_id, episode, o.id, resolved)
+            if stream := _direct(resolved):
+                chosen = (o, resolved, stream)
+                break
+        if chosen is None:
+            await redis().set(miss_key, 1, ex=PREVIEW_MISS_TTL_S)
+    if chosen is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No direct stream to preview")
+
+    option, resolved, stream = chosen
+    opening = next((seg for seg in resolved.segments if seg.kind == "opening"), None)
+    start = opening.start_s if opening else None
+    if start is None:
+        start = await db.scalar(
+            select(SkipSegment.start_s).where(
+                SkipSegment.anime_id == anime_id,
+                SkipSegment.episode == episode,
+                SkipSegment.kind == "opening",
+            )
+        )
+    out = stream_out(stream)
+    return PreviewOut(
+        episode=episode, language=option.language, url=out.url, format=out.format,
+        start_s=round(start or 0.0, 1),
+    )  # fmt: skip

@@ -32,6 +32,20 @@ export type AnimeCard = {
   prediction: Prediction | null;
   /** In the release calendar / New Episodes: this episode and its (Japanese) air time. */
   airing?: { episode: number; airing_at: string } | null;
+  status: string | null;
+  start_season: string | null;
+  /** While airing: the next episode and its air time. */
+  next_episode: number | null;
+  next_episode_at: string | null;
+};
+
+/** GET /anime/{id}/preview: a muted preview for the hover card. */
+export type Preview = {
+  episode: number;
+  language: Language;
+  url: string;
+  format: "hls" | "file" | null;
+  start_s: number;
 };
 
 export type AnimeDetail = AnimeCard & {
@@ -40,8 +54,6 @@ export type AnimeDetail = AnimeCard & {
   synopsis_language: string;
   /** Episodes aired so far (null: no limit known, e.g. finished) and the next one's air time. */
   aired_episodes: number | null;
-  next_episode: number | null;
-  next_episode_at: string | null;
   status: string | null;
   start_season: string | null;
   tags: { id: number; name: string; category: TagCategory }[];

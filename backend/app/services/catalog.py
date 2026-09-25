@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import TypeVar
 
 from sqlalchemy import select
@@ -36,6 +37,8 @@ def _build(
     reasons: int = 0,
 ) -> CardT:
     card = model.model_validate(anime)
+    if card.next_episode_at is not None and card.next_episode_at <= datetime.now(UTC):
+        card.next_episode = card.next_episode_at = None  # passed: not the next one any more
     if entry is not None:
         card.progress = Progress(
             status=entry.status, episodes_watched=entry.episodes_watched, score=entry.score
