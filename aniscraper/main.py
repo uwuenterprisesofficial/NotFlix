@@ -4,6 +4,7 @@ Run:  python main.py   (or: uvicorn main:app --reload --port 9000)
 Docs: http://127.0.0.1:9000/docs
 """
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from enum import Enum
 
@@ -11,10 +12,12 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query
 
 from animetoast import AnimeToastScraper
+from download_client import DownloadClient
 from scraper import AniWorldScraper
 
 aniworld: AniWorldScraper
 animetoast: AnimeToastScraper
+downloads: DownloadClient
 
 
 class Source(str, Enum):
@@ -25,12 +28,14 @@ class Source(str, Enum):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global aniworld, animetoast
+    global aniworld, animetoast, downloads
     aniworld = AniWorldScraper()
     animetoast = AnimeToastScraper()
+    downloads = DownloadClient(ffmpeg_location=os.getenv("FFMPEG_PATH", "ffmpeg"))
     yield
     await aniworld.close()
     await animetoast.close()
+    await downloads.close()
 
 
 app = FastAPI(title="AniScraper", version="1.1", lifespan=lifespan)
@@ -69,34 +74,66 @@ async def _safe(coro):
         return {"error": e.detail}
 
 
+async def _add_direct_urls(data):
+    """Add ``direct_url`` / ``direct_error`` to every stream dict in a scrape result."""
+    if isinstance(data, dict):
+        streams = data.get("streams")
+        if isinstance(streams, dict):
+            for items in streams.values():
+                for stream in items:
+                    if not isinstance(stream, dict) or not stream.get("url"):
+                        continue
+                    direct_url, error = await downloads.resolve_direct(
+                        stream.get("hoster"), stream["url"]
+                    )
+                    stream["direct_url"] = direct_url
+                    if error is not None:
+                        stream["direct_error"] = error
+        for value in data.values():
+            await _add_direct_urls(value)
+    elif isinstance(data, list):
+        for item in data:
+            await _add_direct_urls(item)
+
+
 @app.get("/search")
 async def search(
     q: str = Query(..., min_length=2, description="Title to search for"),
     source: Source = Query(Source.aniworld, description="Which site to search"),
     season: int | None = Query(None, description="aniworld only: just this season (0 = movies)"),
     streams: bool = Query(True, description="Include stream links per episode (slower)"),
+    direct: bool = Query(True, description="Resolve direct stream URLs (one request per stream, slower)"),
 ):
     """Search a title and return the best match with its episodes, streams and languages.
 
     - aniworld: `result` = one show with all seasons/languages.
     - animetoast: `results` = one entry per language variant of the best match (Ger Dub, Ger Sub, ...).
       With streams=true the hoster embed URL is resolved for every episode link.
+    - With direct=true every stream gets its direct stream URL resolved (VOE/Streamtape/Doodstream/Vidoza).
     """
     if source == Source.aniworld:
-        data = await _search_aniworld(q, season, streams)
+        data = await _search_aniworld(q, season, streams or direct)
         if not data["result"]:
             raise HTTPException(404, f"No results for '{q}'")
+        if direct:
+            await _add_direct_urls(data)
         return {"query": q, **data}
 
     if source == Source.animetoast:
-        data = await _search_animetoast(q, streams)
+        data = await _search_animetoast(q, streams or direct)
         if not data["results"]:
             raise HTTPException(404, f"No results for '{q}'")
+        if direct:
+            await _add_direct_urls(data)
         return {"query": q, **data}
 
     aw, at = await asyncio.gather(
-        _safe(_search_aniworld(q, season, streams)), _safe(_search_animetoast(q, streams))
+        _safe(_search_aniworld(q, season, streams or direct)),
+        _safe(_search_animetoast(q, streams or direct)),
     )
+    if direct:
+        await _add_direct_urls(aw)
+        await _add_direct_urls(at)
     return {"query": q, "aniworld": aw, "animetoast": at}
 
 
@@ -120,13 +157,24 @@ async def anime(
     slug: str,
     season: int | None = Query(None, description="Only this season (0 = movies)"),
     streams: bool = Query(False, description="Include stream links per episode (slower)"),
+    direct: bool = Query(True, description="Resolve direct stream URLs (one request per stream, slower)"),
 ):
     """aniworld: series info with all seasons and episodes (by slug, e.g. 'one-piece')."""
-    return await _wrap(aniworld.get_full(slug, season=season, with_streams=streams), "aniworld.to")
+    data = await _wrap(
+        aniworld.get_full(slug, season=season, with_streams=streams or direct), "aniworld.to"
+    )
+    if direct:
+        await _add_direct_urls(data)
+    return data
 
 
 @app.get("/anime/{slug}/season/{season}/episode/{episode}")
-async def episode(slug: str, season: int, episode: int):
+async def episode(
+    slug: str,
+    season: int,
+    episode: int,
+    direct: bool = Query(True, description="Resolve direct stream URLs (one request per stream, slower)"),
+):
     """aniworld: streams and languages of a single episode. season=0 means movies."""
     path = (
         f"/anime/stream/{slug}/filme/film-{episode}"
@@ -134,6 +182,8 @@ async def episode(slug: str, season: int, episode: int):
         else f"/anime/stream/{slug}/staffel-{season}/episode-{episode}"
     )
     data = await _wrap(aniworld.get_streams(path), "aniworld.to")
+    if direct:
+        await _add_direct_urls(data)
     return {"slug": slug, "season": season, "episode": episode, **data}
 
 
@@ -142,18 +192,30 @@ async def episode(slug: str, season: int, episode: int):
 async def animetoast_show(
     slug: str,
     streams: bool = Query(False, description="Resolve hoster embed URLs (one request per link)"),
+    direct: bool = Query(True, description="Resolve direct stream URLs (one request per stream, slower)"),
 ):
     """animetoast: episodes and hoster links of one show page (slug e.g. 'naruto-ger-dub')."""
-    return await _wrap(animetoast.get_show(slug, with_streams=streams), "animetoast.cc")
+    data = await _wrap(
+        animetoast.get_show(slug, with_streams=streams or direct), "animetoast.cc"
+    )
+    if direct:
+        await _add_direct_urls(data)
+    return data
 
 
 
 @app.get("/animetoast/{slug}/episode/{episode}")
-async def animetoast_episode(slug: str, episode: int):
+async def animetoast_episode(
+    slug: str,
+    episode: int,
+    direct: bool = Query(True, description="Resolve direct stream URLs (one request per stream, slower)"),
+):
     """animetoast: one episode with its hoster embed URLs resolved (only that episode's links)."""
     data = await _wrap(animetoast.get_episode(slug, episode), "animetoast.cc")
     if data is None:
         raise HTTPException(404, f"Episode {episode} not found on '{slug}'")
+    if direct:
+        await _add_direct_urls(data)
     return data
 
 
