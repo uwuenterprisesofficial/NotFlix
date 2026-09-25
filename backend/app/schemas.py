@@ -15,6 +15,7 @@ class Progress(BaseModel):
 
 
 class ReasonOut(BaseModel):
+    key: str  # tag:<id>, studio:<name>, source:<source>, type:<type>, era:<decade>, mal, popularity
     name: str
     points: float  # how much this feature moves the predicted score
 
@@ -49,6 +50,7 @@ class AnimeCard(ORM):
 
 class AnimeDetail(AnimeCard):
     synopsis: str | None = None
+    synopsis_language: str = "en"  # MAL's are English; see GET /anime/{id}/synopsis
     status: str | None = None
     start_season: str | None = None
     tags: list[TagOut] = []
@@ -56,6 +58,11 @@ class AnimeDetail(AnimeCard):
     source: str | None = None
     rank: int | None = None
     num_list_users: int | None = None
+
+
+class SynopsisOut(BaseModel):
+    language: str  # the language of `synopsis`: the one asked for, else "en" (MAL's)
+    synopsis: str | None
 
 
 class SearchResponse(BaseModel):
@@ -123,14 +130,16 @@ class TagStatOut(BaseModel):
 
 
 class HotTakeOut(BaseModel):
-    kind: str
-    title: str
-    text: str
+    """One hot take; the UI words it from `kind` and `params` (in the viewer's language)."""
+
+    kind: str  # harsh, generous, agreement, underrated, overrated, dropped_acclaimed, ...
+    params: dict[str, float | int | str | None] = {}
     value: float | None = None
     anime: ShowRefOut | None = None
 
 
 class ModelFeatureOut(BaseModel):
+    key: str
     name: str
     kind: str
     points: float
@@ -367,7 +376,7 @@ class StatsStatusOut(BaseModel):
     """The statistics page: cached statistics, and whether newer ones are being computed."""
 
     status: Literal["ready", "loading", "failed"]
-    step: str | None = None  # what the background computation is doing
+    step: Literal["starting", "details", "computing"] | None = None  # what's being done
     done: int = 0
     total: int = 0
     error: str | None = None

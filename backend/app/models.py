@@ -114,6 +114,21 @@ class Recommendation(Base):
     reason: Mapped[str | None] = mapped_column(Text)
 
 
+class AnimeSynopsis(Base):
+    """A show's synopsis in another language than MAL's English (e.g. German from AniWorld).
+    `synopsis` is None when none was found; it's looked for again after a while."""
+
+    __tablename__ = "anime_synopses"
+    __table_args__ = (UniqueConstraint("anime_id", "language"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    anime_id: Mapped[int] = mapped_column(Integer, index=True)
+    language: Mapped[str] = mapped_column(String(5))
+    synopsis: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str | None] = mapped_column(String(20))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class TasteModel(Base):
     """A user's fitted score predictor (see services.taste), refitted on every list sync."""
 

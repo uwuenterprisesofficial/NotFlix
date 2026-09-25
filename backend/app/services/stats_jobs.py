@@ -36,9 +36,13 @@ def _key(user_id: int) -> str:
     return f"stats:{user_id}"
 
 
+STATS_FORMAT = 2  # bump when the shape of the statistics changes
+
+
 def _version(user: User) -> str:
-    """Cached statistics belong to one state of the list: its last sync."""
-    return user.last_synced_at.isoformat() if user.last_synced_at else "never"
+    """Cached statistics belong to one state of the list (its last sync) and one format."""
+    synced = user.last_synced_at.isoformat() if user.last_synced_at else "never"
+    return f"{STATS_FORMAT}:{synced}"
 
 
 async def cached(user_id: int) -> dict[str, Any] | None:
@@ -67,6 +71,8 @@ async def status(user: User) -> dict[str, Any]:
     """What the statistics page shows: the cached statistics (if any) and whether newer ones
     are being computed. Starts that computation when the cache is missing or out of date."""
     entry = await cached(user.id)
+    if entry is not None and not str(entry.get("version", "")).startswith(f"{STATS_FORMAT}:"):
+        entry = None  # an older format can't even be shown while newer ones are computed
     fresh = entry is not None and entry["version"] == _version(user)
     state = _progress.get(user.id, {})
     if not fresh and not running(user.id) and state.get("status") != "failed":
@@ -89,7 +95,7 @@ def start(user_id: int) -> None:
     """Compute a user's statistics in the background, unless that's already happening."""
     if user_id in _running:
         return
-    _progress[user_id] = {"status": "running", "step": "Starting", "done": 0, "total": 0}
+    _progress[user_id] = {"status": "running", "step": "starting", "done": 0, "total": 0}
     task = asyncio.create_task(_run(user_id))
     _running[user_id] = task
     task.add_done_callback(lambda _: _running.pop(user_id, None))
@@ -128,7 +134,7 @@ async def _fill_details(db, user: User) -> None:
     missing = await _missing(db, user.id)
     if not missing or not catalog.mal_configured():
         return
-    state.update(step="Loading show details from MyAnimeList", done=0, total=len(missing))
+    state.update(step="details", done=0, total=len(missing))
     token = await access_token(db, user)
     async with mal.MalClient(token) as client:
         # The list endpoint returns most details for every show in a request or two.
@@ -179,7 +185,7 @@ async def _run(user_id: int) -> None:
             except Exception as e:  # MAL down etc.: compute with what there is
                 log.warning("Filling in show details for user %s failed: %s", user_id, e)
                 await db.rollback()
-            state.update(step="Computing statistics", done=0, total=0)
+            state.update(step="computing", done=0, total=0)
             rated = await taste.load_rated(db, user_id)
             predictor = await taste.refit(db, user, rated)
             await db.commit()

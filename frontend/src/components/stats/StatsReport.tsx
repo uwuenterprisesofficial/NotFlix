@@ -1,113 +1,109 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
+import { useT } from "@/components/I18nProvider";
 import { PredictionBadge } from "@/components/PredictionBadge";
 import { Breakdown } from "@/components/stats/Breakdown";
-import { DivergingBars, signed } from "@/components/stats/DivergingBars";
+import { DivergingBars } from "@/components/stats/DivergingBars";
 import { ScoreDistribution } from "@/components/stats/ScoreDistribution";
 import { YOU } from "@/components/stats/colors";
 import { displayTitle } from "@/lib/format";
+import { featureName, formatNumber, type Lang, type MessageKey, type T } from "@/lib/i18n";
 import type { HotTake, ShowRef, Stats, TagStat } from "@/lib/types";
 
-const STATUS_LABEL: Record<string, string> = {
-  watching: "Watching",
-  completed: "Completed",
-  on_hold: "On hold",
-  dropped: "Dropped",
-  plan_to_watch: "Plan to watch",
-};
-const KIND_LABEL: Record<string, string> = {
-  genre: "Genre",
-  theme: "Theme",
-  demographic: "Demographic",
-  explicit: "Explicit",
-  studio: "Studio",
-  source: "Source",
-  type: "Type",
-  era: "Decade",
-};
+/** Number formatting for the page's language; "–" for missing values. */
+function numbers(lang: Lang) {
+  const num = (v: number | null | undefined, digits = 2) =>
+    v === null || v === undefined ? "–" : formatNumber(lang, v, digits);
+  const signed = (v: number | null | undefined, digits = 2) =>
+    v === null || v === undefined ? "–" : `${v >= 0 ? "+" : "−"}${num(Math.abs(v), digits)}`;
+  return { num, signed };
+}
+
+const kindOne = (t: T, kind: string) => t(`kindOne.${kind}` as MessageKey);
 
 /** Every section of the statistics page. */
 export function StatsReport({ stats }: { stats: Stats }) {
+  const { t, lang } = useT();
+  const { num, signed } = numbers(lang);
   const o = stats.overview;
   if (o.total === 0) {
-    return <p className="text-muted">Press “Sync MAL” to import your list first.</p>;
+    return <p className="text-muted">{t("stats.syncFirst")}</p>;
   }
+  const feature = (f: { key: string; name: string; kind: string; points: number }) => ({
+    name: featureName(lang, f.key, f.name),
+    value: f.points,
+    detail: kindOne(t, f.kind),
+  });
+  const thresholds = stats.model?.thresholds.map((v) => num(v, 1)) ?? [];
+
   return (
     <div className="space-y-10">
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Tile label="Shows" value={o.total.toLocaleString("en")} note={`${o.scored} scored`} />
         <Tile
-          label="Time watched"
-          value={o.days !== null ? `${o.days.toLocaleString("en")} days` : "–"}
-          note={`${o.episodes.toLocaleString("en")} episodes`}
+          label={t("stats.shows")}
+          value={formatNumber(lang, o.total)}
+          note={t("stats.scored", { count: formatNumber(lang, o.scored) })}
         />
         <Tile
-          label="Your mean score"
-          value={o.mean_score?.toFixed(2) ?? "–"}
-          note={
-            o.mal_mean !== null ? `MAL: ${o.mal_mean.toFixed(2)} for the same shows` : undefined
-          }
+          label={t("stats.timeWatched")}
+          value={o.days !== null ? t("stats.days", { days: num(o.days, 1) }) : "–"}
+          note={t("stats.episodes", { count: formatNumber(lang, o.episodes) })}
         />
         <Tile
-          label="Agreement with MAL"
-          value={o.agreement !== null ? o.agreement.toFixed(2) : "–"}
+          label={t("stats.meanScore")}
+          value={num(o.mean_score)}
+          note={o.mal_mean !== null ? t("stats.malSame", { mal: num(o.mal_mean) }) : undefined}
+        />
+        <Tile
+          label={t("stats.agreement")}
+          value={num(o.agreement)}
           note={
             o.mean_abs_difference !== null
-              ? `off by ${o.mean_abs_difference.toFixed(1)} points on average`
+              ? t("stats.offBy", { points: num(o.mean_abs_difference, 1) })
               : undefined
           }
         />
       </section>
 
       <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
-        <Card
-          title="Score distribution"
-          subtitle="How you score, and how MAL scores the same shows"
-        >
+        <Card title={t("stats.distribution")} subtitle={t("stats.distributionInfo")}>
           <ScoreDistribution data={stats.score_distribution} />
         </Card>
         <Card
-          title="Your list"
+          title={t("stats.yourList")}
           subtitle={
             o.drop_rate !== null
-              ? `Drop rate ${(o.drop_rate * 100).toFixed(0)}% of finished shows`
+              ? t("stats.dropRate", { rate: num(o.drop_rate * 100, 0) })
               : undefined
           }
         >
           <StatusBars stats={stats} />
           <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
-            <Fact label="Median score" value={o.median_score?.toFixed(1) ?? "–"} />
-            <Fact label="Score spread (σ)" value={o.std_score?.toFixed(2) ?? "–"} />
+            <Fact label={t("stats.median")} value={num(o.median_score, 1)} />
+            <Fact label={t("stats.spread")} value={num(o.std_score)} />
+            <Fact label={t("stats.vsMal")} value={signed(o.mean_difference)} />
             <Fact
-              label="vs MAL on average"
-              value={o.mean_difference !== null ? signed(o.mean_difference) : "–"}
-            />
-            <Fact
-              label="Typical show's MAL members"
-              value={o.median_members?.toLocaleString("en") ?? "–"}
+              label={t("stats.members")}
+              value={o.median_members !== null ? formatNumber(lang, o.median_members) : "–"}
             />
           </dl>
         </Card>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Card title="Favourite genres & themes" subtitle="Points above your own average score">
-          <TagBars
-            items={stats.favourites}
-            empty="Score a few more shows to find your favourites."
-          />
+        <Card title={t("stats.favourites")} subtitle={t("stats.favouritesInfo")}>
+          <TagBars items={stats.favourites} empty={t("stats.favouritesEmpty")} />
         </Card>
-        <Card
-          title="Genres & themes you dislike"
-          subtitle="Points below your average (dropped shows count against)"
-        >
-          <TagBars items={stats.hated} empty="Nothing you consistently dislike — yet." />
+        <Card title={t("stats.hated")} subtitle={t("stats.hatedInfo")}>
+          <TagBars items={stats.hated} empty={t("stats.hatedEmpty")} />
         </Card>
       </div>
 
       {stats.hot_takes.length > 0 && (
         <section>
-          <h2 className="text-xl font-bold">Hot takes</h2>
+          <h2 className="text-xl font-bold">{t("stats.hotTakes")}</h2>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {stats.hot_takes.map((take, i) => (
               <HotTakeCard key={`${take.kind}-${i}`} take={take} />
@@ -116,70 +112,49 @@ export function StatsReport({ stats }: { stats: Stats }) {
         </section>
       )}
 
-      <Card title="Breakdown" subtitle="Everything on your list, by genre, theme, studio and more">
+      <Card title={t("stats.breakdown")} subtitle={t("stats.breakdownInfo")}>
         <Breakdown breakdown={stats.breakdown} />
       </Card>
 
       {stats.model ? (
         <Card
-          title="What predicts your score"
-          subtitle={`Learned from your ${stats.model.scored} scored shows; used for the MUST WATCH … AVOID labels`}
+          title={t("stats.model")}
+          subtitle={t("stats.modelInfo", { count: stats.model.scored })}
         >
           <p className="text-sm text-neutral-300">
-            {stats.model.mae !== null && (
-              <>
-                Predictions for shows the model hadn&apos;t seen were off by{" "}
-                <strong>{stats.model.mae.toFixed(2)}</strong> points on average
-                {stats.model.baseline_mae !== null && (
-                  <> — MAL&apos;s score alone is off by {stats.model.baseline_mae.toFixed(2)}</>
-                )}
-                .{" "}
-              </>
-            )}
-            Every point of MAL score is worth{" "}
-            <strong>{(stats.model.mal_weight ?? 0).toFixed(2)}</strong> of yours.
+            {stats.model.mae !== null &&
+              t("stats.modelError", { mae: stats.model.mae, baseline: stats.model.baseline_mae })}
+            {t("stats.malWeight", { weight: num(stats.model.mal_weight ?? 0) })}
           </p>
           <div className="mt-5 grid gap-6 md:grid-cols-2">
             <div>
-              <h3 className="mb-2 text-sm font-semibold">Raises your score</h3>
-              <DivergingBars
-                items={stats.model.likes.map((f) => ({
-                  name: f.name,
-                  value: f.points,
-                  detail: KIND_LABEL[f.kind],
-                }))}
-              />
+              <h3 className="mb-2 text-sm font-semibold">{t("stats.raises")}</h3>
+              <DivergingBars items={stats.model.likes.map(feature)} />
             </div>
             <div>
-              <h3 className="mb-2 text-sm font-semibold">Lowers your score</h3>
-              <DivergingBars
-                items={stats.model.dislikes.map((f) => ({
-                  name: f.name,
-                  value: f.points,
-                  detail: KIND_LABEL[f.kind],
-                }))}
-              />
+              <h3 className="mb-2 text-sm font-semibold">{t("stats.lowers")}</h3>
+              <DivergingBars items={stats.model.dislikes.map(feature)} />
             </div>
           </div>
           <p className="mt-4 text-xs text-muted">
-            Label thresholds (predicted score): must watch ≥ {stats.model.thresholds[0]?.toFixed(1)}
-            , recommended ≥ {stats.model.thresholds[1]?.toFixed(1)}, maybe ≥{" "}
-            {stats.model.thresholds[2]?.toFixed(1)}, probably skip ≥{" "}
-            {stats.model.thresholds[3]?.toFixed(1)}, avoid below.
+            {t("stats.thresholds", {
+              a: thresholds[0] ?? "–",
+              b: thresholds[1] ?? "–",
+              c: thresholds[2] ?? "–",
+              d: thresholds[3] ?? "–",
+            })}
           </p>
         </Card>
       ) : (
-        <Card title="What predicts your score">
-          <p className="text-sm text-muted">
-            Score at least 10 shows on MyAnimeList to get predictions.
-          </p>
+        <Card title={t("stats.model")}>
+          <p className="text-sm text-muted">{t("stats.noModel")}</p>
         </Card>
       )}
 
       {stats.plan_to_watch.length > 0 && (
         <Card
-          title="Your plan to watch, ranked for you"
-          subtitle={stats.model ? "By predicted score" : "By MAL score"}
+          title={t("stats.plan")}
+          subtitle={stats.model ? t("stats.byPrediction") : t("stats.byMal")}
         >
           <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {stats.plan_to_watch.map((show, i) => (
@@ -232,12 +207,13 @@ function Fact({ label, value }: { label: string; value: string }) {
 }
 
 function StatusBars({ stats }: { stats: Stats }) {
+  const { t } = useT();
   const max = Math.max(1, ...stats.overview.by_status.map((s) => s.count));
   return (
     <ul className="space-y-2 text-sm">
       {stats.overview.by_status.map((s) => (
         <li key={s.status} className="grid grid-cols-[7rem_1fr_3rem] items-center gap-3">
-          <span className="text-neutral-200">{STATUS_LABEL[s.status] ?? s.status}</span>
+          <span className="text-neutral-200">{t(`list.${s.status}`)}</span>
           <span className="h-3">
             <span
               className="block h-full rounded-r"
@@ -252,22 +228,35 @@ function StatusBars({ stats }: { stats: Stats }) {
 }
 
 function TagBars({ items, empty }: { items: TagStat[]; empty: string }) {
+  const { t, lang } = useT();
+  const { num } = numbers(lang);
   if (!items.length) return <p className="text-sm text-muted">{empty}</p>;
+  const name = (s: TagStat) => featureName(lang, s.key, s.name);
   return (
     <>
       <DivergingBars
-        items={items.map((t) => ({
-          name: t.name,
-          value: t.affinity ?? 0,
-          detail: `${KIND_LABEL[t.kind]} · ${t.count} shows · you ${t.mean_score?.toFixed(2) ?? "–"} · MAL ${t.mal_mean?.toFixed(2) ?? "–"}${t.dropped ? ` · ${t.dropped} dropped` : ""}`,
+        items={items.map((s) => ({
+          name: name(s),
+          value: s.affinity ?? 0,
+          detail:
+            t("stats.tagDetail", {
+              kind: kindOne(t, s.kind),
+              count: s.count,
+              mine: num(s.mean_score),
+              mal: num(s.mal_mean),
+            }) + (s.dropped ? t("stats.tagDropped", { count: s.dropped }) : ""),
         }))}
       />
       <p className="mt-3 text-xs text-muted">
         {items
           .slice(0, 3)
-          .map(
-            (t) =>
-              `${t.name}: ${t.count} shows, you ${t.mean_score?.toFixed(1) ?? "–"} vs MAL ${t.mal_mean?.toFixed(1) ?? "–"}`,
+          .map((s) =>
+            t("stats.tagSummary", {
+              name: name(s),
+              count: s.count,
+              mine: num(s.mean_score, 1),
+              mal: num(s.mal_mean, 1),
+            }),
           )
           .join(" · ")}
       </p>
@@ -275,7 +264,43 @@ function TagBars({ items, empty }: { items: TagStat[]; empty: string }) {
   );
 }
 
+/** A hot take's title and text, worded from its kind and numbers. */
+function hotTakeText(t: T, lang: Lang, take: HotTake): { title: string; text: string } {
+  const p = take.params;
+  const text = (key: string, vars: object) => (t as (k: string, v: object) => string)(key, vars);
+  switch (take.kind) {
+    case "agreement":
+      return {
+        title: t(`take.agreement.${p.level as "own"}`),
+        text: text("take.agreement.text", p),
+      };
+    case "tag_contrarian": {
+      const vars = { ...p, name: featureName(lang, String(p.key), String(p.name)) };
+      return {
+        title: text("take.tag_contrarian.title", vars),
+        text: text("take.tag_contrarian.text", vars),
+      };
+    }
+    default:
+      return { title: text(`take.${take.kind}.title`, p), text: text(`take.${take.kind}.text`, p) };
+  }
+}
+
+const KNOWN_TAKES = new Set([
+  "harsh",
+  "generous",
+  "agreement",
+  "underrated",
+  "overrated",
+  "dropped_acclaimed",
+  "hidden_gem",
+  "tag_contrarian",
+]);
+
 function HotTakeCard({ take }: { take: HotTake }) {
+  const { t, lang } = useT();
+  if (!KNOWN_TAKES.has(take.kind)) return null;
+  const { title, text } = hotTakeText(t, lang, take);
   const body = (
     <div className="flex h-full gap-3 rounded-lg bg-surface-raised p-4 transition-colors hover:bg-white/10">
       {take.anime?.picture_url && (
@@ -288,11 +313,11 @@ function HotTakeCard({ take }: { take: HotTake }) {
         />
       )}
       <div className="min-w-0">
-        <div className="text-xs font-semibold tracking-wide text-brand uppercase">{take.title}</div>
+        <div className="text-xs font-semibold tracking-wide text-brand uppercase">{title}</div>
         {take.anime && (
           <div className="mt-0.5 truncate font-semibold">{displayTitle(take.anime)}</div>
         )}
-        <p className="mt-1 text-sm text-neutral-300">{take.text}</p>
+        <p className="mt-1 text-sm text-neutral-300">{text}</p>
       </div>
     </div>
   );
@@ -300,6 +325,7 @@ function HotTakeCard({ take }: { take: HotTake }) {
 }
 
 function ShowRow({ show, rank }: { show: ShowRef; rank: number }) {
+  const { lang } = useT();
   return (
     <Link
       href={`/anime/${show.id}`}
@@ -321,7 +347,7 @@ function ShowRow({ show, rank }: { show: ShowRef; rank: number }) {
         <span className="block truncate text-sm font-semibold">{displayTitle(show)}</span>
         <span className="mt-1 flex items-center gap-2 text-xs text-muted">
           <PredictionBadge prediction={show.prediction} force />
-          {show.mean !== null && <span>MAL {show.mean.toFixed(2)}</span>}
+          {show.mean !== null && <span>MAL {formatNumber(lang, show.mean, 2)}</span>}
         </span>
       </span>
     </Link>

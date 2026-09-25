@@ -136,7 +136,9 @@ class Prediction:
     score: float
     tier: Tier
     # The features that moved the prediction most, as (name, points), strongest first.
-    reasons: list[tuple[str, float]] = field(default_factory=list)
+    # The features that moved it most, as (feature key, name, points), strongest first. The key
+    # ("tag:62", "source:manga", "mal", "popularity", ...) lets the UI translate the name.
+    reasons: list[tuple[str, str, float]] = field(default_factory=list)
 
 
 class Predictor:
@@ -151,14 +153,17 @@ class Predictor:
         d = self.data
         terms: list[tuple[str, float]] = []
         mal = (show.mean - d["mal_center"]) if show.mean is not None else 0.0
-        terms.append(("MAL score", d["mal_coef"] * mal))
+        terms.append(("mal", d["mal_coef"] * mal))
         pop = _popularity(show)
         if pop is not None:
-            terms.append(("Popularity", d["pop_coef"] * (pop - d["pop_center"])))
+            terms.append(("popularity", d["pop_coef"] * (pop - d["pop_center"])))
         for key in features(show):
             if key in self.weights:
-                terms.append((self.names[key], self.weights[key]))
+                terms.append((key, self.weights[key]))
         return d["intercept"] + sum(v for _, v in terms), terms
+
+    def name(self, key: str) -> str:
+        return {"mal": "MAL score", "popularity": "Popularity"}.get(key) or self.names[key]
 
     def score(self, show: Show) -> float:
         return round(min(10.0, max(1.0, self._terms(show)[0])), 2)
@@ -176,7 +181,11 @@ class Predictor:
         return Prediction(
             score=score,
             tier=self.tier(score),
-            reasons=[(name, round(v, 2)) for name, v in strongest[:reasons] if abs(v) >= 0.05],
+            reasons=[
+                (key, self.name(key), round(v, 2))
+                for key, v in strongest[:reasons]
+                if abs(v) >= 0.05
+            ],
         )
 
 

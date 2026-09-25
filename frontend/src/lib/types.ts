@@ -11,7 +11,7 @@ export type Prediction = {
   score: number;
   tier: Tier;
   /** The features that moved the prediction most (detail page only). */
-  reasons: { name: string; points: number }[];
+  reasons: { key: string; name: string; points: number }[];
 };
 
 export type TagCategory = "genre" | "theme" | "demographic" | "explicit";
@@ -32,6 +32,8 @@ export type AnimeCard = {
 
 export type AnimeDetail = AnimeCard & {
   synopsis: string | null;
+  /** "en" is MAL's; another language when a translation was found. */
+  synopsis_language: string;
   status: string | null;
   start_season: string | null;
   tags: { id: number; name: string; category: TagCategory }[];
@@ -77,8 +79,7 @@ export type TagStat = {
 
 export type HotTake = {
   kind: string;
-  title: string;
-  text: string;
+  params: Record<string, number | string | null>;
   value: number | null;
   anime: ShowRef | null;
 };
@@ -111,8 +112,8 @@ export type Stats = {
     baseline_mae: number | null;
     mal_weight: number | null;
     thresholds: number[];
-    likes: { name: string; kind: string; points: number }[];
-    dislikes: { name: string; kind: string; points: number }[];
+    likes: { key: string; name: string; kind: string; points: number }[];
+    dislikes: { key: string; name: string; kind: string; points: number }[];
   } | null;
   plan_to_watch: ShowRef[];
 };
@@ -229,7 +230,7 @@ export type Availability = {
 /** GET /me/stats: statistics are computed in the background; poll while "loading". */
 export type StatsStatus = {
   status: "ready" | "loading" | "failed";
-  step: string | null;
+  step: "starting" | "details" | "computing" | null;
   done: number;
   total: number;
   error: string | null;

@@ -1,12 +1,13 @@
 "use client";
 
 import { LanguageFlag } from "@/components/LanguageFlag";
-import { LANGUAGE_LABELS } from "@/lib/languages";
+import { useT } from "../I18nProvider";
 import { Dropdown } from "./Dropdown";
 import type { useSources } from "./useSources";
 
 /** The episode's languages, each with its flag. */
 export function LanguageMenu({ sources }: { sources: ReturnType<typeof useSources> }) {
+  const { t } = useT();
   return (
     <Dropdown
       align="left"
@@ -14,7 +15,7 @@ export function LanguageMenu({ sources }: { sources: ReturnType<typeof useSource
       button={
         <>
           <LanguageFlag language={sources.language} />
-          <span className="truncate font-semibold">{LANGUAGE_LABELS[sources.language]}</span>
+          <span className="truncate font-semibold">{t(`lang.${sources.language}`)}</span>
         </>
       }
     >
@@ -37,10 +38,8 @@ export function LanguageMenu({ sources }: { sources: ReturnType<typeof useSource
                 {current ? "✓" : ""}
               </span>
               <LanguageFlag language={lang} />
-              <span className="flex-1 truncate">{LANGUAGE_LABELS[lang]}</span>
-              <span className="text-xs text-muted">
-                {count} {count === 1 ? "source" : "sources"}
-              </span>
+              <span className="flex-1 truncate">{t(`lang.${lang}`)}</span>
+              <span className="text-xs text-muted">{t("player.sources", { count })}</span>
             </button>
           );
         })

@@ -125,6 +125,15 @@ def parse_episode_links(html: str) -> list[EpisodeLink]:
     return [link for link in links if link.path.startswith("/")]
 
 
+def parse_description(html: str) -> str | None:
+    """The series' German description from its AniWorld page."""
+    el = BeautifulSoup(html, "html.parser").select_one("p.seri_des")
+    if el is None:
+        return None
+    text = str(el.get("data-full-description") or "") or el.get_text(" ", strip=True)
+    return text.strip() or None
+
+
 def count_episodes(html: str) -> int:
     soup = BeautifulSoup(html, "html.parser")
     if soup.select_one(".messageAlert.danger"):
@@ -176,6 +185,14 @@ class AniWorldProvider:
 
     def season_path(self, slug: str, season: int) -> str:
         return f"/{self.series_path.replace('{slug}', slug)}/staffel-{season}"
+
+    async def description(self, anime: AnimeInfo) -> str | None:
+        """The show's German description, if it's on AniWorld."""
+        located = await self.locate(anime)
+        if located is None:
+            return None
+        html = await self._fetch(f"/{self.series_path.replace('{slug}', located[0])}")
+        return parse_description(html) if html else None
 
     async def candidate_slugs(self, titles: list[str]) -> list[str]:
         """Series slugs to try, best first."""
@@ -326,6 +343,9 @@ class AniWorldApiProvider(AniWorldProvider):
     (VOE, Doodstream, ...) become that option's streams when it is played.
     """
 
+    async def description(self, anime: AnimeInfo) -> str | None:
+        return None  # not part of this API
+
     def __init__(self, api_url: str, http: httpx.AsyncClient | None = None):
         super().__init__(api_url, "", http)
 
@@ -453,6 +473,15 @@ class AniScraperProvider(AniWorldApiProvider):
             hits.sort(key=lambda r: _norm(str(r.get("title") or "")) not in wanted)
             found += [str(r["slug"]) for r in hits]
         return list(dict.fromkeys(found + slug_candidates(titles)))[:MAX_SLUG_CANDIDATES]
+
+    async def description(self, anime: AnimeInfo) -> str | None:
+        located = await self.locate(anime)
+        if located is None:
+            return None
+        slug, season, _ = located
+        data = await self._api(f"/anime/{quote(slug)}", {"season": season, "streams": "false"})
+        text = (data or {}).get("description") if isinstance(data, dict) else None
+        return str(text).strip() or None if text else None
 
     async def _season(self, slug: str, season: int) -> list[dict[str, Any]] | None:
         key = f"aniworld:scraper:season:{slug}:{season}"

@@ -1,27 +1,14 @@
-import type { Language } from "./types";
-
-export const LANGUAGE_ORDER: Language[] = ["de-dub", "de-sub", "en-sub", "en-dub", "unknown"];
-
-export const LANGUAGE_LABELS: Record<Language, string> = {
-  "de-dub": "German Dub",
-  "de-sub": "German Sub",
-  "en-sub": "English Sub",
-  "en-dub": "English Dub",
-  unknown: "Other",
-};
-
-export const LANGUAGE_SHORT: Record<Language, string> = {
-  "de-dub": "DE",
-  "de-sub": "DE Sub",
-  "en-sub": "EN Sub",
-  "en-dub": "EN",
-  unknown: "?",
-};
+import type { T } from "./i18n";
 
 export const PROVIDER_LABELS: Record<string, string> = {
   aniworld: "AniWorld",
   animetoast: "AnimeToast",
   anivexa: "Anivexa",
   reanime: "ReAnime",
-  database: "Your sources",
 };
+
+export function providerLabel(t: T, provider: string): string {
+  return provider === "database"
+    ? t("player.yourSources")
+    : (PROVIDER_LABELS[provider] ?? provider);
+}

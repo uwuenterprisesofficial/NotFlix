@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
 from app.api.deps import DB, CurrentUser, OptionalUser
@@ -28,8 +28,9 @@ from app.schemas import (
     ProgressUpdate,
     ReferenceOut,
     SkipSegmentOut,
+    SynopsisOut,
 )
-from app.services import catalog, mal
+from app.services import catalog, mal, synopsis
 from app.services.sync import access_token
 from app.services.taste import predictor_for
 from app.worker.queue import analysis_queue, stop_job, timeout_message, timeout_seconds
@@ -40,7 +41,9 @@ TIMEOUT_GRACE = timedelta(minutes=1)
 
 
 @router.get("/anime/{anime_id}", response_model=AnimeDetail)
-async def anime_detail(anime_id: int, user: OptionalUser, db: DB):
+async def anime_detail(anime_id: int, user: OptionalUser, db: DB, lang: str = "en"):
+    """A show's details; with `lang`, the synopsis in that language if it's already known
+    (GET /anime/{id}/synopsis looks it up)."""
     anime = await catalog.get_anime(db, anime_id)
     if anime is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Anime not found")
@@ -49,7 +52,25 @@ async def anime_detail(anime_id: int, user: OptionalUser, db: DB):
         entry = await db.scalar(
             select(ListEntry).where(ListEntry.user_id == user.id, ListEntry.anime_id == anime_id)
         )
-    return catalog.to_detail(anime, entry, predictor=await predictor_for(db, user))
+    detail = catalog.to_detail(anime, entry, predictor=await predictor_for(db, user))
+    if synopsis.supported(lang):
+        row = await synopsis.stored(db, anime_id, lang)
+        if row is not None and row.synopsis:
+            detail.synopsis, detail.synopsis_language = row.synopsis, lang
+    return detail
+
+
+@router.get("/anime/{anime_id}/synopsis", response_model=SynopsisOut)
+async def anime_synopsis(anime_id: int, db: DB, lang: str = Query(pattern=r"^[a-z]{2}$")):
+    """The synopsis in `lang` (German from AniWorld), else MAL's English one. May take a few
+    seconds the first time, while the show is found on AniWorld."""
+    anime = await catalog.get_anime(db, anime_id)
+    if anime is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Anime not found")
+    text = await synopsis.localized(db, anime, lang)
+    if text:
+        return SynopsisOut(language=lang, synopsis=text)
+    return SynopsisOut(language="en", synopsis=anime.synopsis)
 
 
 @router.get("/anime/{anime_id}/episodes/{episode}", response_model=EpisodeOut)

@@ -1,3 +1,6 @@
+"use client";
+
+import { useT } from "@/components/I18nProvider";
 import type { Stats } from "@/lib/types";
 import { AXIS, GRID, MAL, YOU } from "./colors";
 
@@ -14,6 +17,7 @@ function ticks(max: number): number[] {
 
 /** Your scores next to MAL's (rounded) average for the same shows, per score 1–10. */
 export function ScoreDistribution({ data }: { data: Stats["score_distribution"] }) {
+  const { t } = useT();
   const max = Math.max(1, ...data.flatMap((d) => [d.mine, d.mal]));
   const top = ticks(max).at(-1)!;
   const h = (v: number) => (v / top) * HEIGHT;
@@ -22,11 +26,12 @@ export function ScoreDistribution({ data }: { data: Stats["score_distribution"] 
     <figure>
       <div className="mb-3 flex gap-4 text-xs text-neutral-300" aria-hidden>
         <span className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-sm" style={{ background: YOU }} /> Your score
+          <span className="size-2.5 rounded-sm" style={{ background: YOU }} />{" "}
+          {t("stats.yourScore")}
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-sm" style={{ background: MAL }} /> MAL average, same
-          shows
+          <span className="size-2.5 rounded-sm" style={{ background: MAL }} />{" "}
+          {t("stats.malSameShows")}
         </span>
       </div>
       <div className="flex pt-2">
@@ -54,7 +59,7 @@ export function ScoreDistribution({ data }: { data: Stats["score_distribution"] 
                 <div
                   key={d.score}
                   tabIndex={0}
-                  aria-label={`Score ${d.score}: you ${d.mine}, MAL ${d.mal}`}
+                  aria-label={t("stats.scoreAria", { score: d.score, mine: d.mine, mal: d.mal })}
                   className="group relative flex h-full flex-1 items-end justify-center gap-0.5 outline-none hover:bg-white/5 focus-visible:bg-white/10"
                 >
                   <div
@@ -66,14 +71,14 @@ export function ScoreDistribution({ data }: { data: Stats["score_distribution"] 
                     style={{ height: h(d.mal), background: MAL }}
                   />
                   <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 rounded bg-black/90 px-2.5 py-1.5 text-xs whitespace-nowrap shadow-lg group-hover:block group-focus-visible:block">
-                    <div className="text-muted">Score {d.score}</div>
+                    <div className="text-muted">{t("stats.scoreN", { score: d.score })}</div>
                     <div className="flex items-center gap-1.5">
                       <span className="h-0.5 w-3" style={{ background: YOU }} />
-                      <strong>{d.mine}</strong> <span className="text-muted">you</span>
+                      <strong>{d.mine}</strong> <span className="text-muted">{t("stats.you")}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="h-0.5 w-3" style={{ background: MAL }} />
-                      <strong>{d.mal}</strong> <span className="text-muted">MAL</span>
+                      <strong>{d.mal}</strong> <span className="text-muted">{t("stats.mal")}</span>
                     </div>
                   </div>
                 </div>
@@ -90,13 +95,13 @@ export function ScoreDistribution({ data }: { data: Stats["score_distribution"] 
         </div>
       </div>
       <details className="mt-3 text-xs text-muted">
-        <summary className="cursor-pointer">Show as table</summary>
+        <summary className="cursor-pointer">{t("stats.asTable")}</summary>
         <table className="mt-2 w-full max-w-sm tabular-nums">
           <thead>
             <tr className="text-left">
-              <th className="font-normal">Score</th>
-              <th className="font-normal">You</th>
-              <th className="font-normal">MAL</th>
+              <th className="font-normal">{t("stats.score")}</th>
+              <th className="font-normal">{t("stats.you")}</th>
+              <th className="font-normal">{t("stats.mal")}</th>
             </tr>
           </thead>
           <tbody className="text-neutral-200">

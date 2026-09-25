@@ -7,14 +7,18 @@ import { AniWorldMapping } from "@/components/AniWorldMapping";
 import { EpisodeBrowser } from "@/components/EpisodeBrowser";
 import { PredictionPanel } from "@/components/PredictionPanel";
 import { apiOrNull } from "@/lib/api";
-import { displayTitle, nextEpisode } from "@/lib/format";
+import { Synopsis } from "@/components/Synopsis";
+import { displayTitle, mediaType, nextEpisode, seasonText } from "@/lib/format";
+import { type T, formatNumber, genreName, tagName } from "@/lib/i18n";
+import { getT } from "@/lib/i18n/server";
 import type { AnimeDetail, Me } from "@/lib/types";
 
 export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
   const { id } = await params;
   if (!/^\d+$/.test(id)) notFound();
+  const { t, lang } = await getT();
   const [anime, me] = await Promise.all([
-    apiOrNull<AnimeDetail>(`/anime/${id}`),
+    apiOrNull<AnimeDetail>(`/anime/${id}?lang=${lang}`),
     apiOrNull<Me>("/me"),
   ]);
   if (!anime) notFound();
@@ -40,45 +44,47 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
             <p className="mt-1 text-muted">{anime.title}</p>
           )}
           <div className="mt-3 flex flex-wrap gap-3 text-sm text-neutral-300">
-            {anime.mean && <span className="font-semibold text-green-400">★ {anime.mean}</span>}
-            {anime.media_type && <span className="uppercase">{anime.media_type}</span>}
-            {anime.start_season && <span className="capitalize">{anime.start_season}</span>}
-            {anime.status && (
-              <span className="capitalize">{anime.status.replaceAll("_", " ")}</span>
-            )}
+            {anime.mean && <span className="font-semibold text-green-400">★ {formatNumber(lang, anime.mean)}</span>}
+            {anime.media_type && <span>{mediaType(lang, anime.media_type)}</span>}
+            {anime.start_season && <span>{seasonText(t, anime.start_season)}</span>}
+            {anime.status && <span>{statusText(t, anime.status)}</span>}
             {anime.progress && (
-              <span className="text-brand capitalize">
-                {anime.progress.status.replaceAll("_", " ")} · {watched}/{anime.num_episodes ?? "?"}
+              <span className="text-brand">
+                {t(`list.${anime.progress.status}`)} · {watched}/{anime.num_episodes ?? "?"}
               </span>
             )}
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             {anime.tags.length
-              ? anime.tags.map((t) => (
+              ? anime.tags.map((tag) => (
                   <Link
-                    key={t.id}
-                    href={`/search?genre=${t.id}`}
-                    title={`${t.category[0].toUpperCase()}${t.category.slice(1)} · more like this`}
-                    className={`rounded-full px-3 py-1 text-xs hover:bg-white/20 ${t.category === "genre" ? "bg-surface-raised" : "border border-white/20"}`}
+                    key={tag.id}
+                    href={`/search?genre=${tag.id}`}
+                    title={t("detail.moreLikeThis", { category: t(`category.${tag.category}`) })}
+                    className={`rounded-full px-3 py-1 text-xs hover:bg-white/20 ${tag.category === "genre" ? "bg-surface-raised" : "border border-white/20"}`}
                   >
-                    {t.name}
+                    {tagName(lang, tag.id, tag.name)}
                   </Link>
                 ))
               : anime.genres.map((g) => (
                   <span key={g} className="rounded-full bg-surface-raised px-3 py-1 text-xs">
-                    {g}
+                    {genreName(lang, g)}
                   </span>
                 ))}
           </div>
           {anime.prediction && <PredictionPanel prediction={anime.prediction} />}
-          {anime.synopsis && (
-            <p className="mt-5 whitespace-pre-line text-neutral-200">{anime.synopsis}</p>
-          )}
+          <Synopsis
+            animeId={anime.id}
+            text={anime.synopsis}
+            language={anime.synopsis_language}
+            className="mt-5 whitespace-pre-line text-neutral-200"
+            note
+          />
           <Link
             href={`/watch/${anime.id}/${nextEpisode(anime)}`}
             className="mt-6 inline-flex items-center gap-2 rounded bg-white px-6 py-2 font-semibold text-black hover:bg-white/80"
           >
-            ▶ {watched ? `Resume episode ${nextEpisode(anime)}` : "Play episode 1"}
+            ▶ {watched ? t("detail.resume", { episode: nextEpisode(anime) }) : t("detail.play1")}
           </Link>
         </div>
       </div>
@@ -97,10 +103,8 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
             <span aria-hidden className="transition-transform group-open:rotate-90">
               ▸
             </span>
-            More options
-            <span className="font-normal text-muted">
-              AniWorld &amp; AnimeToast pages, intro &amp; outro detection
-            </span>
+            {t("detail.moreOptions")}
+            <span className="font-normal text-muted">{t("detail.moreOptionsInfo")}</span>
           </summary>
           <AniWorldMapping animeId={anime.id} />
           <AnimeToastMapping animeId={anime.id} />
@@ -109,4 +113,10 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
       )}
     </div>
   );
+}
+
+function statusText(t: T, status: string): string {
+  return ["finished_airing", "currently_airing", "not_yet_aired"].includes(status)
+    ? t(`status.${status}` as "status.finished_airing")
+    : status.replaceAll("_", " ");
 }

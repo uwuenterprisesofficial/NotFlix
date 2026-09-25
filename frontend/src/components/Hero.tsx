@@ -1,10 +1,14 @@
 import Image from "next/image";
 import Link from "next/link";
-import { displayTitle, nextEpisode } from "@/lib/format";
+import { displayTitle, nextEpisode, reasonText, seasonText } from "@/lib/format";
+import { formatNumber, genreName } from "@/lib/i18n";
+import { getT } from "@/lib/i18n/server";
 import type { AnimeDetail } from "@/lib/types";
 import { PredictionBadge } from "./PredictionBadge";
+import { Synopsis } from "./Synopsis";
 
-export function Hero({ anime }: { anime: AnimeDetail }) {
+export async function Hero({ anime }: { anime: AnimeDetail }) {
+  const { t, lang } = await getT();
   const episode = nextEpisode(anime);
 
   return (
@@ -27,36 +31,41 @@ export function Hero({ anime }: { anime: AnimeDetail }) {
         <div className="max-w-xl">
           {anime.reason && (
             <p className="mb-2 text-sm font-semibold tracking-wide text-brand uppercase">
-              {anime.reason}
+              {reasonText(t, anime.reason)}
             </p>
           )}
           <h1 className="text-4xl font-black drop-shadow md:text-6xl">{displayTitle(anime)}</h1>
           <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-neutral-300">
             <PredictionBadge prediction={anime.prediction} size="md" />
-            {anime.mean && <span className="font-semibold text-green-400">★ {anime.mean}</span>}
-            {anime.start_season && <span className="capitalize">{anime.start_season}</span>}
-            {anime.num_episodes && <span>{anime.num_episodes} episodes</span>}
+            {anime.mean && <span className="font-semibold text-green-400">★ {formatNumber(lang, anime.mean)}</span>}
+            {anime.start_season && <span>{seasonText(t, anime.start_season)}</span>}
+            {anime.num_episodes && (
+              <span>{t("anime.episodes", { count: anime.num_episodes })}</span>
+            )}
             {anime.genres.slice(0, 3).map((g) => (
               <span key={g} className="rounded border border-white/30 px-1.5 text-xs">
-                {g}
+                {genreName(lang, g)}
               </span>
             ))}
           </div>
-          {anime.synopsis && (
-            <p className="mt-4 line-clamp-3 text-neutral-200 md:text-lg">{anime.synopsis}</p>
-          )}
+          <Synopsis
+            animeId={anime.id}
+            text={anime.synopsis}
+            language={anime.synopsis_language}
+            className="mt-4 line-clamp-3 text-neutral-200 md:text-lg"
+          />
           <div className="mt-6 flex gap-3">
             <Link
               href={`/watch/${anime.id}/${episode}`}
               className="flex items-center gap-2 rounded bg-white px-6 py-2 font-semibold text-black hover:bg-white/80"
             >
-              ▶ {anime.progress ? `Resume E${episode}` : "Play"}
+              ▶ {anime.progress ? t("hero.resume", { episode }) : t("hero.play")}
             </Link>
             <Link
               href={`/anime/${anime.id}`}
               className="rounded bg-neutral-500/60 px-6 py-2 font-semibold hover:bg-neutral-500/40"
             >
-              ⓘ More Info
+              ⓘ {t("hero.moreInfo")}
             </Link>
           </div>
         </div>

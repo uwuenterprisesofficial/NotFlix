@@ -76,7 +76,7 @@ def test_predictions_are_labelled_from_the_users_own_range():
     assert predictor.predict(loved).tier == "must_watch"
     assert predictor.predict(hated).tier == "avoid"
     reasons = predictor.predict(hated, reasons=3).reasons
-    assert reasons[0] == ("Isekai", pytest.approx(predictor.weights["tag:62"], abs=0.01))
+    assert reasons[0] == ("tag:62", "Isekai", pytest.approx(predictor.weights["tag:62"], abs=0.01))
 
 
 def test_no_model_without_enough_scores():
@@ -221,7 +221,7 @@ async def test_stats_and_predictions_in_the_api(client, user):
 
     detail = (await client.get("/anime/900")).json()
     assert detail["prediction"]["tier"] in ("must_watch", "recommended")
-    assert detail["prediction"]["reasons"][0]["name"] == "Psychological"
+    assert detail["prediction"]["reasons"][0]["key"] == "tag:40"
     assert detail["tags"] == [{"id": 40, "name": "Psychological", "category": "theme"}]
     # Scored shows get no prediction.
     assert (await client.get(f"/anime/{listed[0][0].id}")).json()["prediction"] is None
@@ -315,3 +315,16 @@ async def test_stats_fill_in_missing_show_details_from_mal(client, user, monkeyp
     assert len(body["stats"]["breakdown"]["genre"]) >= 4
     with sync_session() as db:
         assert all(a.genre_tags and a.num_list_users for a in db.query(Anime).all())
+
+
+async def test_stats_in_an_old_format_are_not_shown(client, user):
+    from app.core.cache import set_json
+    from app.services import stats_jobs
+
+    _seed_list(user, [(r.show, r.status, r.score) for r in _list(20)])
+    old = {"version": "1:whenever", "computed_at": "2026-01-01T00:00:00+00:00", "stats": {"x": 1}}
+    await set_json(f"stats:{user.id}", old, 60)
+    body = (await client.get("/me/stats")).json()
+    assert body["status"] == "loading" and body["stats"] is None
+    await stats_jobs.wait_idle()
+    assert (await client.get("/me/stats")).json()["status"] == "ready"

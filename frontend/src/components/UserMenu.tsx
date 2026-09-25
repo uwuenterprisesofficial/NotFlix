@@ -3,7 +3,9 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState, useSyncExternalStore, useTransition } from "react";
+import { LOCALE } from "@/lib/i18n";
 import type { Me } from "@/lib/types";
+import { useT } from "./I18nProvider";
 
 const noop = () => () => {};
 
@@ -15,6 +17,7 @@ export function UserMenu({ me }: { me: Me }) {
     () => true,
     () => false,
   );
+  const { t, lang } = useT();
   const router = useRouter();
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -27,10 +30,10 @@ export function UserMenu({ me }: { me: Me }) {
     setSyncing(false);
     if (res.ok) {
       const { entries, recommendations } = await res.json();
-      setMessage(`Synced ${entries} shows · ${recommendations} recommendations`);
+      setMessage(t("user.synced", { entries, recommendations }));
       startTransition(() => router.refresh());
     } else {
-      setMessage("Sync failed");
+      setMessage(t("user.syncFailed"));
     }
   }
 
@@ -48,16 +51,18 @@ export function UserMenu({ me }: { me: Me }) {
         className="rounded border border-white/30 px-3 py-1 hover:bg-white/10 disabled:opacity-50"
         title={
           !me.last_synced_at
-            ? "Never synced"
+            ? t("user.neverSynced")
             : hydrated
-              ? `Last synced ${new Date(me.last_synced_at).toLocaleString()}`
-              : "Last synced"
+              ? t("user.lastSynced", {
+                  when: new Date(me.last_synced_at).toLocaleString(LOCALE[lang]),
+                })
+              : t("user.lastSyncedShort")
         }
       >
-        {syncing ? "Syncing…" : "Sync MAL"}
+        {syncing ? t("user.syncing") : t("user.sync")}
       </button>
       <button onClick={logout} className="text-muted hover:text-white">
-        Sign out
+        {t("user.signOut")}
       </button>
       {me.picture ? (
         <Image

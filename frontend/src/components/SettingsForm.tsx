@@ -1,11 +1,20 @@
 "use client";
 
-import { TIER_CLASS, TIER_DESCRIPTION, TIER_LABEL } from "@/lib/prediction";
+import { useRouter } from "next/navigation";
+import { useTransition } from "react";
+import { type Lang, saveLang } from "@/lib/i18n";
+import { TIER_CLASS } from "@/lib/prediction";
 import { useShowPredictedScore, useShowTierLabels } from "@/lib/preferences";
 import type { Tier } from "@/lib/types";
+import { useT } from "./I18nProvider";
+import { LanguageFlag } from "./LanguageFlag";
 import { PredictionBadge } from "./PredictionBadge";
 
 const TIERS: Tier[] = ["must_watch", "recommended", "maybe", "skip", "avoid"];
+const LANGUAGES: { lang: Lang; name: string; flag: "de-dub" | "en-dub" }[] = [
+  { lang: "de", name: "Deutsch", flag: "de-dub" },
+  { lang: "en", name: "English", flag: "en-dub" },
+];
 
 function Toggle({
   label,
@@ -40,27 +49,52 @@ function Toggle({
 }
 
 export function SettingsForm() {
+  const { t, lang } = useT();
+  const router = useRouter();
+  const [switching, startTransition] = useTransition();
   const [labels, setLabels] = useShowTierLabels();
   const [score, setScore] = useShowPredictedScore();
+
+  function chooseLanguage(next: Lang) {
+    saveLang(next);
+    startTransition(() => router.refresh());
+  }
 
   return (
     <div className="mt-8 space-y-8">
       <section>
-        <h2 className="text-lg font-semibold">Predictions</h2>
-        <p className="mt-1 text-sm text-muted">
-          Predicted from your MyAnimeList scores (genres, themes, demographics, studios, source, era
-          and MAL&apos;s own score). Shows you have scored or dropped aren&apos;t labelled.
-        </p>
+        <h2 className="text-lg font-semibold">{t("settings.language")}</h2>
+        <p className="mt-1 text-sm text-muted">{t("settings.languageInfo")}</p>
+        <div role="radiogroup" aria-label={t("settings.language")} className="mt-3 flex gap-2">
+          {LANGUAGES.map((l) => (
+            <button
+              key={l.lang}
+              role="radio"
+              aria-checked={l.lang === lang}
+              disabled={switching}
+              onClick={() => chooseLanguage(l.lang)}
+              className={`flex items-center gap-2 rounded px-4 py-2 font-semibold ${l.lang === lang ? "bg-white text-black" : "bg-surface-raised hover:bg-neutral-700"}`}
+            >
+              <LanguageFlag language={l.flag} />
+              {l.name}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold">{t("settings.predictions")}</h2>
+        <p className="mt-1 text-sm text-muted">{t("settings.predictionsInfo")}</p>
         <div className="mt-2 divide-y divide-white/10">
           <Toggle
-            label="Show labels on posters"
-            description="MUST WATCH, RECOMMENDED, MAYBE, PROBABLY SKIP or AVOID in the corner of each poster."
+            label={t("settings.labels")}
+            description={t("settings.labelsInfo")}
             checked={labels === "on"}
             onChange={(on) => setLabels(on ? "on" : "off")}
           />
           <Toggle
-            label="Show the predicted score"
-            description="Your predicted score (1–10) next to the label."
+            label={t("settings.score")}
+            description={t("settings.scoreInfo")}
             checked={score === "on"}
             onChange={(on) => setScore(on ? "on" : "off")}
           />
@@ -68,25 +102,22 @@ export function SettingsForm() {
       </section>
 
       <section>
-        <h2 className="text-lg font-semibold">What the labels mean</h2>
-        <p className="mt-1 text-sm text-muted">
-          Labels compare a show with what you&apos;ve already watched, so they adapt to how you
-          score.
-        </p>
+        <h2 className="text-lg font-semibold">{t("settings.labelMeaning")}</h2>
+        <p className="mt-1 text-sm text-muted">{t("settings.labelMeaningInfo")}</p>
         <ul className="mt-3 space-y-2 text-sm">
           {TIERS.map((tier) => (
             <li key={tier} className="flex items-center gap-3">
               <span
                 className={`w-32 shrink-0 rounded px-2 py-1 text-center text-xs font-bold uppercase ${TIER_CLASS[tier]}`}
               >
-                {TIER_LABEL[tier]}
+                {t(`tier.${tier}`)}
               </span>
-              <span className="text-neutral-300">{TIER_DESCRIPTION[tier]}</span>
+              <span className="text-neutral-300">{t(`tierInfo.${tier}`)}</span>
             </li>
           ))}
         </ul>
         <div className="mt-4 flex items-center gap-2 text-sm text-muted">
-          Preview:
+          {t("settings.preview")}
           <PredictionBadge prediction={{ score: 8.7, tier: "must_watch", reasons: [] }} force />
         </div>
       </section>

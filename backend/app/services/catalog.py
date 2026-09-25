@@ -48,7 +48,7 @@ def _build(
         card.prediction = PredictionOut(
             score=p.score,
             tier=p.tier,
-            reasons=[ReasonOut(name=n, points=v) for n, v in p.reasons],
+            reasons=[ReasonOut(key=k, name=n, points=v) for k, n, v in p.reasons],
         )
     return card
 

@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import type { ProviderMapping } from "@/lib/types";
 import { SCAN_FINISHED_EVENT, SOURCES_CHANGED_EVENT } from "./EpisodeBrowser";
+import { useT } from "./I18nProvider";
 
 /** Shows which AniWorld series/season feeds the German sources and lets the user correct it. */
 export function AniWorldMapping({ animeId }: { animeId: number }) {
+  const { t } = useT();
   const [mapping, setMapping] = useState<ProviderMapping | null | undefined>(undefined);
   const [slug, setSlug] = useState("");
   const [season, setSeason] = useState(1);
@@ -44,39 +46,35 @@ export function AniWorldMapping({ animeId }: { animeId: number }) {
         episode_offset: offset,
         manual: true,
       });
-      setMessage("Saved. Looking for German sources with this mapping…");
+      setMessage(t("mapping.saved"));
       window.dispatchEvent(new Event(SOURCES_CHANGED_EVENT));
     } else {
-      setMessage(
-        res.status === 422
-          ? "Use the slug from the AniWorld URL, e.g. one-piece."
-          : "Saving failed.",
-      );
+      setMessage(res.status === 422 ? t("mapping.slugHint") : t("mapping.saveFailed"));
     }
   }
 
   async function reset() {
     await fetch(`/api/anime/${animeId}/mappings/aniworld`, { method: "DELETE" });
     apply(null);
-    setMessage("Reset. Detecting the series again…");
+    setMessage(t("mapping.reset"));
     window.dispatchEvent(new Event(SOURCES_CHANGED_EVENT));
   }
 
   if (mapping === undefined) return null;
 
   const status = mapping?.external_id
-    ? `${mapping.manual ? "Set manually" : "Detected"}: ${mapping.external_id}, season ${mapping.season}${mapping.episode_offset ? `, episode offset ${mapping.episode_offset}` : ""}`
+    ? `${mapping.manual ? t("mapping.manual") : t("mapping.detected")}: ${mapping.external_id}, ${t("mapping.season", { season: mapping.season ?? 1 })}${mapping.episode_offset ? `, ${t("mapping.offset", { offset: mapping.episode_offset })}` : ""}`
     : mapping
-      ? "Not found on AniWorld automatically."
-      : "Not detected yet. It is looked up while the episode list loads.";
+      ? t("mapping.notFound", { site: "AniWorld" })
+      : t("mapping.notDetected");
 
   return (
     <section className="mt-6 max-w-2xl rounded-lg bg-surface-raised p-6">
-      <h2 className="text-lg font-semibold">German sources (AniWorld)</h2>
+      <h2 className="text-lg font-semibold">{t("mapping.aniworldTitle")}</h2>
       <p className="mt-1 text-sm text-muted">{status}</p>
       <div className="mt-4 flex flex-wrap items-end gap-3 text-sm">
         <label className="flex flex-col gap-1">
-          Series slug
+          {t("mapping.seriesSlug")}
           <input
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
@@ -85,7 +83,7 @@ export function AniWorldMapping({ animeId }: { animeId: number }) {
           />
         </label>
         <label className="flex flex-col gap-1">
-          Season
+          {t("mapping.seasonLabel")}
           <input
             type="number"
             min={0}
@@ -94,11 +92,8 @@ export function AniWorldMapping({ animeId }: { animeId: number }) {
             className="w-20 rounded bg-neutral-800 px-2 py-1"
           />
         </label>
-        <label
-          className="flex flex-col gap-1"
-          title="Added to the episode number, for shows AniWorld numbers continuously"
-        >
-          Episode offset
+        <label className="flex flex-col gap-1" title={t("mapping.offsetInfo")}>
+          {t("mapping.offsetLabel")}
           <input
             type="number"
             value={offset}
@@ -111,11 +106,11 @@ export function AniWorldMapping({ animeId }: { animeId: number }) {
           disabled={!slug.trim()}
           className="rounded bg-brand px-4 py-1.5 font-semibold hover:bg-brand-dark disabled:opacity-50"
         >
-          Save
+          {t("mapping.save")}
         </button>
         {mapping && (
           <button onClick={reset} className="rounded px-3 py-1.5 text-muted hover:text-white">
-            Reset
+            {t("mapping.resetButton")}
           </button>
         )}
       </div>

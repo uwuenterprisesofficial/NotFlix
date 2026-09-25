@@ -3,9 +3,14 @@ import Link from "next/link";
 import { AnimeCard } from "@/components/AnimeCard";
 import { SearchControls } from "@/components/SearchControls";
 import { api } from "@/lib/api";
+import { type T, tagName } from "@/lib/i18n";
+import { getT } from "@/lib/i18n/server";
 import type { Genre, SearchResponse } from "@/lib/types";
 
-export const metadata: Metadata = { title: "Search · NotFlix" };
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getT();
+  return { title: `${t("nav.search")} · NotFlix` };
+}
 
 const ORDERS = ["score", "popularity", "newest", "for_you"] as const;
 type Order = (typeof ORDERS)[number];
@@ -21,8 +26,10 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
   const order: Order = ORDERS.find((o) => o === one(params.order)) ?? "score";
   const page = Math.max(1, Math.min(200, Number(one(params.page)) || 1));
 
-  const genres = await api<Genre[]>("/genres");
-  const genre = genres.find((g) => g.id === genreId) ?? null;
+  const [genres, { t, lang }] = await Promise.all([api<Genre[]>("/genres"), getT()]);
+  const found = genres.find((g) => g.id === genreId);
+  // In the UI's language; the English name is still what MAL's results are matched by.
+  const genre = found ? { ...found, label: tagName(lang, found.id, found.name) } : null;
 
   let result: SearchResponse | null = null;
   if (q) {
@@ -50,21 +57,19 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
 
   return (
     <div className="px-4 pt-24 pb-16 md:px-12">
-      <h1 className="text-3xl font-black">Search</h1>
+      <h1 className="text-3xl font-black">{t("search.title")}</h1>
       <SearchControls q={q} genreId={genre?.id ?? null} order={order} genres={genres} />
 
       {result === null ? (
-        <p className="mt-10 text-muted">
-          Search MyAnimeList by title, or pick a genre, theme or demographic to browse.
-        </p>
+        <p className="mt-10 text-muted">{t("search.intro")}</p>
       ) : (
         <>
           <p className="mt-6 text-sm text-muted">
-            {heading(q, genre)}
-            {result.source === "local" && " · from shows NotFlix already knows"}
+            {heading(t, q, genre?.label ?? null)}
+            {result.source === "local" && t("search.local")}
           </p>
           {result.items.length === 0 ? (
-            <p className="mt-10 text-muted">Nothing found.</p>
+            <p className="mt-10 text-muted">{t("search.nothing")}</p>
           ) : (
             <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-x-3 gap-y-6 md:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
               {result.items.map((anime) => (
@@ -80,16 +85,16 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
                 href={link(page - 1)}
                 className="rounded bg-surface-raised px-4 py-2 hover:bg-white/10"
               >
-                ‹ Previous
+                {t("search.previous")}
               </Link>
             )}
-            <span className="text-muted">Page {page}</span>
+            <span className="text-muted">{t("search.page", { page })}</span>
             {result.has_next && (
               <Link
                 href={link(page + 1)}
                 className="rounded bg-surface-raised px-4 py-2 hover:bg-white/10"
               >
-                Next ›
+                {t("search.next")}
               </Link>
             )}
           </nav>
@@ -99,8 +104,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
   );
 }
 
-function heading(q: string, genre: Genre | null) {
-  const what = q ? `Results for “${q}”` : `${genre!.name}`;
-  const within = q && genre ? ` in ${genre.name}` : "";
-  return `${what}${within}`;
+function heading(t: T, q: string, genre: string | null) {
+  const what = q ? t("search.resultsFor", { q }) : (genre ?? "");
+  return q && genre ? what + t("search.inGenre", { genre }) : what;
 }

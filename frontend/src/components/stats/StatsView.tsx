@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useT } from "@/components/I18nProvider";
+import { LOCALE, type T } from "@/lib/i18n";
 import type { StatsStatus } from "@/lib/types";
 import { StatsReport } from "./StatsReport";
 
@@ -8,6 +10,7 @@ const POLL_MS = 1500;
 
 /** Loads the statistics, polling while the backend computes them. */
 export function StatsView() {
+  const { t, lang } = useT();
   const [state, setState] = useState<StatsStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -43,24 +46,24 @@ export function StatsView() {
   const retry = () => setAttempt((a) => a + 1);
 
   if (!state) {
-    return <Loading step={error ? "Can't reach the server, retrying" : "Loading"} />;
+    return <Loading text={error ? t("stats.step.offline") : t("stats.step.loading")} />;
   }
   if (!state.stats) {
     if (state.status === "failed") {
       return (
         <div className="rounded-lg bg-surface-raised p-8 text-center">
-          <p className="font-semibold">The statistics couldn&apos;t be computed.</p>
+          <p className="font-semibold">{t("stats.failed")}</p>
           {state.error && <p className="mt-1 text-sm text-muted">{state.error}</p>}
           <button
             onClick={retry}
             className="mt-4 rounded bg-brand px-4 py-2 font-semibold hover:bg-brand-dark"
           >
-            Try again
+            {t("error.retry")}
           </button>
         </div>
       );
     }
-    return <Loading step={state.step} done={state.done} total={state.total} />;
+    return <Loading text={progressText(t, state)} done={state.done} total={state.total} />;
   }
 
   return (
@@ -68,21 +71,25 @@ export function StatsView() {
       <div className="mb-6 flex min-h-8 flex-wrap items-center gap-3 text-sm text-muted">
         {state.status === "loading" ? (
           <span className="flex items-center gap-2" role="status">
-            <Spinner /> Updating in the background: {progressText(state)}
+            <Spinner /> {t("stats.updating", { progress: progressText(t, state) })}
           </span>
         ) : state.status === "failed" ? (
           <span>
-            Updating failed{state.error ? `: ${state.error}` : ""}.{" "}
+            {t("stats.updateFailed")}
+            {state.error ? `: ${state.error}` : ""}.{" "}
             <button onClick={retry} className="underline hover:text-white">
-              Try again
+              {t("error.retry")}
             </button>
           </span>
         ) : (
           state.computed_at && (
             <span>
-              Computed {new Date(state.computed_at).toLocaleString()} ·{" "}
+              {t("stats.computedAt", {
+                when: new Date(state.computed_at).toLocaleString(LOCALE[lang]),
+              })}{" "}
+              ·{" "}
               <button onClick={retry} className="underline hover:text-white">
-                Recalculate
+                {t("stats.recalculate")}
               </button>
             </span>
           )
@@ -95,9 +102,9 @@ export function StatsView() {
   );
 }
 
-function progressText(s: { step: string | null; done: number; total: number }) {
-  const step = s.step ?? "Working";
-  return s.total ? `${step} (${s.done} of ${s.total})` : `${step}…`;
+function progressText(t: T, s: Pick<StatsStatus, "step" | "done" | "total">) {
+  const step = t(`stats.step.${s.step ?? "starting"}`);
+  return s.total ? t("stats.progress", { step, done: s.done, total: s.total }) : `${step}…`;
 }
 
 function Spinner() {
@@ -109,21 +116,14 @@ function Spinner() {
   );
 }
 
-function Loading({
-  step,
-  done = 0,
-  total = 0,
-}: {
-  step: string | null;
-  done?: number;
-  total?: number;
-}) {
+function Loading({ text, done = 0, total = 0 }: { text: string; done?: number; total?: number }) {
+  const { t } = useT();
   return (
     <div role="status" className="rounded-lg bg-surface-raised p-10 text-center">
       <div className="flex items-center justify-center gap-3 text-lg font-semibold">
-        <Spinner /> Preparing your statistics
+        <Spinner /> {t("stats.preparing")}
       </div>
-      <p className="mt-2 text-sm text-muted">{progressText({ step, done, total })}</p>
+      <p className="mt-2 text-sm text-muted">{text.endsWith("…") ? text : `${text}…`}</p>
       {total > 0 && (
         <div className="mx-auto mt-4 h-1.5 max-w-sm overflow-hidden rounded bg-white/10">
           <div
@@ -132,10 +132,7 @@ function Loading({
           />
         </div>
       )}
-      <p className="mt-4 text-xs text-muted">
-        The first time, every show&apos;s genres, studios and more are loaded from MyAnimeList. You
-        can leave this page — it keeps going.
-      </p>
+      <p className="mt-4 text-xs text-muted">{t("stats.firstTime")}</p>
     </div>
   );
 }

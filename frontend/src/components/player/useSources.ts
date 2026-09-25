@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { LANGUAGE_ORDER } from "@/lib/languages";
 import {
   dropResolution,
   getShowStreams,
@@ -12,7 +11,7 @@ import {
   subscribeStreams,
 } from "@/lib/streamCache";
 import type { Language, Resolved, SourceOption, Stream } from "@/lib/types";
-import { useStoredValue } from "./useStoredValue";
+import { useStreamLanguage } from "@/lib/streamLanguage";
 
 type Resolution = { ok: true; resolved: Resolved } | { ok: false; error: string };
 
@@ -85,7 +84,7 @@ export function useSources(
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [search, setSearch] = useState({ round: 0, patient: true });
-  const [preferred, setPreferred] = useStoredValue<Language>("notflix:language", "de-dub");
+  const { order, chosen: chosenLanguage, choose } = useStreamLanguage(animeId);
   const inflight = useRef(new Set<string>());
   const prefetched = useRef(false);
 
@@ -146,10 +145,19 @@ export function useSources(
   const waiting = show ? unsettled(show, episode).filter((name) => !gaveUp.includes(name)) : null;
   const pending = waiting?.length ?? null;
   const all = show?.episodes.find((e) => e.episode === episode)?.options ?? [];
-  const languages = LANGUAGE_ORDER.filter((lang) => all.some((o) => o.language === lang));
-  // While providers are still answering, wait for the preferred language instead of falling back.
+  const languages = order.filter((lang) => all.some((o) => o.language === lang));
+  // The language picked for this show, else the first of the preference order (dub, then sub
+  // in the UI's language, then the other) this episode has. While providers are still
+  // answering, a better language the show has elsewhere is waited for instead of falling back.
+  const showHas = (lang: Language) =>
+    show?.episodes.some((e) => e.options.some((o) => o.language === lang)) ?? false;
   const language =
-    languages.includes(preferred) || pending !== 0 ? preferred : (languages[0] ?? preferred);
+    chosenLanguage && (languages.includes(chosenLanguage) || pending !== 0 || !languages.length)
+      ? chosenLanguage
+      : (order.find((l) => languages.includes(l) || (pending !== 0 && showHas(l))) ??
+        languages[0] ??
+        chosenLanguage ??
+        order[0]);
   const candidates = all.filter((o) => o.language === language);
 
   const resolutionOf = (o: SourceOption): Resolution | undefined => {
@@ -299,7 +307,7 @@ export function useSources(
     language,
     countIn: (lang: Language) => all.filter((o) => o.language === lang).length,
     setLanguage: (lang: Language) => {
-      setPreferred(lang);
+      choose(lang);
       setChosenId(null);
       setPlayingId(null);
       setSearch((s) => ({ round: s.round + 1, patient: true }));

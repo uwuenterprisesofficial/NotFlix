@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { apiOrNull } from "@/lib/api";
+import { getT } from "@/lib/i18n/server";
 import type { Me } from "@/lib/types";
 import { UserMenu } from "./UserMenu";
 
@@ -12,7 +13,7 @@ async function currentUser(): Promise<Me | null> {
 }
 
 export async function Navbar() {
-  const me = await currentUser();
+  const [me, { t }] = await Promise.all([currentUser(), getT()]);
 
   return (
     <header className="fixed inset-x-0 top-0 z-50 bg-gradient-to-b from-black/90 to-transparent">
@@ -22,24 +23,24 @@ export async function Navbar() {
         </Link>
         <div className="hidden gap-5 text-sm text-neutral-200 sm:flex">
           <Link href="/" className="hover:text-white">
-            Home
+            {t("nav.home")}
           </Link>
           {me && (
             <Link href="/#my-list" className="hover:text-white">
-              My List
+              {t("nav.myList")}
             </Link>
           )}
           {me && (
             <Link href="/stats" className="hover:text-white">
-              Statistics
+              {t("nav.stats")}
             </Link>
           )}
         </div>
         <div className="ml-auto flex items-center gap-4">
           <Link
             href="/search"
-            aria-label="Search"
-            title="Search"
+            aria-label={t("nav.search")}
+            title={t("nav.search")}
             className="text-xl hover:text-white"
           >
             <svg
@@ -56,8 +57,8 @@ export async function Navbar() {
           </Link>
           <Link
             href="/settings"
-            aria-label="Settings"
-            title="Settings"
+            aria-label={t("nav.settings")}
+            title={t("nav.settings")}
             className="hover:text-white"
           >
             <svg
@@ -80,7 +81,7 @@ export async function Navbar() {
               href="/api/auth/login"
               className="rounded bg-brand px-4 py-1.5 text-sm font-semibold hover:bg-brand-dark"
             >
-              Sign in with MyAnimeList
+              {t("nav.signIn")}
             </a>
           )}
         </div>

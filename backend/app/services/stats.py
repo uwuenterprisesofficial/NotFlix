@@ -152,41 +152,34 @@ def _tag_stat(key: str, b: _Bucket, total: int, predictor: Predictor | None) -> 
 def _hot_takes(
     rated: list[Rated], stats: dict[str, dict[str, Any]], overview: dict[str, Any]
 ) -> list[dict[str, Any]]:
+    """Notable opinions, as a kind plus the numbers the UI words them with."""
     takes: list[dict[str, Any]] = []
-    scored = [r for r in rated if r.score > 0 and r.show.mean is not None]
 
-    offset = overview["mean_difference"]
-    if offset is not None and abs(offset) >= 0.3:
-        harsher = offset < 0
+    def take(kind: str, value: float | None, anime: Rated | None = None, **params: Any) -> None:
         takes.append(
             {
-                "kind": "harsh" if harsher else "generous",
-                "title": "Tough critic" if harsher else "Easy to please",
-                "text": (
-                    f"You score {abs(offset):.1f} points {'lower' if harsher else 'higher'} than "
-                    f"MAL does on the same shows ({overview['mean_score']:.2f} vs "
-                    f"{overview['mal_mean']:.2f})."
-                ),
-                "value": offset,
+                "kind": kind,
+                "params": params,
+                "value": value,
+                "anime": show_ref(anime.show, anime.score) if anime else None,
             }
+        )
+
+    scored = [r for r in rated if r.score > 0 and r.show.mean is not None]
+    offset = overview["mean_difference"]
+    if offset is not None and abs(offset) >= 0.3:
+        take(
+            "harsh" if offset < 0 else "generous",
+            offset,
+            difference=abs(offset),
+            mine=overview["mean_score"],
+            mal=overview["mal_mean"],
         )
 
     agreement = overview["agreement"]
     if agreement is not None:
-        if agreement < 0.3:
-            title, text = "Contrarian", "Your scores barely follow MAL's"
-        elif agreement > 0.7:
-            title, text = "In tune with MAL", "Your scores closely follow MAL's"
-        else:
-            title, text = "Own opinion", "You mostly agree with MAL, with your own twists"
-        takes.append(
-            {
-                "kind": "agreement",
-                "title": title,
-                "text": f"{text} (correlation {agreement:.2f}).",
-                "value": agreement,
-            }
-        )
+        level = "contrarian" if agreement < 0.3 else "in_tune" if agreement > 0.7 else "own"
+        take("agreement", agreement, level=level, correlation=agreement)
 
     underrated = sorted(
         (r for r in scored if r.score - r.show.mean >= HOT_TAKE_GAP),
@@ -194,15 +187,7 @@ def _hot_takes(
         reverse=True,
     )
     for r in underrated[:4]:
-        takes.append(
-            {
-                "kind": "underrated",
-                "title": "You love it, MAL doesn't",
-                "text": f"You gave it a {r.score} — MAL's average is {r.show.mean:.2f}.",
-                "value": round(r.score - r.show.mean, 2),
-                "anime": show_ref(r.show, r.score),
-            }
-        )
+        take("underrated", round(r.score - r.show.mean, 2), r, score=r.score, mal=r.show.mean)
 
     overrated = sorted(
         (r for r in scored if r.show.mean - r.score >= HOT_TAKE_GAP),
@@ -210,16 +195,11 @@ def _hot_takes(
         reverse=True,
     )
     for r in overrated[:4]:
-        rank = f"#{r.show.rank} on MAL, " if r.show.rank and r.show.rank <= 500 else ""
-        takes.append(
-            {
-                "kind": "overrated",
-                "title": "Overrated, says you",
-                "text": f"{rank}{r.show.mean:.2f} average — you gave it a {r.score}.",
-                "value": round(r.score - r.show.mean, 2),
-                "anime": show_ref(r.show, r.score),
-            }
-        )
+        rank = r.show.rank if r.show.rank and r.show.rank <= 500 else None
+        take(
+            "overrated", round(r.score - r.show.mean, 2), r,
+            score=r.score, mal=r.show.mean, rank=rank,
+        )  # fmt: skip
 
     dropped = sorted(
         (
@@ -231,16 +211,7 @@ def _hot_takes(
         reverse=True,
     )
     for r in dropped[:3]:
-        takes.append(
-            {
-                "kind": "dropped_acclaimed",
-                "title": "Dropped a classic",
-                "text": f"You dropped it after {r.episodes_watched} episode(s), "
-                f"despite its {r.show.mean:.2f} on MAL.",
-                "value": r.show.mean,
-                "anime": show_ref(r.show, r.score),
-            }
-        )
+        take("dropped_acclaimed", r.show.mean, r, episodes=r.episodes_watched, mal=r.show.mean)
 
     gems = sorted(
         (
@@ -251,16 +222,7 @@ def _hot_takes(
         key=lambda r: (-r.score, r.show.members),
     )
     for r in gems[:3]:
-        takes.append(
-            {
-                "kind": "hidden_gem",
-                "title": "Hidden gem",
-                "text": f"You gave it a {r.score}; only {r.show.members:,} MAL users have it "
-                "on their list.",
-                "value": float(r.score),
-                "anime": show_ref(r.show, r.score),
-            }
-        )
+        take("hidden_gem", float(r.score), r, score=r.score, members=r.show.members)
 
     # Genres/themes the user scores differently from MAL, beyond their usual offset.
     base = offset or 0.0
@@ -274,21 +236,9 @@ def _hot_takes(
     ]
     contrarian.sort(key=lambda s: abs(s["delta"] - base), reverse=True)
     for s in contrarian[:4]:
-        diff = s["delta"] - base
-        takes.append(
-            {
-                "kind": "tag_contrarian",
-                "title": f"{s['name']}: {'soft spot' if diff > 0 else 'not impressed'}",
-                "text": (
-                    f"You rate {s['name']} {abs(diff):.1f} points "
-                    f"{'more generously' if diff > 0 else 'more harshly'} than MAL, "
-                    f"compared with your usual ({s['scored']} scored shows)."
-                ),
-                "value": round(diff, 2),
-            }
-        )
-    for take in takes:
-        take.setdefault("anime", None)
+        diff = round(s["delta"] - base, 2)
+        take("tag_contrarian", diff, key=s["key"], name=s["name"], difference=diff,
+             scored=s["scored"])  # fmt: skip
     return takes
 
 
@@ -299,7 +249,12 @@ def _model_stats(predictor: Predictor | None) -> dict[str, Any] | None:
     ranked = sorted(predictor.weights.items(), key=lambda kv: kv[1], reverse=True)
 
     def item(key: str, weight: float) -> dict[str, Any]:
-        return {"name": predictor.names[key], "kind": feature_kind(key), "points": round(weight, 2)}
+        return {
+            "key": key,
+            "name": predictor.names[key],
+            "kind": feature_kind(key),
+            "points": round(weight, 2),
+        }
 
     return {
         "scored": d["n"],

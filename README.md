@@ -54,7 +54,7 @@ npm run dev                                 # UI on :3000
 
 ## Streams
 
-The player lists every source it finds for an episode, grouped by language: German Dub, German Sub, English Sub, English Dub. The language you pick is remembered per browser, and German Dub is the default.
+The player lists every source it finds for an episode, grouped by language: German Dub, German Sub, English Dub, English Sub. The language is picked automatically from the NotFlix language (see **Languages** below): dub, then sub in that language, then dub, then sub in the other. A language you pick by hand (in the player or the episode list) is remembered for that show in this browser.
 
 It resolves all sources of the language at once and plays the first **direct** stream that works (NotFlix's own player, so Skip Intro and Next Episode work). A direct stream that errors or loads nothing within 20 s is skipped, and the next one continues from the same position. When no source has a direct stream (it waits up to 8 s for one), the embedded player is the fallback. Every source and stream, marked *Direct · MP4*, *Direct · HLS* or *Embed*, is in the dropdown on the right under the video; the language dropdown (with flags) is on the left. When you continue with **Next Episode**, the same provider and hoster are preferred. The Next Episode card appears when the detected ending starts, or 1:30 before the end when no ending was detected. Fullscreen (the button in the corner, a double-click or `f`) enlarges the whole player, so Skip Intro and Next Episode stay visible, and it stays on when the next episode starts. On iPhones, where only the video itself can go fullscreen, the overlays aren't shown in fullscreen.
 
@@ -118,6 +118,16 @@ What the worker does:
 The widget on the show page lists the saved fingerprints ("Intro from episode 1 (1:30)") above the per-episode results.
 
 **Stopping an analysis.** Every waiting or running job is listed in the widget ("Analysing episodes 2, 3… (1:05)") with a **✕**; the player's "Detecting intro & outro…" has a **Stop** link. A waiting job is taken out of the queue, a running one has its worker process killed (RQ's stop command, which also ends the ffmpeg it started); either way the job is marked failed ("Stopped"). This also clears a job that only looks like it's running because its worker died. A job running longer than `ANALYSIS_TIMEOUT_MINUTES` (default 10, in `.env`) is stopped by RQ and marked failed ("Stopped after 10 minutes"); one whose worker died without reporting is marked the same way a minute after that limit.
+
+## Languages
+
+NotFlix is in **English** or **German**. Pick it under **Settings** (gear icon); until you do, your browser's language decides. The choice is a cookie, so pages rendered on the server use it too. It sets:
+
+- **The UI**: every label, message and hot take, number and date formats, and the genre/theme names (MAL only has English ones, so the German names are NotFlix's).
+- **The stream language picked first**: in German, German Dub > German Sub > English Dub > English Sub; in English, English Dub > English Sub > German Dub > German Sub. While providers are still answering, a better language the show has on other episodes is waited for instead of falling back.
+- **Synopses**: MAL's are English. In German, the description from the show's AniWorld page is used (through AniScraper, or scraped from `ANIWORLD_URL`), found through the same mapping as its sources. It's looked up the first time the show is opened, stored in the `anime_synopses` table, and MAL's English one is shown when AniWorld doesn't have the show (looked up again after a week).
+
+Translations live in `frontend/src/lib/i18n/messages/`, each message with its English and German text side by side. Adding a key to only one language is a type error.
 
 ## Statistics and predictions
 

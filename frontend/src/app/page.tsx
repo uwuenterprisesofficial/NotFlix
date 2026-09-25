@@ -1,10 +1,12 @@
 import { AnimeRow } from "@/components/AnimeRow";
 import { Hero } from "@/components/Hero";
 import { api } from "@/lib/api";
+import type { T } from "@/lib/i18n";
+import { getT } from "@/lib/i18n/server";
 import type { BrowseResponse } from "@/lib/types";
 
 export default async function Home() {
-  const browse = await api<BrowseResponse>("/browse");
+  const [browse, { t }] = await Promise.all([api<BrowseResponse>("/browse"), getT()]);
 
   return (
     <div className="pb-16">
@@ -14,20 +16,19 @@ export default async function Home() {
           <AnimeRow key={row.id} row={row} />
         ))}
       </div>
-      {browse.rows.length === 0 && <EmptyState browse={browse} />}
+      {browse.rows.length === 0 && <EmptyState browse={browse} t={t} />}
     </div>
   );
 }
 
-function EmptyState({ browse }: { browse: BrowseResponse }) {
-  let title = "Nothing here yet";
-  let body = "Press “Sync MAL” to import your MyAnimeList list and build recommendations.";
+function EmptyState({ browse, t }: { browse: BrowseResponse; t: T }) {
+  let title = t("home.emptyTitle");
+  let body = t("home.emptyBody");
   if (!browse.mal_configured) {
-    title = "Connect MyAnimeList";
-    body =
-      "Create an API client at myanimelist.net/apiconfig, then set MAL_CLIENT_ID and MAL_CLIENT_SECRET in .env and restart the backend.";
+    title = t("home.connectTitle");
+    body = t("home.connectBody");
   } else if (!browse.signed_in) {
-    body = "Sign in with MyAnimeList to see your list and personal recommendations.";
+    body = t("home.signInBody");
   }
 
   return (

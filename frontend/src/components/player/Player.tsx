@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { formatTime } from "@/lib/format";
-import { LANGUAGE_LABELS } from "@/lib/languages";
 import type { Progress, SkipSegment } from "@/lib/types";
+import { useT } from "../I18nProvider";
 import { DirectVideo } from "./DirectVideo";
 import { LanguageMenu } from "./LanguageMenu";
 import { FullscreenButton, useFrameFullscreen, usePlayerFrame } from "./PlayerFrame";
@@ -36,6 +36,7 @@ export function Player({
   via: { provider: string | null; label: string | null };
   server: string | null;
 }) {
+  const { t } = useT();
   const router = useRouter();
   const sources = useSources(animeId, episode, { ...via, server });
   const [autoSkip, setAutoSkip] = useAutoSkip();
@@ -108,7 +109,11 @@ export function Player({
                 segments={skipSegments}
                 autoSkip={autoSkip}
                 autoNext={autoNext === "1"}
-                next={hasNext ? { label: "Next Episode", go: () => router.push(nextHref) } : null}
+                next={
+                  hasNext
+                    ? { label: t("player.nextEpisode"), go: () => router.push(nextHref) }
+                    : null
+                }
                 onNearEnd={autoMarkWatched}
                 onStart={() => {
                   sources.started();
@@ -124,7 +129,7 @@ export function Player({
               <iframe
                 key={stream.url}
                 src={stream.url}
-                title={`Episode ${episode}`}
+                title={t("player.episodeTitle", { episode })}
                 // No sandbox: hosters (VOE, Doodstream, ...) detect it and refuse to play. Browsers
                 // already block top-level redirects from cross-origin frames without a user click.
                 allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
@@ -140,7 +145,7 @@ export function Player({
                 href={nextHref}
                 className="absolute top-4 right-4 rounded bg-white/90 px-4 py-2 font-semibold text-black opacity-0 shadow-lg transition-opacity group-hover:opacity-100 focus:opacity-100"
               >
-                ▶ Next Episode
+                ▶ {t("player.nextEpisode")}
               </Link>
             )}
             {stream?.kind === "embed" && (
@@ -158,7 +163,9 @@ export function Player({
         <div className="mt-4 flex flex-wrap items-start gap-3 text-sm">
           <div className="flex items-center gap-3">
             <LanguageMenu sources={sources} />
-            {sources.loading && <span className="text-xs text-muted">Loading more sources…</span>}
+            {sources.loading && (
+              <span className="text-xs text-muted">{t("player.loadingMore")}</span>
+            )}
           </div>
           <div className="ml-auto">
             <StreamMenu sources={sources} />
@@ -175,7 +182,7 @@ export function Player({
               onChange={(e) => setAutoSkip(e.target.checked)}
               className="accent-brand"
             />
-            Auto-skip intro
+            {t("player.autoSkip")}
           </label>
         )}
         {stream?.kind === "direct" && hasNext && (
@@ -186,7 +193,7 @@ export function Player({
               onChange={(e) => setAutoNext(e.target.checked ? "1" : "0")}
               className="accent-brand"
             />
-            Autoplay next episode
+            {t("player.autoNext")}
           </label>
         )}
         <div className="ml-auto flex gap-2">
@@ -199,28 +206,28 @@ export function Player({
                 !isWatched
                   ? undefined
                   : progress > episode
-                    ? `Mark as unwatched: your progress goes back to episode ${episode - 1}`
-                    : "Mark as unwatched"
+                    ? t("player.unwatchBack", { episode: episode - 1 })
+                    : t("player.unwatchTitle")
               }
               className="group/watched rounded bg-surface-raised px-3 py-1 hover:bg-neutral-700 disabled:opacity-60"
             >
               {saving ? (
-                "Saving…"
+                t("player.saving")
               ) : saveFailed ? (
-                "Couldn’t save, retry"
+                t("player.saveFailed")
               ) : isWatched ? (
                 <>
-                  <span className="group-hover/watched:hidden">✓ Watched</span>
-                  <span className="hidden group-hover/watched:inline">✕ Unwatch</span>
+                  <span className="group-hover/watched:hidden">{t("player.watched")}</span>
+                  <span className="hidden group-hover/watched:inline">{t("player.unwatch")}</span>
                 </>
               ) : (
-                "Mark as watched"
+                t("player.markWatched")
               )}
             </button>
           )}
           {hasNext && (
             <Link href={nextHref} className="rounded bg-white px-3 py-1 font-semibold text-black">
-              Next episode ›
+              {t("player.nextEpisodeShort")}
             </Link>
           )}
         </div>
@@ -237,27 +244,27 @@ export function Player({
 }
 
 function PlayerStatus({ sources }: { sources: ReturnType<typeof useSources> }) {
-  let title = "Loading sources…";
+  const { t } = useT();
+  let title = t("player.loadingSources");
   let detail: string | null = null;
   if (sources.loadError) {
-    title = "Couldn’t load sources";
-    detail = "Is the NotFlix API running?";
+    title = t("player.loadFailed");
+    detail = t("player.apiRunning");
   } else if (!sources.loading && sources.languages.length === 0) {
-    title = "No source for this episode yet";
-    detail =
-      "No provider has this episode. For German sources, check the AniWorld and AnimeToast pages under “More options” on the show’s page.";
+    title = t("player.noSource");
+    detail = t("player.noSourceInfo");
   } else if (sources.searching) {
-    title = "Looking for a direct stream…";
+    title = t("player.lookingDirect");
     const checked = sources.candidates.filter((o) => sources.resolutionOf(o)).length;
-    detail = `${checked} of ${sources.candidates.length} sources checked`;
+    detail = t("player.checked", { checked, total: sources.candidates.length });
   } else if (sources.resolving) {
-    title = `Loading ${sources.active?.label}…`;
+    title = t("player.loadingSource", { label: sources.active?.label ?? "" });
   } else if (sources.error) {
-    title = `${sources.active?.label ?? "Source"} failed`;
-    detail = `${sources.error}. Pick another source or language below.`;
+    title = t("player.sourceFailed", { label: sources.active?.label ?? t("player.source") });
+    detail = t("player.pickAnother", { error: sources.error });
   } else if (!sources.loading && !sources.active) {
-    title = `No working ${LANGUAGE_LABELS[sources.language]} source`;
-    detail = "Try another language below.";
+    title = t("player.noWorking", { language: t(`lang.${sources.language}`) });
+    detail = t("player.tryLanguage");
   }
   return (
     <div className="grid h-full place-items-center p-6 text-center text-muted">
@@ -280,18 +287,19 @@ function SegmentInfo({
   detecting: boolean;
   onStopDetecting: () => void;
 }) {
+  const { t } = useT();
   if (segments.length === 0) {
     return (
       <p className="mt-4 text-sm text-muted">
         {detecting ? (
           <>
-            Detecting intro &amp; outro in the background…{" "}
+            {t("player.detecting")}{" "}
             <button onClick={onStopDetecting} className="underline hover:text-white">
-              Stop
+              {t("player.stop")}
             </button>
           </>
         ) : (
-          "Intro/outro not detected yet. It’s detected automatically while a direct stream plays, or under “More options” on the show’s page."
+          t("player.notDetected")
         )}
       </p>
     );
@@ -301,16 +309,12 @@ function SegmentInfo({
       <div className="flex flex-wrap gap-3">
         {segments.map((s) => (
           <span key={s.kind} className="rounded bg-surface-raised px-3 py-1">
-            {s.kind === "opening" ? "Intro" : "Outro"} {formatTime(s.start_s)}–{formatTime(s.end_s)}
+            {s.kind === "opening" ? t("player.intro") : t("player.outro")} {formatTime(s.start_s)}–
+            {formatTime(s.end_s)}
           </span>
         ))}
       </div>
-      {embedded && (
-        <p className="mt-2">
-          Embedded players can’t be read or controlled from NotFlix, so “Skip Intro” and starting
-          the next episode automatically only work with direct sources.
-        </p>
-      )}
+      {embedded && <p className="mt-2">{t("player.embedInfo")}</p>}
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import { type Lang, type T, mediaTypeName } from "./i18n";
+
 export function formatTime(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   const h = Math.floor(s / 3600);
@@ -17,4 +19,26 @@ export function nextEpisode(anime: {
 }): number {
   const next = (anime.progress?.episodes_watched ?? 0) + 1;
   return anime.num_episodes ? Math.min(next, anime.num_episodes) : next;
+}
+
+const LIKED = "Because you liked ";
+
+/** A recommendation's reason (the backend stores it in English) in the UI's language. */
+export function reasonText(t: T, reason: string): string {
+  return reason.startsWith(LIKED)
+    ? t("reason.becauseYouLiked", { title: reason.slice(LIKED.length) })
+    : reason;
+}
+
+/** MAL's "spring 2009" in the UI's language. */
+export function seasonText(t: T, startSeason: string): string {
+  const [season, year] = startSeason.split(" ");
+  const key = `season.${season}` as const;
+  return ["winter", "spring", "summer", "fall"].includes(season)
+    ? t(key as "season.spring", { year })
+    : startSeason;
+}
+
+export function mediaType(lang: Lang, type: string): string {
+  return mediaTypeName(lang, type);
 }

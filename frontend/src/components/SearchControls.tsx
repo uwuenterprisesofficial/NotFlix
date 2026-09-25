@@ -2,20 +2,22 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { formatNumber, type MessageKey, tagName } from "@/lib/i18n";
 import type { Genre, TagCategory } from "@/lib/types";
+import { useT } from "./I18nProvider";
 
-const GROUPS: { category: TagCategory; label: string }[] = [
-  { category: "genre", label: "Genres" },
-  { category: "theme", label: "Themes" },
-  { category: "demographic", label: "Demographics" },
-  { category: "explicit", label: "Explicit genres" },
+const GROUPS: { category: TagCategory; label: MessageKey }[] = [
+  { category: "genre", label: "search.groupGenre" },
+  { category: "theme", label: "search.groupTheme" },
+  { category: "demographic", label: "search.groupDemographic" },
+  { category: "explicit", label: "search.groupExplicit" },
 ];
 
 const ORDER_LABEL = {
-  score: "Top rated",
-  popularity: "Most popular",
-  newest: "Newest",
-  for_you: "Best for you",
+  score: "search.orderScore",
+  popularity: "search.orderPopularity",
+  newest: "search.orderNewest",
+  for_you: "search.orderForYou",
 } as const;
 
 export function SearchControls({
@@ -29,6 +31,7 @@ export function SearchControls({
   order: keyof typeof ORDER_LABEL;
   genres: Genre[];
 }) {
+  const { t, lang } = useT();
   const router = useRouter();
   const [text, setText] = useState(q);
 
@@ -57,25 +60,28 @@ export function SearchControls({
         name="q"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="Search anime on MyAnimeList…"
-        aria-label="Title"
+        placeholder={t("search.placeholder")}
+        aria-label={t("search.titleLabel")}
         className="min-w-0 flex-1 basis-64 rounded border border-white/20 bg-surface-raised px-3 py-2 outline-none focus:border-white/60"
       />
       <select
-        aria-label="Genre"
+        aria-label={t("search.genre")}
         value={genreId ?? ""}
         onChange={(e) => go({ genre: e.target.value ? Number(e.target.value) : null })}
         className="rounded border border-white/20 bg-surface-raised px-3 py-2"
       >
-        <option value="">Any genre</option>
+        <option value="">{t("search.anyGenre")}</option>
         {GROUPS.map(({ category, label }) => {
-          const items = genres.filter((g) => g.category === category);
+          const items = genres
+            .filter((g) => g.category === category)
+            .map((g) => ({ ...g, label: tagName(lang, g.id, g.name) }))
+            .sort((a, b) => a.label.localeCompare(b.label, lang));
           return items.length ? (
-            <optgroup key={category} label={label}>
+            <optgroup key={category} label={t(label)}>
               {items.map((g) => (
                 <option key={g.id} value={g.id}>
-                  {g.name}
-                  {g.count ? ` (${g.count.toLocaleString("en")})` : ""}
+                  {g.label}
+                  {g.count ? ` (${formatNumber(lang, g.count)})` : ""}
                 </option>
               ))}
             </optgroup>
@@ -83,11 +89,11 @@ export function SearchControls({
         })}
       </select>
       <select
-        aria-label="Order"
+        aria-label={t("search.order")}
         value={order}
         onChange={(e) => go({ order: e.target.value })}
         className="rounded border border-white/20 bg-surface-raised px-3 py-2"
-        title={q ? "MAL's title search has its own order; this sorts the page" : undefined}
+        title={q ? t("search.orderInfo") : undefined}
       >
         {Object.entries(ORDER_LABEL).map(([value, label]) => (
           <option
@@ -95,12 +101,12 @@ export function SearchControls({
             value={value}
             disabled={!!q && value !== "score" && value !== "for_you"}
           >
-            {q && value === "score" ? "Best match" : label}
+            {q && value === "score" ? t("search.bestMatch") : t(label)}
           </option>
         ))}
       </select>
       <button className="rounded bg-brand px-5 py-2 font-semibold hover:bg-brand-dark">
-        Search
+        {t("search.submit")}
       </button>
     </form>
   );

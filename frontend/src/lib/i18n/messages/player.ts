@@ -1,0 +1,85 @@
+import type { Messages } from "../core";
+
+export const player = {
+  "player.nextEpisode": { en: "Next Episode", de: "Nächste Folge" },
+  "player.nextEpisodeShort": { en: "Next episode ›", de: "Nächste Folge ›" },
+  "player.episodeTitle": { en: "Episode {episode}", de: "Folge {episode}" },
+  "player.loadingMore": { en: "Loading more sources…", de: "Lade weitere Quellen…" },
+  "player.autoSkip": { en: "Auto-skip intro", de: "Intro automatisch überspringen" },
+  "player.autoNext": { en: "Autoplay next episode", de: "Nächste Folge automatisch abspielen" },
+  "player.unwatchBack": {
+    en: "Mark as unwatched: your progress goes back to episode {episode}",
+    de: "Als ungesehen markieren: dein Fortschritt geht zurück auf Folge {episode}",
+  },
+  "player.unwatchTitle": { en: "Mark as unwatched", de: "Als ungesehen markieren" },
+  "player.saving": { en: "Saving…", de: "Speichere…" },
+  "player.saveFailed": { en: "Couldn’t save, retry", de: "Speichern fehlgeschlagen, nochmal" },
+  "player.watched": { en: "✓ Watched", de: "✓ Gesehen" },
+  "player.unwatch": { en: "✕ Unwatch", de: "✕ Ungesehen" },
+  "player.markWatched": { en: "Mark as watched", de: "Als gesehen markieren" },
+  "player.loadingSources": { en: "Loading sources…", de: "Lade Quellen…" },
+  "player.loadFailed": { en: "Couldn’t load sources", de: "Quellen konnten nicht geladen werden" },
+  "player.apiRunning": { en: "Is the NotFlix API running?", de: "Läuft die NotFlix-API?" },
+  "player.noSource": {
+    en: "No source for this episode yet",
+    de: "Noch keine Quelle für diese Folge",
+  },
+  "player.noSourceInfo": {
+    en: "No provider has this episode. For German sources, check the AniWorld and AnimeToast pages under “More options” on the show’s page.",
+    de: "Kein Anbieter hat diese Folge. Für deutsche Quellen prüfe die AniWorld- und AnimeToast-Seiten unter „Weitere Optionen“ auf der Seite der Serie.",
+  },
+  "player.lookingDirect": {
+    en: "Looking for a direct stream…",
+    de: "Suche einen direkten Stream…",
+  },
+  "player.checked": {
+    en: "{checked} of {total} sources checked",
+    de: "{checked} von {total} Quellen geprüft",
+  },
+  "player.loadingSource": { en: "Loading {label}…", de: "Lade {label}…" },
+  "player.source": { en: "Source", de: "Quelle" },
+  "player.sourceFailed": { en: "{label} failed", de: "{label} fehlgeschlagen" },
+  "player.pickAnother": {
+    en: "{error}. Pick another source or language below.",
+    de: "{error}. Wähle unten eine andere Quelle oder Sprache.",
+  },
+  "player.noWorking": {
+    en: "No working {language} source",
+    de: "Keine funktionierende Quelle: {language}",
+  },
+  "player.tryLanguage": {
+    en: "Try another language below.",
+    de: "Versuche unten eine andere Sprache.",
+  },
+  "player.detecting": {
+    en: "Detecting intro & outro in the background…",
+    de: "Intro & Outro werden im Hintergrund erkannt…",
+  },
+  "player.stop": { en: "Stop", de: "Stopp" },
+  "player.notDetected": {
+    en: "Intro/outro not detected yet. It’s detected automatically while a direct stream plays, or under “More options” on the show’s page.",
+    de: "Intro/Outro noch nicht erkannt. Das passiert automatisch, während ein direkter Stream läuft, oder unter „Weitere Optionen“ auf der Seite der Serie.",
+  },
+  "player.intro": { en: "Intro", de: "Intro" },
+  "player.outro": { en: "Outro", de: "Outro" },
+  "player.embedInfo": {
+    en: "Embedded players can’t be read or controlled from NotFlix, so “Skip Intro” and starting the next episode automatically only work with direct sources.",
+    de: "Eingebettete Player kann NotFlix weder auslesen noch steuern, deshalb funktionieren „Intro überspringen“ und das automatische Starten der nächsten Folge nur mit direkten Quellen.",
+  },
+  "player.skipIntro": { en: "Skip Intro", de: "Intro überspringen" },
+  "player.skipCredits": { en: "Skip Credits", de: "Abspann überspringen" },
+  "player.inSeconds": { en: "in {s}s", de: "in {s} s" },
+  "player.watchCredits": { en: "Watch credits", de: "Abspann ansehen" },
+  "player.fullscreen": { en: "Fullscreen", de: "Vollbild" },
+  "player.exitFullscreen": { en: "Exit fullscreen", de: "Vollbild beenden" },
+  "player.sources": {
+    en: (v: { count: number }) => `${v.count} ${v.count === 1 ? "source" : "sources"}`,
+    de: (v: { count: number }) => `${v.count} ${v.count === 1 ? "Quelle" : "Quellen"}`,
+  },
+  "player.yourSources": { en: "Your sources", de: "Deine Quellen" },
+  "player.streams": { en: "Streams", de: "Streams" },
+  "player.embed": { en: "Embed", de: "Eingebettet" },
+  "player.direct": { en: "Direct", de: "Direkt" },
+  "player.loadingStreams": { en: "Loading streams…", de: "Lade Streams…" },
+  "player.streamBroken": { en: "This stream didn’t play", de: "Dieser Stream lief nicht" },
+} satisfies Messages;

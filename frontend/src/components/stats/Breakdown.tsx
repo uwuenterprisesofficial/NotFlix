@@ -1,48 +1,41 @@
 "use client";
 
 import { useState } from "react";
+import { useT } from "@/components/I18nProvider";
+import { featureName, formatNumber, type MessageKey } from "@/lib/i18n";
 import type { TagStat } from "@/lib/types";
 import { YOU } from "./colors";
-import { signed } from "./DivergingBars";
 
-const KINDS: { kind: string; label: string }[] = [
-  { kind: "genre", label: "Genres" },
-  { kind: "theme", label: "Themes" },
-  { kind: "demographic", label: "Demographics" },
-  { kind: "studio", label: "Studios" },
-  { kind: "source", label: "Source" },
-  { kind: "type", label: "Type" },
-  { kind: "era", label: "Decade" },
-  { kind: "explicit", label: "Explicit" },
-];
+const KINDS = ["genre", "theme", "demographic", "studio", "source", "type", "era", "explicit"];
 
 type SortKey = "count" | "mean_score" | "mal_mean" | "delta" | "affinity" | "name";
-const COLUMNS: { key: SortKey; label: string; title: string }[] = [
-  { key: "count", label: "Shows", title: "Shows on your list" },
-  { key: "mean_score", label: "You", title: "Your average score" },
-  { key: "mal_mean", label: "MAL", title: "MAL's average for the same shows" },
-  { key: "delta", label: "vs MAL", title: "Your score minus MAL's, on average" },
-  {
-    key: "affinity",
-    label: "Affinity",
-    title: "Points above/below your own average (few shows count less)",
-  },
+const COLUMNS: { key: SortKey; label: MessageKey; title: MessageKey }[] = [
+  { key: "count", label: "col.count", title: "col.countInfo" },
+  { key: "mean_score", label: "col.mean", title: "col.meanInfo" },
+  { key: "mal_mean", label: "col.mal", title: "col.malInfo" },
+  { key: "delta", label: "col.delta", title: "col.deltaInfo" },
+  { key: "affinity", label: "col.affinity", title: "col.affinityInfo" },
 ];
-
-const num = (v: number | null, digits = 2) => (v === null ? "–" : v.toFixed(digits));
 
 /** Every genre, theme, studio, ... on the list, in sortable tabs. */
 export function Breakdown({ breakdown }: { breakdown: Record<string, TagStat[]> }) {
-  const kinds = KINDS.filter((k) => breakdown[k.kind]?.length);
-  const [kind, setKind] = useState(kinds[0]?.kind ?? "genre");
+  const { t, lang } = useT();
+  const num = (v: number | null, digits = 2) => (v === null ? "–" : formatNumber(lang, v, digits));
+  const signed = (v: number) => `${v >= 0 ? "+" : "−"}${num(Math.abs(v))}`;
+  const kinds = KINDS.filter((k) => breakdown[k]?.length);
+  const [kind, setKind] = useState(kinds[0] ?? "genre");
+  const named = (breakdown[kind] ?? []).map((r) => ({
+    ...r,
+    name: featureName(lang, r.key, r.name),
+  }));
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "count", desc: true });
-  const rows = [...(breakdown[kind] ?? [])];
+  const rows = [...named];
   if (!(kind === "era" && sort.key === "count")) {
     rows.sort((a, b) => {
       const av = a[sort.key];
       const bv = b[sort.key];
       if (typeof av === "string" || typeof bv === "string")
-        return String(av).localeCompare(String(bv)) * (sort.desc ? -1 : 1);
+        return String(av).localeCompare(String(bv), lang) * (sort.desc ? -1 : 1);
       return ((av ?? -Infinity) - (bv ?? -Infinity)) * (sort.desc ? -1 : 1);
     });
   }
@@ -72,13 +65,13 @@ export function Breakdown({ breakdown }: { breakdown: Record<string, TagStat[]> 
       <div role="tablist" className="flex flex-wrap gap-1">
         {kinds.map((k) => (
           <button
-            key={k.kind}
+            key={k}
             role="tab"
-            aria-selected={k.kind === kind}
-            onClick={() => setKind(k.kind)}
-            className={`rounded-full px-3 py-1 text-sm ${k.kind === kind ? "bg-white text-black" : "bg-white/5 hover:bg-white/10"}`}
+            aria-selected={k === kind}
+            onClick={() => setKind(k)}
+            className={`rounded-full px-3 py-1 text-sm ${k === kind ? "bg-white text-black" : "bg-white/5 hover:bg-white/10"}`}
           >
-            {k.label}
+            {t(`kind.${k}` as MessageKey)}
           </button>
         ))}
       </div>
@@ -86,10 +79,10 @@ export function Breakdown({ breakdown }: { breakdown: Record<string, TagStat[]> 
         <table className="w-full min-w-[36rem] text-sm tabular-nums">
           <thead className="text-xs text-muted">
             <tr className="border-b border-white/10">
-              {header("name", "Name", "Name", "text-left")}
-              {COLUMNS.map((c) => header(c.key, c.label, c.title))}
-              <th className="px-2 py-2 text-right font-normal" title="Dropped shows">
-                Dropped
+              {header("name", t("col.name"), t("col.name"), "text-left")}
+              {COLUMNS.map((c) => header(c.key, t(c.label), t(c.title)))}
+              <th className="px-2 py-2 text-right font-normal" title={t("col.droppedInfo")}>
+                {t("col.dropped")}
               </th>
             </tr>
           </thead>

@@ -1,10 +1,15 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
-import { displayTitle } from "@/lib/format";
+import { displayTitle, reasonText } from "@/lib/format";
+import { formatNumber, genreName } from "@/lib/i18n";
 import type { AnimeCard as AnimeCardType } from "@/lib/types";
+import { useT } from "./I18nProvider";
 import { PredictionBadge } from "./PredictionBadge";
 
 export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; fluid?: boolean }) {
+  const { t, lang } = useT();
   const watched = anime.progress?.episodes_watched ?? 0;
   const showProgress = anime.progress?.status === "watching" && anime.num_episodes;
   const title = displayTitle(anime);
@@ -13,7 +18,7 @@ export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; flui
     <Link
       href={`/anime/${anime.id}`}
       className={`group/card relative block shrink-0 transition-transform duration-200 hover:z-10 hover:scale-110 ${fluid ? "w-full" : "w-36 md:w-44"}`}
-      title={anime.reason ?? title}
+      title={anime.reason ? reasonText(t, anime.reason) : title}
     >
       <div className="relative aspect-[2/3] overflow-hidden rounded-md bg-surface-raised">
         {anime.picture_url ? (
@@ -33,7 +38,11 @@ export function AnimeCard({ anime, fluid = false }: { anime: AnimeCardType; flui
         <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/90 via-black/20 to-transparent p-2 opacity-0 transition-opacity group-hover/card:opacity-100">
           <p className="line-clamp-2 text-sm font-semibold">{title}</p>
           <p className="text-xs text-muted">
-            {anime.mean ? `★ ${anime.mean}` : ""} {anime.genres.slice(0, 2).join(" · ")}
+            {anime.mean ? `★ ${formatNumber(lang, anime.mean)}` : ""}{" "}
+            {anime.genres
+              .slice(0, 2)
+              .map((g) => genreName(lang, g))
+              .join(" · ")}
           </p>
         </div>
       </div>

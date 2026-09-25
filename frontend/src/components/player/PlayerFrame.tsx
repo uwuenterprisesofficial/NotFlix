@@ -2,6 +2,7 @@
 
 import { useParams } from "next/navigation";
 import { createContext, type ReactNode, use, useState, useSyncExternalStore } from "react";
+import { useT } from "../I18nProvider";
 
 const FrameContext = createContext<HTMLDivElement | null>(null);
 
@@ -68,8 +69,9 @@ export function FullscreenButton({
   fullscreen: ReturnType<typeof useFrameFullscreen>;
   className: string;
 }) {
+  const { t } = useT();
   if (!fullscreen.supported) return null;
-  const label = fullscreen.active ? "Exit fullscreen" : "Fullscreen";
+  const label = fullscreen.active ? t("player.exitFullscreen") : t("player.fullscreen");
   return (
     <button
       onClick={fullscreen.toggle}

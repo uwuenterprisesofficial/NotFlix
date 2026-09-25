@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { LanguageFlag } from "@/components/LanguageFlag";
-import { LANGUAGE_LABELS } from "@/lib/languages";
 import { formatTime } from "@/lib/format";
+import { pickLanguage, useStreamLanguage } from "@/lib/streamLanguage";
 import type {
   AnalysisJob,
   AnalysisOverview,
@@ -12,7 +12,7 @@ import type {
   SkipSegment,
 } from "@/lib/types";
 import { SCAN_FINISHED_EVENT } from "./EpisodeBrowser";
-import { useStoredValue } from "./player/useStoredValue";
+import { useT } from "./I18nProvider";
 
 const POLL_MS = 3000;
 
@@ -35,8 +35,9 @@ async function fetchAvailability(animeId: number): Promise<Availability | null> 
 }
 
 export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn: boolean }) {
-  // The language picked for the episode list; only its direct streams are analysed.
-  const [language] = useStoredValue<Language>("notflix:language", "de-dub");
+  const { t } = useT();
+  // The episode list's language (see streamLanguage); only its direct streams are analysed.
+  const { order, chosen } = useStreamLanguage(animeId);
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [custom, setCustom] = useState<{ language: Language; from: number; to: number } | null>(
     null,
@@ -92,6 +93,11 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
     return () => clearInterval(timer);
   }, [running, job?.id]);
 
+  const language = pickLanguage(
+    order,
+    (availability?.episodes ?? []).flatMap((e) => e.languages),
+    chosen,
+  );
   const available = (availability?.episodes ?? [])
     .filter((e) => e.languages.includes(language))
     .map((e) => e.episode)
@@ -101,7 +107,7 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
   const [from, to] =
     custom?.language === language ? [custom.from, custom.to] : (fallback ?? [1, 2]);
   const episodes = available.filter((ep) => ep >= from && ep <= to);
-  const label = LANGUAGE_LABELS[language];
+  const label = t(`lang.${language}`);
   const hasReferences = (overview?.references.length ?? 0) > 0;
   // One episode is enough once there's something to match it against: a saved intro/outro
   // fingerprint, or (to compare) an episode analysed before.
@@ -119,7 +125,7 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       const detail = typeof body?.detail === "string" ? body.detail : null;
-      setMessage(detail ?? `Could not start analysis (${res.status})`);
+      setMessage(detail ?? t("analysis.startFailed", { status: res.status }));
       return;
     }
     const body: { job: AnalysisJob | null } = await res.json();
@@ -142,14 +148,13 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
 
   let hint: string;
   if (!availability || (availability.scanning && !fallback)) {
-    hint = "Checking which episodes are available…";
+    hint = t("analysis.checking");
   } else if (!fallback) {
-    hint = `Needs at least two episodes in ${label}; ${available.length === 1 ? "only one was" : "none were"} found. Pick another language in the episode list.`;
+    hint = t("analysis.needsTwo", { label, found: available.length });
   } else if (episodes.length < minEpisodes) {
-    hint = `Pick a range with at least two ${label} episodes.`;
+    hint = t("analysis.pickRange", { label });
   } else {
-    const one = episodes.length === 1;
-    hint = `Analyses episode${one ? "" : "s"} ${episodes.join(", ")} using ${one ? "its" : "their"} direct ${label} stream${one ? "" : "s"}${compare ? ", comparing episodes" : ""}, and replaces ${one ? "its" : "their"} earlier times (not ones entered by hand).`;
+    hint = t("analysis.hint", { episodes, label, compare });
   }
 
   const setRange = (next: { from?: number; to?: number }) =>
@@ -157,19 +162,15 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
 
   return (
     <section className="mt-6 max-w-2xl rounded-lg bg-surface-raised p-6">
-      <h2 className="text-lg font-semibold">Intro &amp; outro detection</h2>
-      <p className="mt-1 text-sm text-muted">
-        The first time, two episodes are compared to find the opening and ending they share, and
-        both are saved as fingerprints. Later episodes are just searched for those. The timestamps
-        drive auto-skip. Only local files and direct streams can be analysed, not embedded players.
-      </p>
+      <h2 className="text-lg font-semibold">{t("analysis.title")}</h2>
+      <p className="mt-1 text-sm text-muted">{t("analysis.info")}</p>
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
         <span className="flex items-center gap-2 rounded bg-neutral-800 px-2 py-1">
           <LanguageFlag language={language} />
           {label}
         </span>
         <label className="flex items-center gap-2">
-          Episodes
+          {t("analysis.episodes")}
           <input
             type="number"
             min={available[0] ?? 1}
@@ -181,7 +182,7 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
           />
         </label>
         <label className="flex items-center gap-2">
-          to
+          {t("analysis.to")}
           <input
             type="number"
             min={from + (minEpisodes - 1)}
@@ -197,7 +198,7 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
           disabled={running || episodes.length < minEpisodes}
           className="rounded bg-brand px-4 py-1.5 font-semibold hover:bg-brand-dark disabled:opacity-50"
         >
-          {running ? "Analysing…" : "Analyse"}
+          {running ? t("analysis.analysing") : t("analysis.analyse")}
         </button>
       </div>
       {hasReferences && (
@@ -208,18 +209,17 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
             onChange={(e) => setCompare(e.target.checked)}
             className="accent-brand"
           />
-          Compare episodes instead of searching for the saved fingerprints
+          {t("analysis.compare")}
         </label>
       )}
       <p className="mt-3 text-sm text-muted">{hint}</p>
       {message && <p className="mt-3 text-sm text-muted">{message}</p>}
       {job && (
         <p className="mt-3 text-sm">
-          {job.redownload ? "Retry of" : "Job for"} episode{job.episodes.length > 1 ? "s" : ""}{" "}
-          {job.episodes.join(", ")}
-          {job.language && ` (${LANGUAGE_LABELS[job.language]})`}:{" "}
+          {t("analysis.job", { retry: job.redownload, episodes: job.episodes })}
+          {job.language && ` (${t(`lang.${job.language}`)})`}:{" "}
           <span className={job.status === "failed" ? "text-red-400" : "text-green-400"}>
-            {job.status}
+            {t(`jobStatus.${job.status}`)}
           </span>
           {job.error && <span className="block text-red-400">{job.error}</span>}
         </p>
@@ -237,9 +237,10 @@ export function AnalyzePanel({ animeId, signedIn }: { animeId: number; signedIn:
 }
 
 function Range({ label, segment }: { label: string; segment: SkipSegment | undefined }) {
-  if (!segment) return <span className="text-muted">{label} not found</span>;
+  const { t } = useT();
+  if (!segment) return <span className="text-muted">{t("analysis.notFound", { label })}</span>;
   return (
-    <span title={segment.source === "manual" ? "Entered manually" : undefined}>
+    <span title={segment.source === "manual" ? t("analysis.manual") : undefined}>
       {label} {formatTime(segment.start_s)} – {formatTime(segment.end_s)}
     </span>
   );
@@ -261,28 +262,33 @@ function AnalysisResults({
   onForget: (referenceId: number) => void;
   onStop: (jobId: string) => void;
 }) {
+  const { t } = useT();
   const pending = [...new Set(overview.running.flatMap((j) => j.episodes))].sort((a, b) => a - b);
   if (!overview.episodes.length && !pending.length && !overview.references.length) return null;
   return (
     <div className="mt-5 border-t border-white/10 pt-4 text-sm">
-      <h3 className="font-semibold">Results</h3>
+      <h3 className="font-semibold">{t("analysis.results")}</h3>
       {overview.references.length > 0 && (
         <div className="mt-1 flex flex-wrap items-center gap-2 text-muted">
-          Saved fingerprints, searched for in new episodes:
+          {t("analysis.savedFingerprints")}
           {overview.references.map((r) => (
             <span
               key={r.id}
               className="flex items-center gap-1 rounded bg-neutral-800 py-0.5 pr-1 pl-2 text-white/90"
             >
-              {r.kind === "opening" ? "Intro" : "Outro"} from episode {r.source_episode} (
-              {formatTime(r.duration_s)})
+              {t("analysis.fromEpisode", {
+                kind: r.kind === "opening" ? t("player.intro") : t("player.outro"),
+                episode: r.source_episode,
+                duration: formatTime(r.duration_s),
+              })}
               <button
                 onClick={() => {
-                  if (confirm("Remove this fingerprint? Later analyses compare episodes again."))
-                    onForget(r.id);
+                  if (confirm(t("analysis.confirmRemove"))) onForget(r.id);
                 }}
-                aria-label={`Remove the ${r.kind === "opening" ? "intro" : "outro"} fingerprint`}
-                title="Remove (e.g. if it's wrong)"
+                aria-label={t("analysis.removeLabel", {
+                  kind: r.kind === "opening" ? t("player.intro") : t("player.outro"),
+                })}
+                title={t("analysis.removeTitle")}
                 className="rounded px-1 text-muted hover:bg-white/10 hover:text-white"
               >
                 ✕
@@ -294,14 +300,13 @@ function AnalysisResults({
       {overview.running.map((j) => (
         <p key={j.id} className="mt-1 flex flex-wrap items-center gap-2 text-muted">
           <span>
-            {j.status === "running" ? "Analysing" : "Waiting to analyse"} episode
-            {j.episodes.length > 1 ? "s" : ""} {j.episodes.join(", ")}…
+            {t("analysis.runningJob", { running: j.status === "running", episodes: j.episodes })}
             {j.status === "running" && j.started_at && ` (${elapsed(j.started_at)})`}
           </span>
           <button
             onClick={() => onStop(j.id)}
-            aria-label={`Stop analysing episode${j.episodes.length > 1 ? "s" : ""} ${j.episodes.join(", ")}`}
-            title="Stop (it's marked as failed)"
+            aria-label={t("analysis.stopLabel", { episodes: j.episodes })}
+            title={t("analysis.stopTitle")}
             className="rounded px-1.5 text-white/80 hover:bg-white/10 hover:text-white"
           >
             ✕
@@ -315,25 +320,27 @@ function AnalysisResults({
           const busy = pending.includes(e.episode);
           return (
             <li key={e.episode} className="group flex flex-wrap items-center gap-x-3">
-              <span className="w-24 shrink-0 font-semibold">Episode {e.episode}:</span>
+              <span className="w-24 shrink-0 font-semibold">
+                {t("analysis.episodeLabel", { episode: e.episode })}
+              </span>
               {intro || outro ? (
                 <>
-                  <Range label="Intro" segment={intro} />
+                  <Range label={t("player.intro")} segment={intro} />
                   <span aria-hidden className="text-muted">
                     ·
                   </span>
-                  <Range label="Outro" segment={outro} />
+                  <Range label={t("player.outro")} segment={outro} />
                 </>
               ) : (
-                <span className="text-muted">no intro or outro found</span>
+                <span className="text-muted">{t("analysis.nothingFound")}</span>
               )}
               <button
                 onClick={() => onRetry(e.episode)}
                 disabled={busy}
-                title="Download the episode again and recalculate its times"
+                title={t("analysis.retryTitle")}
                 className="ml-auto rounded px-2 py-0.5 text-xs text-muted hover:bg-white/10 hover:text-white disabled:opacity-50"
               >
-                {busy ? "Analysing…" : "↻ Retry"}
+                {busy ? t("analysis.analysing") : t("analysis.retry")}
               </button>
             </li>
           );

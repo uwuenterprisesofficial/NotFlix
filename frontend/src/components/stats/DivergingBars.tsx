@@ -1,14 +1,20 @@
+"use client";
+
+import { useT } from "@/components/I18nProvider";
+import { formatNumber, type Lang } from "@/lib/i18n";
 import { ABOVE, AXIS, BELOW } from "./colors";
 
 export type DivergingItem = { name: string; value: number; detail?: string };
 
-const signed = (v: number, digits = 2) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(digits)}`;
+const signed = (lang: Lang, v: number, digits = 2) =>
+  `${v >= 0 ? "+" : "−"}${formatNumber(lang, Math.abs(v), digits)}`;
 
 /**
  * Horizontal bars growing left (below) or right (above) from a zero line, value labelled. When
  * every value has the same sign the zero line moves to the left edge, so no half stays empty.
  */
 export function DivergingBars({ items, unit = "" }: { items: DivergingItem[]; unit?: string }) {
+  const { lang } = useT();
   const peak = Math.max(0.01, ...items.map((i) => Math.abs(i.value)));
   const oneSided = items.every((i) => i.value >= 0) || items.every((i) => i.value < 0);
   const half = oneSided ? 100 : 50;
@@ -40,7 +46,7 @@ export function DivergingBars({ items, unit = "" }: { items: DivergingItem[]; un
               />
             </span>
             <span className="text-neutral-200 tabular-nums">
-              {signed(item.value)}
+              {signed(lang, item.value)}
               {unit}
             </span>
           </li>
@@ -49,5 +55,3 @@ export function DivergingBars({ items, unit = "" }: { items: DivergingItem[]; un
     </ul>
   );
 }
-
-export { signed };

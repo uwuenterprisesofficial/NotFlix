@@ -3,6 +3,7 @@
 import type Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
 import type { SkipSegment, Stream } from "@/lib/types";
+import { useT } from "../I18nProvider";
 import { FullscreenButton, useFrameFullscreen } from "./PlayerFrame";
 
 function useStream(
@@ -88,6 +89,7 @@ export function DirectVideo({
   resumeFrom?: () => number;
   onPosition?: (seconds: number) => void;
 }) {
+  const { t } = useT();
   const ref = useRef<HTMLVideoElement>(null);
   const autoSkipped = useRef(false);
   const loaded = useRef(false);
@@ -200,7 +202,7 @@ export function DirectVideo({
           onClick={() => ref.current && (ref.current.currentTime = opening.end_s)}
           className="absolute right-8 bottom-24 rounded border-2 border-white/80 bg-black/60 px-6 py-2.5 text-lg font-semibold tracking-wide backdrop-blur transition-colors hover:bg-white hover:text-black"
         >
-          Skip Intro
+          {t("player.skipIntro")}
         </button>
       )}
 
@@ -217,7 +219,7 @@ export function DirectVideo({
           onClick={() => ref.current && (ref.current.currentTime = ending.end_s)}
           className="absolute right-8 bottom-24 rounded border-2 border-white/80 bg-black/60 px-6 py-2.5 text-lg font-semibold backdrop-blur hover:bg-white hover:text-black"
         >
-          Skip Credits
+          {t("player.skipCredits")}
         </button>
       )}
       <FullscreenButton
@@ -239,6 +241,7 @@ function NextEpisodeCard({
   video: React.RefObject<HTMLVideoElement | null>;
   onDismiss: () => void;
 }) {
+  const { t } = useT();
   const [left, setLeft] = useState(NEXT_COUNTDOWN_S);
   const started = useRef(false);
 
@@ -273,14 +276,18 @@ function NextEpisodeCard({
         />
         <span className="relative">
           ▶ {next.label}
-          {countdown && <span className="ml-2 text-sm font-normal">in {Math.ceil(left)}s</span>}
+          {countdown && (
+            <span className="ml-2 text-sm font-normal">
+              {t("player.inSeconds", { s: Math.ceil(left) })}
+            </span>
+          )}
         </span>
       </button>
       <button
         onClick={onDismiss}
         className="rounded bg-black/60 px-3 py-1 text-sm text-white/80 backdrop-blur hover:text-white"
       >
-        Watch credits
+        {t("player.watchCredits")}
       </button>
     </div>
   );

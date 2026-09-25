@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { LANGUAGE_LABELS, LANGUAGE_ORDER, LANGUAGE_SHORT, PROVIDER_LABELS } from "@/lib/languages";
+import type { T } from "@/lib/i18n";
+import { PROVIDER_LABELS } from "@/lib/languages";
 import { forgetShowStreams } from "@/lib/streamCache";
+import { pickLanguage, useStreamLanguage } from "@/lib/streamLanguage";
 import type { Availability, Language } from "@/lib/types";
-import { useStoredValue } from "./player/useStoredValue";
+import { useT } from "./I18nProvider";
 
 const POLL_MS = 3000;
 export const SCAN_FINISHED_EVENT = "notflix:scan-finished";
@@ -34,7 +36,8 @@ export function EpisodeBrowser({
   const [data, setData] = useState<Availability | null>(null);
   const [failed, setFailed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [language, setLanguage] = useStoredValue<Language>("notflix:language", "de-dub");
+  const { t } = useT();
+  const { order, chosen, choose } = useStreamLanguage(animeId);
 
   const scanning = data?.scanning ?? true;
   useEffect(() => {
@@ -86,9 +89,9 @@ export function EpisodeBrowser({
   const perLanguage = new Map<Language, number>();
   for (const langs of languagesByEpisode.values())
     for (const lang of langs) perLanguage.set(lang, (perLanguage.get(lang) ?? 0) + 1);
-  const shownLanguages = LANGUAGE_ORDER.filter(
-    (lang) => lang !== "unknown" || perLanguage.has("unknown"),
-  );
+  const shownLanguages = order.filter((lang) => lang !== "unknown" || perLanguage.has("unknown"));
+  // Until the scan finds something, the best language counts as picked.
+  const language = pickLanguage(order, perLanguage.keys(), chosen);
 
   function status(ep: number): Status {
     const langs = languagesByEpisode.get(ep) ?? [];
@@ -105,14 +108,14 @@ export function EpisodeBrowser({
   return (
     <section className="mt-12">
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <h2 className="mr-2 text-xl font-semibold">Episodes</h2>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Language">
+        <h2 className="mr-2 text-xl font-semibold">{t("episodes.title")}</h2>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={t("episodes.language")}>
           {shownLanguages.map((lang) => (
             <button
               key={lang}
               role="radio"
               aria-checked={lang === language}
-              onClick={() => setLanguage(lang)}
+              onClick={() => choose(lang)}
               className={`rounded-full px-3 py-1 text-sm font-semibold ${
                 lang === language
                   ? "bg-white text-black"
@@ -121,7 +124,7 @@ export function EpisodeBrowser({
                     : "bg-surface-raised text-muted hover:bg-neutral-700"
               }`}
             >
-              {LANGUAGE_LABELS[lang]}
+              {t(`lang.${lang}`)}
               <span className="ml-1.5 text-xs opacity-60">{perLanguage.get(lang) ?? 0}</span>
             </button>
           ))}
@@ -132,25 +135,21 @@ export function EpisodeBrowser({
             disabled={refreshing || scanning}
             className="ml-auto rounded px-3 py-1 text-sm text-muted hover:text-white disabled:opacity-50"
           >
-            ↻ Refresh sources
+            {t("episodes.refresh")}
           </button>
         )}
       </div>
 
       <div className="mb-3 min-h-5 text-sm text-muted" aria-live="polite">
-        {failed && "Couldn’t load episode availability."}
-        {running.length > 0 &&
-          `Looking for episodes on ${running.map((s) => PROVIDER_LABELS[s.provider] ?? s.provider).join(", ")}…`}
+        {failed && t("episodes.loadFailed")}
+        {running.length > 0 && t("episodes.looking", { providers: providerNames(running) })}
         {broken.length > 0 && (
           <span className="block text-amber-400/80">
-            {broken.map((s) => PROVIDER_LABELS[s.provider] ?? s.provider).join(", ")} couldn’t be
-            reached; retrying later.
+            {t("episodes.unreachable", { providers: providerNames(broken) })}
           </span>
         )}
         {!scanning && noneCount > 0 && (
-          <span className="block">
-            {noneCount} episode{noneCount === 1 ? "" : "s"} without any stream.
-          </span>
+          <span className="block">{t("episodes.withoutStream", { count: noneCount })}</span>
         )}
       </div>
 
@@ -163,6 +162,7 @@ export function EpisodeBrowser({
             watched={ep <= watched}
             status={status(ep)}
             languages={languagesByEpisode.get(ep) ?? []}
+            t={t}
           />
         ))}
       </div>
@@ -170,15 +170,15 @@ export function EpisodeBrowser({
       <p className="mt-3 flex flex-wrap gap-4 text-xs text-muted">
         <span>
           <span className="mr-1 inline-block size-2 rounded-full bg-green-500" />
-          {LANGUAGE_LABELS[language]}
+          {t(`lang.${language}`)}
         </span>
         <span>
           <span className="mr-1 inline-block size-2 rounded-full bg-amber-400" />
-          Other languages only
+          {t("episodes.otherOnly")}
         </span>
         <span>
           <span className="mr-1 inline-block size-2 rounded-full bg-red-500" />
-          No stream
+          {t("episodes.noStream")}
         </span>
       </p>
     </section>
@@ -205,19 +205,21 @@ function EpisodeTile({
   watched,
   status,
   languages,
+  t,
 }: {
   animeId: number;
   episode: number;
   watched: boolean;
   status: Status;
   languages: Language[];
+  t: T;
 }) {
   const title =
     status === "none"
-      ? "No stream found for this episode"
+      ? t("episodes.noStreamFound")
       : status === "checking"
-        ? "Looking for streams…"
-        : languages.map((l) => LANGUAGE_LABELS[l]).join(", ") || undefined;
+        ? t("episodes.lookingStreams")
+        : languages.map((l) => t(`lang.${l}`)).join(", ") || undefined;
   const content = (
     <>
       {DOT[status] && (
@@ -229,11 +231,13 @@ function EpisodeTile({
       </span>
       {status === "other-language" && (
         <span className="block text-[10px] leading-tight font-normal text-amber-300/80">
-          {languages.map((l) => LANGUAGE_SHORT[l]).join(" · ")}
+          {languages.map((l) => t(`langShort.${l}`)).join(" · ")}
         </span>
       )}
       {status === "none" && (
-        <span className="block text-[10px] leading-tight font-normal">No stream</span>
+        <span className="block text-[10px] leading-tight font-normal">
+          {t("episodes.noStream")}
+        </span>
       )}
     </>
   );
@@ -241,7 +245,11 @@ function EpisodeTile({
 
   if (status === "none") {
     return (
-      <span className={className} title={title} aria-label={`Episode ${episode}: no stream`}>
+      <span
+        className={className}
+        title={title}
+        aria-label={t("episodes.noStreamLabel", { episode })}
+      >
         {content}
       </span>
     );
@@ -251,4 +259,8 @@ function EpisodeTile({
       {content}
     </Link>
   );
+}
+
+function providerNames(scans: { provider: string }[]): string {
+  return scans.map((s) => PROVIDER_LABELS[s.provider] ?? s.provider).join(", ");
 }
