@@ -52,7 +52,11 @@ class AnimeCard(ORM):
     progress: Progress | None = None
     reason: str | None = None
     prediction: PredictionOut | None = None
-    airing: AiringOut | None = None  # in the release calendar / New Episodes: this episode
+    airing: AiringOut | None = None
+    status: str | None = None  # finished_airing, currently_airing, not_yet_aired
+    start_season: str | None = None
+    next_episode: int | None = None  # when airing: the next episode and its air time
+    next_episode_at: datetime | None = None  # in the release calendar / New Episodes: this episode
 
 
 class AnimeDetail(AnimeCard):
@@ -60,8 +64,6 @@ class AnimeDetail(AnimeCard):
     synopsis_language: str = "en"  # MAL's are English; see GET /anime/{id}/synopsis
     # Episodes aired so far (None: no limit known, e.g. finished), and the next one's air time.
     aired_episodes: int | None = None
-    next_episode: int | None = None
-    next_episode_at: datetime | None = None
     status: str | None = None
     start_season: str | None = None
     tags: list[TagOut] = []
@@ -338,6 +340,10 @@ class ProgressUpdate(BaseModel):
     episodes_watched: int = Field(ge=0)
 
 
+class ListStatusUpdate(BaseModel):
+    status: Literal["watching", "completed", "on_hold", "dropped", "plan_to_watch"]
+
+
 class AnalyzeRequest(BaseModel):
     """A manual analysis: always recalculates these episodes, replacing earlier results (but
     never manually entered times)."""
@@ -419,3 +425,14 @@ class CalendarOut(BaseModel):
 
     items: list[AnimeCard]  # one per episode, with `airing` set
     refreshing: bool  # the schedule is being updated; ask again shortly
+
+
+class PreviewOut(BaseModel):
+    """A muted preview for a show's hover card: a direct stream of an episode, started at its
+    opening when that's known."""
+
+    episode: int
+    language: str
+    url: str
+    format: Literal["hls", "file"] | None
+    start_s: float

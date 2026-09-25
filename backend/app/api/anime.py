@@ -25,14 +25,14 @@ from app.schemas import (
     EpisodeAnalysisOut,
     EpisodeOut,
     JobOut,
+    ListStatusUpdate,
     Progress,
     ProgressUpdate,
     ReferenceOut,
     SkipSegmentOut,
     SynopsisOut,
 )
-from app.services import airing, anilist, anilist_account, catalog, mal, synopsis
-from app.services.sync_tokens import mal_token
+from app.services import airing, catalog, list_status, synopsis
 from app.services.taste import predictor_for
 from app.worker.queue import analysis_queue, stop_job, timeout_message, timeout_seconds
 
@@ -58,6 +58,8 @@ async def anime_detail(anime_id: int, user: OptionalUser, db: DB, lang: str = "e
     detail.aired_episodes = await airing.aired_episodes(db, anime)
     if anime.next_episode_at and anime.next_episode_at > datetime.now(UTC):
         detail.next_episode, detail.next_episode_at = anime.next_episode, anime.next_episode_at
+    else:
+        detail.next_episode = detail.next_episode_at = None
     if synopsis.supported(lang):
         row = await synopsis.stored(db, anime_id, lang)
         if row is not None and row.synopsis:
@@ -100,51 +102,34 @@ async def update_progress(anime_id: int, body: ProgressUpdate, user: CurrentUser
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Anime not found")
     finished = anime.num_episodes is not None and body.episodes_watched >= anime.num_episodes
     new_status = ListStatus.completed if finished else ListStatus.watching
-    episodes = body.episodes_watched
+    try:
+        saved = await list_status.save(db, user, anime_id, new_status, body.episodes_watched)
+    except list_status.NotSaved as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+    return _progress(saved)
 
-    async def to_mal() -> dict:
-        async with mal.MalClient(await mal_token(db, user)) as client:
-            return await client.update_my_list_status(
-                anime_id, status=new_status.value, num_watched_episodes=episodes
-            )
 
-    async def to_anilist() -> dict:
-        media_id = await anilist.anilist_id(anime_id)
-        if media_id is None:
-            raise anilist_account.AniListError("This show isn't on AniList")
-        async with anilist_account.AniListClient(user.anilist_token) as client:
-            saved = await client.save_entry(media_id, new_status.value, episodes)
-        return {"num_episodes_watched": saved.get("progress", episodes)}
-
-    writes = {"mal": to_mal} if user.has_mal else {}
-    if user.has_anilist:
-        writes["anilist"] = to_anilist
-    results = await asyncio.gather(*(w() for w in writes.values()), return_exceptions=True)
-    outcome = dict(zip(writes, results, strict=True))
-    failed = [name for name, r in outcome.items() if isinstance(r, Exception)]
-    for name in failed:
-        log.warning("Saving progress to %s failed: %s", name, outcome[name])
-    if writes and len(failed) == len(writes):
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(outcome[failed[0]]))
-    # MAL's answer counts when there is one.
-    result = next((r for r in outcome.values() if not isinstance(r, Exception)), {})
-
-    entry = await db.scalar(
-        select(ListEntry).where(ListEntry.user_id == user.id, ListEntry.anime_id == anime_id)
-    )
-    if entry is None:
-        entry = ListEntry(user_id=user.id, anime_id=anime_id)
-        db.add(entry)
-    entry.status = result.get("status", new_status)
-    entry.episodes_watched = result.get("num_episodes_watched", episodes)
-    entry.score = result.get("score", entry.score or 0)
-    await db.commit()
+def _progress(saved: list_status.Saved) -> Progress:
+    entry = saved.entry
     return Progress(
         status=entry.status,
         episodes_watched=entry.episodes_watched,
         score=entry.score,
-        failed=failed,
+        failed=saved.failed,
     )
+
+
+@router.put("/anime/{anime_id}/list", response_model=Progress)
+async def set_list_status(anime_id: int, body: ListStatusUpdate, user: CurrentUser, db: DB):
+    """Put a show on the user's lists with this status (e.g. "Plan to watch" from a preview
+    card). Episodes watched so far are kept."""
+    if await catalog.get_anime(db, anime_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Anime not found")
+    try:
+        saved = await list_status.save(db, user, anime_id, body.status)
+    except list_status.NotSaved as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+    return _progress(saved)
 
 
 @router.post("/anime/{anime_id}/analyze", response_model=AnalyzeResponse)
