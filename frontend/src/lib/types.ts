@@ -40,7 +40,7 @@ export type AnimeCard = {
   next_episode: number | null;
   next_episode_at: string | null;
   /** Watch Together: both users' side of the show. */
-  pair?: { me: PairSide; partner: PairSide } | null;
+  pair?: { me: PairSide | null; partner: PairSide | null } | null;
 };
 
 /** One user's side of a show: their list status and score, else their predicted score. */
@@ -167,6 +167,8 @@ export type Me = {
   name: string;
   picture: string | null;
   last_synced_at: string | null;
+  /** Watch Together without a list (joined through an invite link with a name). */
+  guest: boolean;
   /** Linked lists. */
   mal: { name: string | null } | null;
   anilist: { name: string | null } | null;
@@ -342,4 +344,7 @@ export type Together = {
   };
   rows: Row[];
   computed_at: string;
+  /** Whose lists the recommendations use (a guest, or an empty list, has none). */
+  me_list: boolean;
+  partner_list: boolean;
 };

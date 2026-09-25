@@ -135,12 +135,12 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
         animeId={anime.id}
         numEpisodes={anime.num_episodes}
         watched={watched}
-        signedIn={me !== null}
+        signedIn={me !== null && !me.guest}
         aired={anime.aired_episodes}
         nextAt={anime.next_episode_at}
       />
 
-      {me && (
+      {me && !me.guest && (
         // Rarely needed: fixing a wrong source match, and intro/outro detection.
         <details className="group mt-12 max-w-2xl">
           <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded bg-surface-raised px-4 py-2 text-sm font-semibold hover:bg-neutral-700 [&::-webkit-details-marker]:hidden">

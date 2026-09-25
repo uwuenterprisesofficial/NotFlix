@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Avatar } from "@/components/together/Avatar";
-import { AcceptInvite, RememberInvite } from "@/components/together/TogetherActions";
+import { AcceptInvite, JoinAsGuest, RememberInvite } from "@/components/together/TogetherActions";
 import { apiOrNull } from "@/lib/api";
 import { getT } from "@/lib/i18n/server";
 import type { InviteInfo, Me } from "@/lib/types";
@@ -32,10 +32,16 @@ export default async function JoinPage({ params }: PageProps<"/together/join/[co
               <p className="mb-4 text-sm">{t("together.signInToJoin", { name })}</p>
               <Link
                 href="/login"
-                className="rounded bg-brand px-5 py-2.5 font-semibold hover:bg-brand-dark"
+                className="inline-block rounded bg-brand px-5 py-2.5 font-semibold hover:bg-brand-dark"
               >
                 {t("login.title")}
               </Link>
+              <p className="my-6 text-sm text-muted">— {t("together.or")} —</p>
+              <div className="rounded-lg bg-surface-raised p-4">
+                <h2 className="font-semibold">{t("together.guestTitle")}</h2>
+                <p className="mt-1 mb-3 text-sm text-muted">{t("together.guestInfo", { name })}</p>
+                <JoinAsGuest code={code} />
+              </div>
             </>
           ) : invite.own ? (
             <p>{t("together.ownInvite")}</p>

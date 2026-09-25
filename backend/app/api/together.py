@@ -1,12 +1,18 @@
 """Watch Together: connect with someone (an invite link), get recommendations for both of you,
-and watch with a synced player (a room per connection, followed through server-sent events)."""
+and watch with a synced player (a room per connection, followed through server-sent events).
+
+Someone without an account joins as a guest: an invite link and a name make a guest user
+(signed in by the session cookie like anyone else) who has no list. The recommendations then
+use only the other's list, or none. Signing in later (or linking a list) keeps the guest's
+connections.
+"""
 
 import secrets
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 
 from app.api.deps import DB, CurrentUser, OptionalUser
 from app.db.session import AsyncSessionLocal
@@ -14,6 +20,7 @@ from app.models import Anime, Connection, ConnectionInvite, ListEntry, User
 from app.schemas import (
     CompatibilityOut,
     ConnectionOut,
+    GuestIn,
     InviteInfo,
     InviteOut,
     PairOut,
@@ -30,7 +37,10 @@ from app.services.taste import predictor_for
 router = APIRouter(prefix="/together", tags=["together"])
 
 INVITE_TTL = timedelta(days=7)
-ROW_ORDER = ["continue", "together", "planned", "show_to_partner", "show_to_me", "both_loved"]
+ROW_ORDER = [
+    "continue", "together", "planned", "show_to_partner", "show_to_me", "both_loved",
+    "top_rated", "popular",
+]  # fmt: skip
 
 
 def _person(user: User) -> PersonOut:
@@ -91,9 +101,26 @@ async def invite_info(code: str, user: OptionalUser, db: DB):
     )
 
 
+@router.post("/invites/{code}/guest", response_model=ConnectionOut)
+async def join_as_guest(code: str, body: GuestIn, request: Request, user: OptionalUser, db: DB):
+    """Accept an invite without an account: a guest with this name, signed in from now on."""
+    if user is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Already signed in: accept the invite")
+    invite, inviter = await _invite(db, code)
+    guest = User(name=body.name.strip() or "Guest", is_guest=True)
+    db.add(guest)
+    await db.flush()
+    request.session["user_id"] = guest.id
+    return await _accept(db, invite, inviter, guest)
+
+
 @router.post("/invites/{code}/accept", response_model=ConnectionOut)
 async def accept_invite(code: str, user: CurrentUser, db: DB):
     invite, inviter = await _invite(db, code)
+    return await _accept(db, invite, inviter, user)
+
+
+async def _accept(db: DB, invite: ConnectionInvite, inviter: User, user: User) -> ConnectionOut:
     if inviter.id == user.id:
         raise HTTPException(status.HTTP_409_CONFLICT, "That's your own invite")
     conn = await _between(db, user.id, inviter.id)
@@ -154,11 +181,24 @@ async def connections(user: CurrentUser, db: DB):
 
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def disconnect(connection_id: int, user: CurrentUser, db: DB) -> None:
-    conn, _ = await _connection(db, connection_id, user)
+    conn, partner = await _connection(db, connection_id, user)
     await db.delete(conn)
+    await db.flush()
+    # A guest is only there to watch with someone: without any connection left, they're gone.
+    for person in (user, partner):
+        if person.is_guest and not await _connection_count(db, person.id):
+            await db.delete(person)
     await db.commit()
     await rooms.clear(connection_id)
     await together.forget(connection_id)
+
+
+async def _connection_count(db: DB, user_id: int) -> int:
+    return await db.scalar(
+        select(func.count())
+        .select_from(Connection)
+        .where(or_(Connection.user_a_id == user_id, Connection.user_b_id == user_id))
+    )
 
 
 @router.get("/{connection_id}", response_model=TogetherOut)
@@ -192,7 +232,7 @@ async def recommendations(connection_id: int, user: CurrentUser, db: DB):
     }
     rows = []
     for row_id in ROW_ORDER:
-        ids_in_row = result["rows"][names.get(row_id, row_id)]
+        ids_in_row = result["rows"].get(names.get(row_id, row_id), [])
         items = [card(i) for i in ids_in_row if i in shows]
         if items:
             rows.append(Row(id=row_id, title=row_id, items=items))
@@ -207,6 +247,8 @@ async def recommendations(connection_id: int, user: CurrentUser, db: DB):
         ),
         rows=rows,
         computed_at=result["computed_at"],
+        me_list=result["lists"]["a" if viewer_is_a else "b"],
+        partner_list=result["lists"]["b" if viewer_is_a else "a"],
     )
 
 

@@ -55,7 +55,9 @@ export default async function WatchPage({
       episode={episode}
       segments={data.skip_segments}
       hasNext={episode < (aired ?? anime.num_episodes ?? Infinity)}
-      signedIn={me !== null}
+      // A guest has no list to mark episodes on, but can watch together.
+      signedIn={me !== null && !me.guest}
+      together={me !== null}
       watched={anime.progress?.episodes_watched ?? 0}
       via={{ provider: param("via"), label: param("option") }}
       server={param("server")}

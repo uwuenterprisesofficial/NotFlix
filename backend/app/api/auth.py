@@ -16,7 +16,7 @@ from sqlalchemy import select
 from app.api.deps import DB, CurrentUser
 from app.core.config import get_settings
 from app.models import User
-from app.services import anilist_account, mal, stats_jobs
+from app.services import anilist_account, mal, stats_jobs, together
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -92,6 +92,18 @@ async def _finish(
         current = await db.get(User, request.session["user_id"])
     owner = await _owner(db, provider, account_id)
 
+    # A Watch Together guest signing in keeps their connections: the guest becomes this
+    # account's user, or (when the account has one already) merges into it.
+    session_user = await db.get(User, request.session.get("user_id") or 0)
+    guest = session_user if session_user is not None and session_user.is_guest else None
+    if guest is not None:
+        if owner is None:
+            current = guest
+        else:
+            await together.absorb_guest(db, guest, owner)
+            current = None
+    upgraded = current is not None and current.is_guest
+
     if current is not None:
         if owner is not None and owner.id != current.id:
             # The account moves to the signed-in user.
@@ -112,6 +124,9 @@ async def _finish(
         user.anilist_user_id, user.anilist_name = account_id, name
     for key, value in tokens.items():
         setattr(user, key, value)
+    if upgraded:
+        user.is_guest = False
+        user.name, user.picture = name, picture
     if not user.picture:
         user.picture = picture
     await db.commit()

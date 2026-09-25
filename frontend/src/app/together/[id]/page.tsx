@@ -24,10 +24,17 @@ function rowTitle(t: T, row: Row, data: Together): string {
       return t("together.row.showTo", { name: data.partner.name });
     case "show_to_me":
       return t("together.row.showTo", { name: data.me.name });
+    case "planned":
+      // With one list, it's that list's plans.
+      if (data.me_list && !data.partner_list) return t("together.row.plannedMine");
+      if (!data.me_list && data.partner_list)
+        return t("together.row.plannedBy", { name: data.partner.name });
+      return t("together.row.planned");
     case "continue":
     case "together":
-    case "planned":
     case "both_loved":
+    case "top_rated":
+    case "popular":
       return t(`together.row.${row.id}`);
     default:
       return row.title;
@@ -88,43 +95,56 @@ export default async function ConnectionPage({ params }: PageProps<"/together/[i
           </div>
         </div>
 
-        <div className="min-w-64 flex-1 rounded-lg bg-surface-raised p-4 md:max-w-md">
-          {compat.score === null ? (
-            <p className="text-sm text-muted">{t("together.notEnough")}</p>
-          ) : (
-            <>
-              <p className="flex items-baseline gap-2">
-                <span className="text-4xl font-black text-brand">{compat.score}%</span>
-                <span className="text-sm text-muted">{t("together.tasteMatch")}</span>
-              </p>
-              <div className="mt-3 space-y-2">
-                {compat.correlation !== null && (
-                  <Meter
-                    label={t("together.scoreAgreement")}
-                    value={(compat.correlation + 1) / 2}
-                  />
-                )}
-                {compat.genre_similarity !== null && (
-                  <Meter
-                    label={t("together.genreAgreement")}
-                    value={(compat.genre_similarity + 1) / 2}
-                  />
-                )}
-              </div>
-              {compat.shared_genres.length > 0 && (
-                <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
-                  <span className="text-muted">{t("together.sharedGenres")}:</span>
-                  {compat.shared_genres.map((g) => (
-                    <span key={g} className="rounded bg-white/10 px-2 py-0.5">
-                      {genreName(lang, g)}
-                    </span>
-                  ))}
+        {data.me_list && data.partner_list && (
+          <div className="min-w-64 flex-1 rounded-lg bg-surface-raised p-4 md:max-w-md">
+            {compat.score === null ? (
+              <p className="text-sm text-muted">{t("together.notEnough")}</p>
+            ) : (
+              <>
+                <p className="flex items-baseline gap-2">
+                  <span className="text-4xl font-black text-brand">{compat.score}%</span>
+                  <span className="text-sm text-muted">{t("together.tasteMatch")}</span>
                 </p>
-              )}
-            </>
-          )}
-        </div>
+                <div className="mt-3 space-y-2">
+                  {compat.correlation !== null && (
+                    <Meter
+                      label={t("together.scoreAgreement")}
+                      value={(compat.correlation + 1) / 2}
+                    />
+                  )}
+                  {compat.genre_similarity !== null && (
+                    <Meter
+                      label={t("together.genreAgreement")}
+                      value={(compat.genre_similarity + 1) / 2}
+                    />
+                  )}
+                </div>
+                {compat.shared_genres.length > 0 && (
+                  <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="text-muted">{t("together.sharedGenres")}:</span>
+                    {compat.shared_genres.map((g) => (
+                      <span key={g} className="rounded bg-white/10 px-2 py-0.5">
+                        {genreName(lang, g)}
+                      </span>
+                    ))}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </header>
+
+      {!(data.me_list && data.partner_list) && (
+        // A guest (or an empty list): whose list the rows come from.
+        <p className="mx-auto mt-4 max-w-6xl px-4 text-sm text-muted md:px-12">
+          {data.me_list
+            ? t("together.onlyMine", { name: data.partner.name })
+            : data.partner_list
+              ? t("together.onlyTheirs", { name: data.partner.name })
+              : t("together.noLists")}
+        </p>
+      )}
 
       {watching && (
         <div className="mx-auto mt-6 flex max-w-6xl px-4 md:px-12">

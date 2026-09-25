@@ -224,6 +224,7 @@ class Me(ORM):
     name: str
     picture: str | None
     last_synced_at: datetime | None
+    guest: bool = False  # Watch Together without a list
     mal: AccountOut | None = None  # linked MyAnimeList account
     anilist: AccountOut | None = None  # linked AniList account
     # Entries being added to the other list after a sync, while that runs.
@@ -467,8 +468,8 @@ class PairSide(BaseModel):
 
 
 class PairOut(BaseModel):
-    me: PairSide
-    partner: PairSide
+    me: PairSide | None  # None: a guest, or someone without a list
+    partner: PairSide | None
 
 
 class PersonOut(BaseModel):
@@ -480,6 +481,10 @@ class PersonOut(BaseModel):
 class InviteOut(BaseModel):
     code: str
     expires_at: datetime
+
+
+class GuestIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
 
 
 class InviteInfo(BaseModel):
@@ -557,6 +562,9 @@ class TogetherOut(BaseModel):
     compatibility: CompatibilityOut
     rows: list[Row]
     computed_at: datetime
+    # Whose lists the recommendations use (a guest, or someone without a list, has none).
+    me_list: bool = True
+    partner_list: bool = True
 
 
 # AnimeCard.pair refers to PairOut, defined after it.

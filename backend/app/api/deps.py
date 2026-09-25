@@ -20,5 +20,14 @@ async def current_user(user: Annotated[User | None, Depends(current_user_optiona
     return user
 
 
+async def list_user(user: Annotated[User, Depends(current_user)]) -> User:
+    """A user with a list: guests (Watch Together only) have none."""
+    if user.is_guest:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Guests have no list: sign in with one")
+    return user
+
+
 OptionalUser = Annotated[User | None, Depends(current_user_optional)]
 CurrentUser = Annotated[User, Depends(current_user)]
+# Anything about the user's own list (progress, statuses, sync, statistics).
+ListUser = Annotated[User, Depends(list_user)]

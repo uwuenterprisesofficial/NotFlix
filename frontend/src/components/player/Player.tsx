@@ -28,6 +28,7 @@ export function Player({
   via,
   server,
   resumeAt = null,
+  together = signedIn,
 }: {
   animeId: number;
   episode: number;
@@ -40,6 +41,8 @@ export function Player({
   server: string | null;
   /** Where this episode was stopped last time (signed in, direct streams). */
   resumeAt?: number | null;
+  /** Can watch together (signed in, guests included). */
+  together?: boolean;
 }) {
   const { t } = useT();
   const router = useRouter();
@@ -246,7 +249,7 @@ export function Player({
         animeId={animeId}
         episode={episode}
         sources={sources}
-        signedIn={signedIn}
+        signedIn={together}
       />
 
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">

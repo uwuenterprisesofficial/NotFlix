@@ -96,6 +96,8 @@ export const together = {
   "together.row.continue": { en: "Continue together", de: "Zusammen weiterschauen" },
   "together.row.together": { en: "New for both of you", de: "Neu für euch beide" },
   "together.row.planned": { en: "On your lists", de: "Auf euren Listen" },
+  "together.row.plannedMine": { en: "On your list", de: "Auf deiner Liste" },
+  "together.row.plannedBy": { en: "On {name}’s list", de: "Auf der Liste von {name}" },
   "together.row.showTo": { en: "Show this to {name}", de: "Zeig das {name}" },
   "together.row.both_loved": { en: "You both loved", de: "Euch beiden gefallen" },
   "together.you": { en: "You", de: "Du" },
@@ -137,4 +139,42 @@ export const together = {
     de: "{name} schaut {title} · Folge {episode}",
   },
   "together.dismiss": { en: "Dismiss", de: "Ausblenden" },
+
+  // Guests
+  "together.or": { en: "or", de: "oder" },
+  "together.guestTitle": { en: "Join as a guest", de: "Als Gast beitreten" },
+  "together.guestInfo": {
+    en: "No account needed, just a name. The recommendations then use only {name}’s list.",
+    de: "Kein Konto nötig, nur ein Name. Die Empfehlungen nutzen dann nur die Liste von {name}.",
+  },
+  "together.guestName": { en: "Your name", de: "Dein Name" },
+  "together.guestJoin": { en: "Join as guest", de: "Als Gast beitreten" },
+  "together.guestFailed": {
+    en: "Couldn’t join. The link may have been used already.",
+    de: "Beitreten fehlgeschlagen. Der Link wurde vielleicht schon benutzt.",
+  },
+  "together.onlyMine": {
+    en: "{name} has no list, so only yours is used.",
+    de: "{name} hat keine Liste, daher wird nur deine verwendet.",
+  },
+  "together.onlyTheirs": {
+    en: "Only {name}’s list is used.",
+    de: "Nur die Liste von {name} wird verwendet.",
+  },
+  "together.noLists": {
+    en: "Neither of you has a list: here’s what’s popular.",
+    de: "Keiner von euch hat eine Liste: hier ist, was beliebt ist.",
+  },
+  "together.row.top_rated": { en: "Top rated", de: "Am besten bewertet" },
+  "together.row.popular": { en: "Most popular", de: "Am beliebtesten" },
+  "guest.badge": { en: "Guest", de: "Gast" },
+  "guest.signIn": { en: "Sign in with a list", de: "Mit Liste anmelden" },
+  "guest.note": {
+    en: "You’re a guest. Sign in with MyAnimeList or AniList to use your own list: your connections stay.",
+    de: "Du bist Gast. Melde dich mit MyAnimeList oder AniList an, um deine eigene Liste zu nutzen: deine Verbindungen bleiben.",
+  },
+  "guest.stats": {
+    en: "Statistics need a list. Sign in with MyAnimeList or AniList.",
+    de: "Statistiken brauchen eine Liste. Melde dich mit MyAnimeList oder AniList an.",
+  },
 } satisfies Messages;

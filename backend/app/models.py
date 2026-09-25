@@ -41,7 +41,8 @@ class JobStatus(StrEnum):
 
 
 class User(Base):
-    """A NotFlix user, signed in with MyAnimeList, AniList or both (linked accounts)."""
+    """A NotFlix user, signed in with MyAnimeList, AniList or both (linked accounts), or a guest
+    (Watch Together without a list: joined through an invite link, with just a name)."""
 
     __tablename__ = "users"
 
@@ -60,6 +61,7 @@ class User(Base):
     anilist_token: Mapped[str | None] = mapped_column(Text)
     anilist_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_guest: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     @property

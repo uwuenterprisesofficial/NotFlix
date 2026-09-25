@@ -162,7 +162,15 @@ export function AnimeCard({
 }
 
 /** "You ★9 · Anna ~8.4": each user's score, else their predicted score. */
-function PairScores({ me, partner, names }: { me: PairSide; partner: PairSide; names: PairNames }) {
+function PairScores({
+  me,
+  partner,
+  names,
+}: {
+  me: PairSide | null;
+  partner: PairSide | null;
+  names: PairNames;
+}) {
   const { t, lang } = useT();
   const side = (who: PairSide, name: string) => {
     const value = who.score
@@ -181,10 +189,12 @@ function PairScores({ me, partner, names }: { me: PairSide; partner: PairSide; n
       </span>
     );
   };
+  // A side without a list (a guest) has nothing to show.
+  if (!me && !partner) return null;
   return (
     <p className="mt-1 flex justify-between gap-2 text-[11px] font-semibold">
-      {side(me, names.me)}
-      {side(partner, names.partner)}
+      {me ? side(me, names.me) : <span />}
+      {partner && side(partner, names.partner)}
     </p>
   );
 }

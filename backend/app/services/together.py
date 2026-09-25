@@ -15,8 +15,13 @@ scorer count the same.
 
 The compatibility score combines how alike the two score shows both have seen (correlation)
 with how alike their genre tastes are (cosine of the genre profiles).
+
+A guest (no account), or someone whose list is empty, has no taste to go on: only the other's
+list is used, with the show's general appeal (MAL score and popularity) standing in for the
+missing side. Without any list, the rows are the catalogue's best rated and most popular shows.
 """
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -26,12 +31,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import get_json, redis, set_json
-from app.models import Anime, ListStatus, Recommendation, User
+from app.models import Anime, Connection, ListStatus, Recommendation, User
 from app.services import recommender
 from app.services.tags import EXPLICIT_GENRE_IDS
 from app.services.taste import Predictor, Rated, Show, load_rated, predictor_for
 
-FORMAT = 1  # bump when the cached result's shape changes
+FORMAT = 2  # bump when the cached result's shape changes
 CACHE_TTL_S = 24 * 3600
 POOL_SIZE = 2500  # the catalogue's most popular shows are candidates, besides both users' recs
 ROW_SIZE = 24
@@ -98,6 +103,13 @@ def member(user_id: int, rated: list[Rated], predictor: Predictor | None) -> Mem
     )
 
 
+def general(show: Show) -> float:
+    """How good a show is for anyone: MAL's score, a little popularity (a z-score-like scale)."""
+    quality = ((show.mean or 7.0) - 7.5) / 0.75
+    popularity = math.log10(show.members + 1) - 5 if show.members else -1.0
+    return quality + 0.25 * popularity
+
+
 def _joint(za: float, zb: float) -> float:
     return 0.6 * min(za, zb) + 0.4 * (za + zb) / 2
 
@@ -106,10 +118,14 @@ def _explicit(show: Show) -> bool:
     return any(tag_id in EXPLICIT_GENRE_IDS for tag_id, _ in show.tags)
 
 
-def _pair(a: Member, b: Member, show: Show) -> dict[str, Any]:
-    """Both users' side of a show: their status and score, else their predicted score."""
-    out = {}
+def _pair(a: Member | None, b: Member | None, show: Show) -> dict[str, Any]:
+    """Both users' side of a show: their status and score, else their predicted score (None for
+    a side without a list)."""
+    out: dict[str, Any] = {}
     for side, m in (("a", a), ("b", b)):
+        if m is None:
+            out[side] = None
+            continue
         z, predicted = m.appeal(show)
         out[side] = {
             "status": m.status(show.id),
@@ -120,7 +136,15 @@ def _pair(a: Member, b: Member, show: Show) -> dict[str, Any]:
     return out
 
 
-def compatibility(a: Member, b: Member) -> dict[str, Any]:
+NO_COMPATIBILITY = {
+    "score": None, "correlation": None, "genre_similarity": None, "shared": 0,
+    "both_scored": 0, "shared_genres": [], "disagreements": [],
+}  # fmt: skip
+
+
+def compatibility(a: Member | None, b: Member | None) -> dict[str, Any]:
+    if a is None or b is None:
+        return dict(NO_COMPATIBILITY)
     shared = [i for i in a.rated if a.status(i) in SEEN and b.status(i) in SEEN]
     both_scored = [i for i in shared if a.score(i) and b.score(i)]
     correlation = None
@@ -161,17 +185,62 @@ def compatibility(a: Member, b: Member) -> dict[str, Any]:
     }
 
 
-def build(a: Member, b: Member, pool: dict[int, Show]) -> dict[str, Any]:
-    """The rows for a pair (sides "a" and "b"): {row id: [(anime id, joint score)]}."""
+def _top(scored: list[tuple[int, float]]) -> list[int]:
+    return [i for i, _ in sorted(scored, key=lambda s: -s[1])[:ROW_SIZE]]
+
+
+def build(a: Member | None, b: Member | None, pool: dict[int, Show]) -> dict[str, list[int]]:
+    """The rows (sides "a" and "b"): {row id: [anime ids]}, from both lists, one, or none."""
+    if a is not None and b is not None:
+        return _build_both(a, b, pool)
+    if a is not None or b is not None:
+        return _build_one(a or b, "b" if a is not None else "a", pool)
+    return _build_none(pool)
+
+
+def _build_one(m: Member, other: str, pool: dict[int, Show]) -> dict[str, list[int]]:
+    """Only one of them has a list: their taste, with general appeal for the other."""
+    shows = dict(pool) | {i: r.show for i, r in m.rated.items()}
+    together, continuing, planned, favourites = [], [], [], []
+    for i, show in shows.items():
+        if _explicit(show):
+            continue
+        status = m.status(i)
+        if status is None:
+            joint = 0.6 * m.appeal(show)[0] + 0.4 * general(show)
+            if joint > 0 and show.media_type != "music":
+                together.append((i, joint))
+        elif status in (ListStatus.watching, ListStatus.on_hold):
+            continuing.append((i, m.appeal(show)[0]))
+        elif status == ListStatus.plan_to_watch:
+            planned.append((i, m.appeal(show)[0]))
+        if (love := m.love(i)) is not None:
+            favourites.append((i, 0.7 * love + 0.3 * general(show)))
+    return {
+        "together": _top(together),
+        "continue": _top(continuing),
+        "planned": _top(planned),
+        f"show_to_{other}": _top(favourites),
+    }
+
+
+def _build_none(pool: dict[int, Show]) -> dict[str, list[int]]:
+    """Nobody has a list: what's good and popular in the catalogue."""
+    shows = [s for s in pool.values() if not _explicit(s) and s.media_type != "music"]
+    return {
+        "top_rated": _top([(s.id, general(s)) for s in shows if s.mean]),
+        "popular": _top([(s.id, float(s.members or 0)) for s in shows]),
+    }
+
+
+def _build_both(a: Member, b: Member, pool: dict[int, Show]) -> dict[str, list[int]]:
+    """The rows for a pair with both lists."""
     shows = dict(pool)
     for m in (a, b):
         shows.update({i: r.show for i, r in m.rated.items()})
 
     def appeal(i: int) -> tuple[float, float]:
         return a.appeal(shows[i])[0], b.appeal(shows[i])[0]
-
-    def top(scored: list[tuple[int, float]]) -> list[int]:
-        return [i for i, _ in sorted(scored, key=lambda s: -s[1])[:ROW_SIZE]]
 
     together, planned, continuing, loved = [], [], [], []
     for i, show in shows.items():
@@ -204,15 +273,15 @@ def build(a: Member, b: Member, pool: dict[int, Show]) -> dict[str, Any]:
             z = getter.appeal(shows[i])[0]
             if z > -0.5:
                 out.append((i, 0.5 * love + 0.5 * z))
-        return top(out)
+        return _top(out)
 
     return {
-        "together": top(together),
-        "continue": top(continuing),
-        "planned": top(planned),
+        "together": _top(together),
+        "continue": _top(continuing),
+        "planned": _top(planned),
         "show_to_b": show_to(a, b),
         "show_to_a": show_to(b, a),
-        "both_loved": top(loved),
+        "both_loved": _top(loved),
     }
 
 
@@ -240,8 +309,19 @@ async def forget(connection_id: int) -> None:
 
 
 def _version(a: User, b: User) -> str:
-    stamp = [u.last_synced_at.isoformat() if u.last_synced_at else "never" for u in (a, b)]
+    stamp = [
+        "guest" if u.is_guest else u.last_synced_at.isoformat() if u.last_synced_at else "never"
+        for u in (a, b)
+    ]
     return f"{FORMAT}:{stamp[0]}:{stamp[1]}"
+
+
+async def _member(db: AsyncSession, user: User) -> Member | None:
+    """The user's taste; None for a guest or an empty list."""
+    if user.is_guest:
+        return None
+    rated = await load_rated(db, user.id)
+    return member(user.id, rated, await predictor_for(db, user)) if rated else None
 
 
 async def report(db: AsyncSession, connection_id: int, a: User, b: User) -> dict[str, Any]:
@@ -252,19 +332,20 @@ async def report(db: AsyncSession, connection_id: int, a: User, b: User) -> dict
     if cached is not None and cached.get("version") == _version(a, b):
         return cached
 
-    ma = member(a.id, await load_rated(db, a.id), await predictor_for(db, a))
-    mb = member(b.id, await load_rated(db, b.id), await predictor_for(db, b))
+    ma, mb = await _member(db, a), await _member(db, b)
     pool = await _pool(db, (a.id, b.id))
     rows = build(ma, mb, pool)
     compat = compatibility(ma, mb)
     shows = dict(pool)
     for m in (ma, mb):
-        shows.update({i: r.show for i, r in m.rated.items()})
+        if m is not None:
+            shows.update({i: r.show for i, r in m.rated.items()})
     ids = {i for row in rows.values() for i in row} | set(compat["disagreements"])
     result = {
         "version": _version(a, b),
         "computed_at": datetime.now().astimezone().isoformat(),
         "rows": rows,
+        "lists": {"a": ma is not None, "b": mb is not None},
         "compatibility": compat,
         "pairs": {str(i): _pair(ma, mb, shows[i]) for i in ids},
     }
@@ -275,3 +356,25 @@ async def report(db: AsyncSession, connection_id: int, a: User, b: User) -> dict
 def for_viewer(pair: dict[str, Any], viewer_is_a: bool) -> dict[str, Any]:
     me, partner = ("a", "b") if viewer_is_a else ("b", "a")
     return {"me": pair[me], "partner": pair[partner]}
+
+
+async def absorb_guest(db: AsyncSession, guest: User, user: User) -> None:
+    """A guest signed in with an account that already has a user: the guest's connections move
+    to that user (unless it's connected with that person already), and the guest goes."""
+    found = await db.scalars(
+        select(Connection).where(
+            or_(Connection.user_a_id == guest.id, Connection.user_b_id == guest.id)
+        )
+    )
+    for conn in list(found):
+        partner = conn.partner_of(guest.id)
+        a, b = sorted((user.id, partner))
+        duplicate = partner == user.id or await db.scalar(
+            select(Connection.id).where(Connection.user_a_id == a, Connection.user_b_id == b)
+        )
+        if duplicate:
+            await db.delete(conn)
+        else:
+            conn.user_a_id, conn.user_b_id = a, b
+    await db.flush()
+    await db.delete(guest)
