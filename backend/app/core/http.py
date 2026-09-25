@@ -30,22 +30,15 @@ KEEPALIVE_S = 4
 DROPPED = (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError)
 
 
-class _RetryDropped(httpx.AsyncBaseTransport):
-    """Sends a GET again (once, on a new connection) when the connection was dropped under it."""
+class _Client(httpx.AsyncClient):
+    """Sends a request again (once, on a new connection) when the connection was dropped under
+    it. (A client, not a transport: a custom transport would make httpx ignore HTTP(S)_PROXY.)"""
 
-    def __init__(self, **kwargs):
-        self._inner = httpx.AsyncHTTPTransport(**kwargs)
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+    async def send(self, request: httpx.Request, **kwargs) -> httpx.Response:
         try:
-            return await self._inner.handle_async_request(request)
+            return await super().send(request, **kwargs)
         except DROPPED:
-            if request.method not in ("GET", "HEAD"):
-                raise
-            return await self._inner.handle_async_request(request)
-
-    async def aclose(self) -> None:
-        await self._inner.aclose()
+            return await super().send(request, **kwargs)
 
 
 def shared(name: str, timeout: httpx.Timeout | float = 20, **kwargs) -> httpx.AsyncClient:
@@ -54,12 +47,12 @@ def shared(name: str, timeout: httpx.Timeout | float = 20, **kwargs) -> httpx.As
     found = _clients.get(name)
     if found is not None and found[0] is loop and not found[1].is_closed:
         return found[1]
-    limits = httpx.Limits(
-        max_connections=20, max_keepalive_connections=10, keepalive_expiry=KEEPALIVE_S
-    )
-    client = httpx.AsyncClient(
+    client = _Client(
         timeout=timeout,
-        transport=_RetryDropped(verify=ssl_context(), limits=limits),
+        verify=ssl_context(),
+        limits=httpx.Limits(
+            max_connections=20, max_keepalive_connections=10, keepalive_expiry=KEEPALIVE_S
+        ),
         **kwargs,
     )
     _clients[name] = (loop, client)
