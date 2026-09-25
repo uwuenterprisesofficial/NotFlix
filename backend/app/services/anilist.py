@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from app.core import http as shared_http
 from app.services.mappings import get_mapping, save_mapping
 
 API_URL = "https://graphql.anilist.co"
@@ -87,7 +88,7 @@ async def lookup(mal_id: int, http: httpx.AsyncClient | None = None) -> AniListI
     global _down_until
     if _down_until > time.monotonic():
         raise AniListUnavailable("AniList was unreachable a moment ago")
-    client = http or httpx.AsyncClient(timeout=httpx.Timeout(15, connect=5))
+    client = http or shared_http.shared("anilist-lookup", timeout=httpx.Timeout(15, connect=5))
     try:
         resp = await client.post(API_URL, json={"query": QUERY, "variables": {"mal": mal_id}})
         if resp.status_code == 404:
@@ -98,9 +99,6 @@ async def lookup(mal_id: int, http: httpx.AsyncClient | None = None) -> AniListI
         _down_until = time.monotonic() + UNAVAILABLE_BACKOFF_S
         log.warning("AniList request failed (%s); skipping it for %ss", e, UNAVAILABLE_BACKOFF_S)
         raise AniListUnavailable(str(e)) from e
-    finally:
-        if http is None:
-            await client.aclose()
     media = (resp.json().get("data") or {}).get("Media")
     return parse_media(media) if media else None
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LOCALE, type T } from "@/lib/i18n";
 import { PROVIDER_LABELS } from "@/lib/languages";
 import { forgetShowStreams } from "@/lib/streamCache";
@@ -47,6 +47,7 @@ export function EpisodeBrowser({
   const [refreshing, setRefreshing] = useState(false);
   const { t } = useT();
   const { order, chosen, choose } = useStreamLanguage(animeId);
+  const rescanned = useRef(false);
 
   // Nothing has aired: there's nothing to look for.
   const nothingAired = aired === 0;
@@ -54,6 +55,9 @@ export function EpisodeBrowser({
   useEffect(() => {
     if (!scanning) return;
     let cancelled = false;
+    // A rescan (see below) counts as a scan seen, however fast it's done.
+    let sawScan = rescanned.current;
+    rescanned.current = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = () =>
       fetch(`/api/anime/${animeId}/availability`)
@@ -61,9 +65,14 @@ export function EpisodeBrowser({
         .then((next: Availability) => {
           if (cancelled) return;
           setData(next);
-          if (next.scanning) timer = setTimeout(load, POLL_MS);
-          // Scans can create provider mappings (e.g. AniWorld); let other panels refresh.
-          else window.dispatchEvent(new Event(SCAN_FINISHED_EVENT));
+          if (next.scanning) {
+            sawScan = true;
+            timer = setTimeout(load, POLL_MS);
+          } else if (sawScan) {
+            // Scans can create provider mappings (e.g. AniWorld); let other panels refresh.
+            // (Only after a scan this page saw: otherwise they have the current data already.)
+            window.dispatchEvent(new Event(SCAN_FINISHED_EVENT));
+          }
         })
         .catch(() => !cancelled && setFailed(true));
     load();
@@ -76,6 +85,7 @@ export function EpisodeBrowser({
   useEffect(() => {
     // Marking the data as scanning restarts polling, and the first poll starts the scan.
     const rescan = () => {
+      rescanned.current = true;
       forgetShowStreams(animeId); // the player's copy is outdated too
       setData((current) => current && { ...current, scanning: true });
     };

@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 import httpx
 
+from app.core import http as shared_http
 from app.core.config import get_settings
 
 Order = Literal["score", "popularity", "newest"]
@@ -103,11 +104,12 @@ def anime_row(item: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=20) as http:
-        try:
-            resp = await http.get(f"{get_settings().jikan_url.rstrip('/')}{path}", params=params)
-        except httpx.HTTPError as e:
-            raise JikanError(f"Jikan unreachable: {e}") from e
+    try:
+        resp = await shared_http.shared("jikan").get(
+            f"{get_settings().jikan_url.rstrip('/')}{path}", params=params
+        )
+    except httpx.HTTPError as e:
+        raise JikanError(f"Jikan unreachable: {e}") from e
     if resp.status_code >= 400:
         raise JikanError(f"Jikan {resp.status_code} for {path}: {resp.text[:200]}")
     return resp.json()

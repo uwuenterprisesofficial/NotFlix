@@ -1,0 +1,19 @@
+# Faster everyday use: the optimized frontend build instead of the development server (which
+# compiles each page on its first visit and ships unminified development React), and no
+# auto-reload for the backend. Changes to the code need a rebuild (`--build`).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+#
+# (Needs Docker Compose 2.24 or newer, for `!reset`.)
+services:
+  backend:
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      target: prod
+      args:
+        API_INTERNAL_URL: http://backend:8000
+    # The development setup mounts the source over the app; the build is in the image.
+    volumes: !reset []

@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from app.core import http as shared_http
 from app.core.config import get_settings
 
 API_BASE = "https://api.myanimelist.net/v2"
@@ -19,7 +20,14 @@ ANIME_FIELDS = (
 
 
 class MalError(RuntimeError):
-    pass
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status  # None: MAL wasn't reached
+
+    @property
+    def outage(self) -> bool:
+        """MAL is down or limiting (not: this request was wrong)."""
+        return self.status is None or self.status == 429 or self.status >= 500
 
 
 def new_code_verifier() -> str:
@@ -100,14 +108,15 @@ class MalClient:
             if access_token
             else {"X-MAL-CLIENT-ID": s.mal_client_id}
         )
-        self._http = http or httpx.AsyncClient(timeout=20)
+        # The shared client, unless one is given (tests).
+        self._http = http or shared_http.shared("mal")
         self._headers = headers
 
     async def __aenter__(self) -> "MalClient":
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        await self._http.aclose()
+        pass  # the client is shared
 
     async def _get(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
@@ -115,7 +124,7 @@ class MalClient:
         except httpx.HTTPError as e:
             raise MalError(f"MAL unreachable: {e}") from e
         if resp.status_code >= 400:
-            raise MalError(f"MAL {resp.status_code} for {url}: {resp.text[:200]}")
+            raise MalError(f"MAL {resp.status_code} for {url}: {resp.text[:200]}", resp.status_code)
         return resp.json()
 
     async def me(self) -> dict[str, Any]:
@@ -163,15 +172,14 @@ class MalClient:
         except httpx.HTTPError as e:
             raise MalError(f"MAL unreachable: {e}") from e
         if resp.status_code >= 400:
-            raise MalError(f"MAL {resp.status_code}: {resp.text[:200]}")
+            raise MalError(f"MAL {resp.status_code}: {resp.text[:200]}", resp.status_code)
         return resp.json()
 
 
 async def _token_request(data: dict[str, str]) -> TokenSet:
     s = get_settings()
     payload = {"client_id": s.mal_client_id, "client_secret": s.mal_client_secret, **data}
-    async with httpx.AsyncClient(timeout=20) as http:
-        resp = await http.post(f"{AUTH_BASE}/token", data=payload)
+    resp = await shared_http.shared("mal").post(f"{AUTH_BASE}/token", data=payload)
     if resp.status_code >= 400:
         raise MalError(f"MAL token request failed ({resp.status_code}): {resp.text[:200]}")
     return TokenSet(resp.json())

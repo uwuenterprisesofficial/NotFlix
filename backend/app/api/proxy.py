@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import Response, StreamingResponse
 from starlette.background import BackgroundTask
 
+from app.core import http as shared_http
 from app.services.proxy import InvalidToken, is_playlist, rewrite_playlist, unsign
 
 router = APIRouter(tags=["proxy"])
@@ -16,7 +17,7 @@ _client: httpx.AsyncClient | None = None
 def http_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
-        _client = httpx.AsyncClient(
+        _client = shared_http.new(
             timeout=httpx.Timeout(30, connect=10), follow_redirects=True, max_redirects=5
         )
     return _client
