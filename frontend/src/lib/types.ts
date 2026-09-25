@@ -32,6 +32,8 @@ export type AnimeCard = {
   prediction: Prediction | null;
   /** In the release calendar / New Episodes: this episode and its (Japanese) air time. */
   airing?: { episode: number; airing_at: string } | null;
+  /** Signed in: where the user stopped in the episode they're watching. */
+  resume?: { episode: number; position_s: number; duration_s: number | null } | null;
   status: string | null;
   start_season: string | null;
   /** While airing: the next episode and its air time. */
@@ -167,7 +169,7 @@ export type SkipSegment = {
   start_s: number;
   end_s: number;
   confidence: number;
-  source: "analysis" | "manual" | "provider";
+  source: "analysis" | "manual" | "provider" | "aniskip";
 };
 
 export type Episode = {

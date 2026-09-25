@@ -240,7 +240,15 @@ function Range({ label, segment }: { label: string; segment: SkipSegment | undef
   const { t } = useT();
   if (!segment) return <span className="text-muted">{t("analysis.notFound", { label })}</span>;
   return (
-    <span title={segment.source === "manual" ? t("analysis.manual") : undefined}>
+    <span
+      title={
+        segment.source === "manual"
+          ? t("analysis.manual")
+          : segment.source === "aniskip"
+            ? t("analysis.fromAniSkip")
+            : undefined
+      }
+    >
       {label} {formatTime(segment.start_s)} – {formatTime(segment.end_s)}
     </span>
   );

@@ -6,8 +6,8 @@ from sqlalchemy import select
 from app.api.calendar import cards as calendar_cards
 from app.api.deps import DB, OptionalUser
 from app.models import Anime, ListEntry, ListStatus, Recommendation
-from app.schemas import AnimeDetail, BrowseResponse, Row
-from app.services import airing, anilist_account, catalog, mal
+from app.schemas import AnimeDetail, BrowseResponse, ResumeOut, Row
+from app.services import airing, anilist_account, catalog, mal, positions
 from app.services.taste import predictor_for
 
 router = APIRouter(tags=["browse"])
@@ -127,6 +127,14 @@ async def browse(user: OptionalUser, db: DB):
             )
             if hero is None and ranked:
                 hero = detail(ranked[0])
+
+    if user is not None:
+        # Where the user stopped, for resuming right from the card.
+        shown = {card.id for row in rows for card in row.items} | ({hero.id} if hero else set())
+        saved = await positions.for_shows(db, user.id, list(shown))
+        for card in [c for row in rows for c in row.items] + ([hero] if hero else []):
+            if card.id in saved and not card.airing:
+                card.resume = ResumeOut.model_validate(saved[card.id])
 
     return BrowseResponse(
         hero=hero,

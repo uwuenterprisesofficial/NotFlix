@@ -168,6 +168,22 @@ class AiringEpisode(Base):
     airing_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class PlaybackPosition(Base):
+    """Where the user stopped in the episode they're watching of a show (one per show), to
+    resume from there on any device signed in with the same MAL/AniList account."""
+
+    __tablename__ = "playback_positions"
+    __table_args__ = (UniqueConstraint("user_id", "anime_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    anime_id: Mapped[int] = mapped_column(Integer)
+    episode: Mapped[int] = mapped_column(Integer)
+    position_s: Mapped[float] = mapped_column(Float)
+    duration_s: Mapped[float | None] = mapped_column(Float)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class TasteModel(Base):
     """A user's fitted score predictor (see services.taste), refitted on every list sync."""
 

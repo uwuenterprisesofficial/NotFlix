@@ -67,6 +67,12 @@ export const player = {
     en: "Embedded players can’t be read or controlled from NotFlix, so “Skip Intro” and starting the next episode automatically only work with direct sources.",
     de: "Eingebettete Player kann NotFlix weder auslesen noch steuern, deshalb funktionieren „Intro überspringen“ und das automatische Starten der nächsten Folge nur mit direkten Quellen.",
   },
+  "player.resumedAt": { en: "Resumed at {time}", de: "Fortgesetzt bei {time}" },
+  "player.startOver": { en: "Start over", de: "Von vorne" },
+  "player.skipAheadInfo": {
+    en: "Skip ahead (the intro's times aren't known yet)",
+    de: "Vorspulen (die Intro-Zeiten sind noch nicht bekannt)",
+  },
   "player.skipIntro": { en: "Skip Intro", de: "Intro überspringen" },
   "player.skipCredits": { en: "Skip Credits", de: "Abspann überspringen" },
   "player.inSeconds": { en: "in {s}s", de: "in {s} s" },

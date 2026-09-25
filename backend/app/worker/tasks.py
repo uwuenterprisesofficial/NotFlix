@@ -221,12 +221,14 @@ def run_analysis(job_id: str) -> None:
                     found.setdefault(episode, {}).setdefault(seg.kind, seg)
 
             # The job's episodes are recalculated: an earlier result that isn't found again
-            # (e.g. a wrong outro) goes. Manually entered times always stay.
+            # (e.g. a wrong outro) goes. Manually entered times always stay, and AniSkip's stay
+            # until a detected time replaces them.
             db.execute(
                 delete(SkipSegment).where(
                     SkipSegment.anime_id == job.anime_id,
                     SkipSegment.episode.in_(job.episodes),
-                    SkipSegment.source != "manual",
+                    # Entered by hand: kept. AniSkip's: kept until something replaces them.
+                    SkipSegment.source.notin_(("manual", "aniskip")),
                 )
             )
             db.flush()
@@ -245,9 +247,9 @@ def run_analysis(job_id: str) -> None:
                     row = existing.get((episode, seg.kind))
                     if row is not None and row.source == "manual":
                         continue
-                    # A partner episode only gains what it didn't have; the job's own
-                    # episodes are (re)calculated.
-                    if row is not None and episode not in job.episodes:
+                    # A partner episode only gains what it didn't have (AniSkip's stand-in
+                    # counts as not having it); the job's own episodes are (re)calculated.
+                    if row is not None and row.source != "aniskip" and episode not in job.episodes:
                         continue
                     if row is None:
                         row = SkipSegment(anime_id=job.anime_id, episode=episode, kind=seg.kind)

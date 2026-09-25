@@ -2,6 +2,7 @@
 
 import type Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
+import { formatTime } from "@/lib/format";
 import type { SkipSegment, Stream } from "@/lib/types";
 import { useT } from "../I18nProvider";
 import { FullscreenButton, useFrameFullscreen } from "./PlayerFrame";
@@ -36,6 +37,11 @@ function useStream(
 }
 
 const NEXT_COUNTDOWN_S = 10;
+const SAVE_EVERY_S = 15;
+const RESUME_NOTE_MS = 8000;
+// Without known intro times: jump the length of a typical opening, early in the episode.
+const SKIP_AHEAD_S = 85;
+const SKIP_AHEAD_UNTIL_S = 8 * 60;
 // A stream that hasn't loaded anything by then counts as broken.
 const LOAD_TIMEOUT_MS = 20_000;
 // Without detected credits, the "Next Episode" card shows this long before the end (1:30).
@@ -74,6 +80,8 @@ export function DirectVideo({
   onFail,
   resumeFrom,
   onPosition,
+  resumedAt = null,
+  onSave,
 }: {
   stream: Stream;
   segments: SkipSegment[];
@@ -88,6 +96,11 @@ export function DirectVideo({
   /** Where to start, e.g. the position of a stream that failed mid-episode. */
   resumeFrom?: () => number;
   onPosition?: (seconds: number) => void;
+  /** Where this episode was stopped last time (resume watching): shows "Start over". */
+  resumedAt?: number | null;
+  /** Remember the position: every little while, on pause, and when the tab goes away
+   * (`final`: the page may be closing, so it must go out right away). */
+  onSave?: (position: number, duration: number, final: boolean) => void;
 }) {
   const { t } = useT();
   const ref = useRef<HTMLVideoElement>(null);
@@ -104,6 +117,29 @@ export function DirectVideo({
   const [idle, setIdle] = useState(true);
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const fullscreen = useFrameFullscreen();
+  const [resumeNote, setResumeNote] = useState(false);
+  const lastSave = useRef(0);
+  const save = useRef<(final: boolean) => void>(() => {});
+  useEffect(() => {
+    save.current = (final) => {
+      const video = ref.current;
+      if (!video || !onSave || !loaded.current || !video.duration) return;
+      lastSave.current = video.currentTime;
+      onSave(video.currentTime, video.duration, final);
+    };
+  }, [onSave]);
+  // Closing the tab, switching away or navigating: save where playback is.
+  useEffect(() => {
+    const away = () => document.visibilityState === "hidden" && save.current(true);
+    const leave = () => save.current(true);
+    document.addEventListener("visibilitychange", away);
+    window.addEventListener("pagehide", leave);
+    return () => {
+      document.removeEventListener("visibilitychange", away);
+      window.removeEventListener("pagehide", leave);
+      save.current(true); // e.g. the next episode or another page in the app
+    };
+  }, []);
 
   const { toggle: toggleFullscreen, supported: canFullscreen } = fullscreen;
   useEffect(() => {
@@ -143,6 +179,7 @@ export function DirectVideo({
       video.currentTime = opening.end_s;
     }
     if (t >= creditsStart(ending, video.duration)) onNearEnd();
+    if (!video.paused && Math.abs(t - lastSave.current) >= SAVE_EVERY_S) save.current(false);
   }
 
   function wake() {
@@ -169,14 +206,24 @@ export function DirectVideo({
           fullscreen.toggle();
         }}
         onPlay={() => setPaused(false)}
-        onPause={() => setPaused(true)}
+        onPause={() => {
+          setPaused(true);
+          if (!ref.current?.ended) save.current(false);
+        }}
         autoPlay
         playsInline
         onTimeUpdate={onTimeUpdate}
         onLoadedMetadata={() => {
           loaded.current = true;
           const at = resumeFrom?.() ?? 0;
-          if (ref.current && at > 5) ref.current.currentTime = at;
+          if (ref.current && at > 5) {
+            ref.current.currentTime = at;
+            lastSave.current = at;
+            if (resumedAt && Math.abs(at - resumedAt) < 1) {
+              setResumeNote(true);
+              setTimeout(() => setResumeNote(false), RESUME_NOTE_MS);
+            }
+          }
         }}
         onPlaying={onStart}
         // Only the video's own errors; a subtitle track failing isn't the stream failing.
@@ -196,6 +243,32 @@ export function DirectVideo({
           />
         ))}
       </video>
+
+      {resumeNote && resumedAt && (
+        <div className="absolute top-4 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded bg-black/75 px-4 py-2 text-sm backdrop-blur">
+          {t("player.resumedAt", { time: formatTime(resumedAt) })}
+          <button
+            onClick={() => {
+              if (ref.current) ref.current.currentTime = 0;
+              setResumeNote(false);
+            }}
+            className="rounded bg-white/15 px-2 py-0.5 font-semibold hover:bg-white/25"
+          >
+            {t("player.startOver")}
+          </button>
+        </div>
+      )}
+
+      {/* No intro times known yet: a plain jump over a typical opening instead. */}
+      {!opening && time > 5 && time < SKIP_AHEAD_UNTIL_S && !inCredits && (
+        <button
+          onClick={() => ref.current && (ref.current.currentTime += SKIP_AHEAD_S)}
+          title={t("player.skipAheadInfo")}
+          className={`absolute right-8 bottom-24 rounded border border-white/50 bg-black/50 px-4 py-1.5 text-sm font-semibold backdrop-blur transition-opacity hover:bg-white hover:text-black ${idle && !paused ? "opacity-0" : "opacity-100"}`}
+        >
+          » {formatTime(SKIP_AHEAD_S)}
+        </button>
+      )}
 
       {inIntro && (
         <button

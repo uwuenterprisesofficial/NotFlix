@@ -35,6 +35,20 @@ class TagOut(BaseModel):
     category: Literal["genre", "explicit", "demographic", "theme"]
 
 
+class ResumeOut(ORM):
+    """Where the user stopped in the episode they're watching."""
+
+    episode: int
+    position_s: float
+    duration_s: float | None
+
+
+class PositionIn(BaseModel):
+    episode: int = Field(ge=1)
+    position_s: float = Field(ge=0)
+    duration_s: float | None = Field(default=None, gt=0)
+
+
 class AiringOut(BaseModel):
     episode: int
     airing_at: datetime
@@ -53,6 +67,7 @@ class AnimeCard(ORM):
     reason: str | None = None
     prediction: PredictionOut | None = None
     airing: AiringOut | None = None
+    resume: ResumeOut | None = None  # signed in: where the user stopped in this show
     status: str | None = None  # finished_airing, currently_airing, not_yet_aired
     start_season: str | None = None
     next_episode: int | None = None  # when airing: the next episode and its air time

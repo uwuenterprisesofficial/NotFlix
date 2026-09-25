@@ -9,7 +9,7 @@ import { EpisodeBrowser } from "@/components/EpisodeBrowser";
 import { PredictionPanel } from "@/components/PredictionPanel";
 import { apiOrNull } from "@/lib/api";
 import { Synopsis } from "@/components/Synopsis";
-import { displayTitle, mediaType, playableEpisode, seasonText } from "@/lib/format";
+import { displayTitle, formatTime, mediaType, playableEpisode, seasonText } from "@/lib/format";
 import { type T, formatNumber, genreName, tagName } from "@/lib/i18n";
 import { getT } from "@/lib/i18n/server";
 import type { AnimeDetail, Me } from "@/lib/types";
@@ -100,13 +100,18 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
           ) : (
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <Link
-                href={`/watch/${anime.id}/${playableEpisode(anime)}`}
+                href={`/watch/${anime.id}/${anime.resume?.episode ?? playableEpisode(anime)}`}
                 className="inline-flex items-center gap-2 rounded bg-white px-6 py-2 font-semibold text-black hover:bg-white/80"
               >
                 ▶{" "}
-                {watched
-                  ? t("detail.resume", { episode: playableEpisode(anime) })
-                  : t("detail.play1")}
+                {anime.resume
+                  ? t("detail.resumeAt", {
+                      episode: anime.resume.episode,
+                      time: formatTime(anime.resume.position_s),
+                    })
+                  : watched
+                    ? t("detail.resume", { episode: playableEpisode(anime) })
+                    : t("detail.play1")}
               </Link>
               {anime.next_episode && anime.next_episode_at && (
                 <span className="text-sm text-muted">
