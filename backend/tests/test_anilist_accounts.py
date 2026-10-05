@@ -260,7 +260,15 @@ async def test_linking_takes_the_account_from_another_user(client, providers):
 
 async def test_providers_and_unconfigured_login(client):
     providers = (await client.get("/auth/providers")).json()
-    assert providers == {"mal": False, "anilist": False, "public_url": "http://localhost:3000"}
+    assert providers == {
+        "mal": False,
+        "anilist": False,
+        "public_url": "http://localhost:3000",
+        "redirects": {
+            "mal": "http://localhost:3000/api/auth/callback",
+            "anilist": "http://localhost:3000/api/auth/anilist/callback",
+        },
+    }
     resp = await client.get("/auth/login", params={"provider": "anilist"})
     assert resp.status_code == 503
 
@@ -288,7 +296,7 @@ async def test_sign_in_from_the_desktop_app_hands_the_session_over(client, provi
     assert (await client.get("/me")).json()["name"] == "mal-user"
     client.cookies.clear()
     again = await client.get("/auth/handoff", params={"token": token})
-    assert again.headers["location"] == "/?login=failed"
+    assert again.headers["location"] == "/login?login=failed&reason=expired"
     assert (await client.get("/me")).status_code == 401
 
 
@@ -350,3 +358,25 @@ async def test_handoff_stays_on_its_origin(client, providers, to):
     await redis().set("handoff:t", 1, ex=60)
     res = await client.get("/auth/handoff", params={"token": "t", "to": to})
     assert res.headers["location"] == "/"
+
+
+async def test_failed_sign_ins_say_why(client, providers, monkeypatch):
+    from app.api import auth
+
+    async def bad_secret(code, verifier):
+        raise auth.mal.MalError("MAL token request failed (401): invalid_client")
+
+    # Not allowed at MAL.
+    start = await client.get("/auth/login", params={"provider": "mal"})
+    state = _state(start.headers["location"])
+    denied = await client.get("/auth/callback", params={"error": "access_denied", "state": state})
+    assert denied.headers["location"].endswith("/login?login=failed&provider=mal&reason=denied")
+    # The client secret is wrong: MAL doesn't hand out a token.
+    monkeypatch.setattr(auth.mal, "exchange_code", bad_secret)
+    start = await client.get("/auth/login", params={"provider": "mal"})
+    state = _state(start.headers["location"])
+    bad = await client.get("/auth/callback", params={"code": "c", "state": state})
+    assert bad.headers["location"].endswith("/login?login=failed&provider=mal&reason=token")
+    # Unknown (or used) state.
+    again = await client.get("/auth/callback", params={"code": "c", "state": state})
+    assert again.headers["location"].endswith("&provider=mal&reason=expired")

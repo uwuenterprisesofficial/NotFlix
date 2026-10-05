@@ -10,6 +10,15 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: `${t("login.title")} · NotFlix` };
 }
 
+type Providers = {
+  mal: boolean;
+  anilist: boolean;
+  /** The redirect URLs to register at each provider. */
+  redirects?: { mal: string; anilist: string };
+};
+
+const FAILURES = ["denied", "expired", "token", "client"] as const;
+
 // Plain anchors: these are full-page redirects to MyAnimeList/AniList, not client navigations.
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   // The backend may be unreachable (in the desktop app: not chosen yet, or wrong): the page
@@ -17,7 +26,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const [{ t }, me, providers, params] = await Promise.all([
     getT(),
     apiOrNull<Me>("/me").catch(() => null),
-    api<{ mal: boolean; anilist: boolean }>("/auth/providers").catch(() => null),
+    api<Providers>("/auth/providers").catch(() => null),
     searchParams,
   ]);
   // A guest signs in here to use their own list (keeping their Watch Together connections).
@@ -36,11 +45,32 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
     </div>
   );
 
+  /** Why signing in failed, as far as known: the reason comes from the backend's callback (or,
+   * for "client", from the desktop app, which sees the provider's error page). */
+  function failure() {
+    const provider =
+      params.provider === "anilist" ? "anilist" : params.provider === "mal" ? "mal" : null;
+    const reason = FAILURES.find((r) => r === params.reason);
+    const list = provider === "anilist" ? "AniList" : "MyAnimeList";
+    const redirect = provider && providers?.redirects?.[provider];
+    return (
+      <div className="mt-4 text-sm text-red-400">
+        <p>{provider && reason ? t(`login.failed.${reason}`, { list }) : t("login.failed")}</p>
+        {redirect && (reason === "client" || reason === "token") && (
+          <p className="mt-2 text-muted">
+            {t("login.failed.redirect", { list })}{" "}
+            <code className="break-all text-neutral-200">{redirect}</code>
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-md px-4 pt-32 pb-16">
       <h1 className="text-3xl font-black">{t("login.title")}</h1>
       <p className="mt-2 text-muted">{t("login.info")}</p>
-      {params.login === "failed" && <p className="mt-4 text-red-400">{t("login.failed")}</p>}
+      {params.login === "failed" && failure()}
       {me?.guest && <p className="mt-4 text-sm">{t("guest.note")}</p>}
       {providers ? (
         <div className="mt-8 space-y-4">

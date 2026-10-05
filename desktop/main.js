@@ -42,6 +42,8 @@ let origin = null; // the local server, e.g. http://127.0.0.1:47300
 let publicOrigin = null;
 let builtInRunning = false;
 let builtInError = null; // why the built-in server didn't start
+// The last page of the app itself: where "Back to NotFlix" on a sign-in page returns to.
+let lastAppPage = null;
 
 // --- Settings ---
 
@@ -316,6 +318,67 @@ function allowedInWindow(url) {
   return SIGN_IN_HOSTS.some((h) => target.hostname === h || target.hostname.endsWith(`.${h}`));
 }
 
+const PROVIDER_HOSTS = { "myanimelist.net": "mal", "anilist.co": "anilist" };
+
+/** Back one page; from a sign-in page (MyAnimeList, AniList), back to the app. */
+function goBack() {
+  if (!win) return;
+  if (!isApp(win.webContents.getURL()) && lastAppPage) {
+    void win.loadURL(lastAppPage);
+  } else if (win.webContents.navigationHistory.canGoBack()) {
+    win.webContents.navigationHistory.goBack();
+  }
+}
+
+/** On a page outside the app (signing in at MyAnimeList or AniList), a button back to it:
+ * the window has no address bar or back button of its own. */
+async function offerWayBack() {
+  const url = win?.webContents.getURL() ?? "";
+  if (!/^https?:/.test(url) || isApp(url)) return;
+  const target = JSON.stringify(lastAppPage ?? `${origin}/login`);
+  // In an isolated world: the page's own scripts can't see or change it.
+  await win.webContents
+    .executeJavaScriptInIsolatedWorld(1, [
+      {
+        code: `(() => {
+          if (document.getElementById("notflix-back")) return;
+          const button = document.createElement("button");
+          button.id = "notflix-back";
+          button.textContent = "← NotFlix";
+          button.title = "Back to NotFlix (Alt+←)";
+          button.style.cssText = "position:fixed;top:12px;left:12px;z-index:2147483647;" +
+            "padding:8px 14px;border:0;border-radius:6px;background:#e50914;color:#fff;" +
+            "font:600 14px system-ui,sans-serif;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,.4)";
+          button.addEventListener("click", () => { location.href = ${target}; });
+          document.body.appendChild(button);
+        })()`,
+      },
+    ])
+    .catch(() => {});
+}
+
+async function explainProviderError() {
+  let url;
+  try {
+    url = new URL(win.webContents.getURL());
+  } catch {
+    return;
+  }
+  const provider = PROVIDER_HOSTS[url.hostname.replace(/^www\./, "")];
+  if (!provider || !url.pathname.includes("oauth")) return;
+  const text = await win.webContents
+    .executeJavaScript("document.body ? document.body.innerText.slice(0, 1000) : ''")
+    .catch(() => "");
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return; // a normal page (the provider's sign-in form)
+  }
+  if (!body?.error) return;
+  void win.loadURL(`${origin}/login?login=failed&provider=${provider}&reason=client`);
+}
+
 function openOutside(url) {
   if (/^https?:\/\//.test(url)) void shell.openExternal(url);
 }
@@ -340,6 +403,31 @@ function createWindow() {
   win.once("ready-to-show", () => win.show());
   win.on("closed", () => (win = null));
 
+  // A provider that rejects the sign-in (wrong client ID, or a redirect URL that doesn't match
+  // the registered one) shows a bare JSON error page: back to the sign-in page, which explains.
+  win.webContents.on("did-finish-load", () => {
+    void explainProviderError();
+    void offerWayBack();
+  });
+  win.webContents.on("did-navigate", (_event, url) => {
+    if (isApp(url) && !new URL(url).pathname.startsWith("/api/")) lastAppPage = url;
+  });
+  // The mouse's back and forward buttons (Windows, Linux), and Alt+←/→ even with the menu
+  // bar hidden.
+  win.on("app-command", (_event, command) => {
+    if (command === "browser-backward") goBack();
+    else if (command === "browser-forward") win.webContents.navigationHistory.goForward();
+  });
+  win.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown" || !input.alt || input.control || input.meta) return;
+    if (input.key === "ArrowLeft") {
+      event.preventDefault();
+      goBack();
+    } else if (input.key === "ArrowRight") {
+      event.preventDefault();
+      win.webContents.navigationHistory.goForward();
+    }
+  });
   win.webContents.on("will-navigate", (event) => {
     if (allowedInWindow(event.url)) return;
     // While signing in, the provider's own pages go where they need to.
@@ -466,7 +554,7 @@ function buildMenu() {
         {
           label: "Back",
           accelerator: process.platform === "darwin" ? "Cmd+[" : "Alt+Left",
-          click: () => win?.webContents.navigationHistory.goBack(),
+          click: () => goBack(),
         },
         {
           label: "Forward",

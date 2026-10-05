@@ -117,7 +117,9 @@ On first start the app sets everything up: the database in its data folder (`%AP
 To sign in, create an API client at [MyAnimeList](https://myanimelist.net/apiconfig) and/or [AniList](https://anilist.co/settings/developer) and enter it under **Settings → Server**. That box shows the redirect URLs to register (`http://localhost:47300/api/auth/callback` and `…/anilist/callback`). **Save and restart** applies the settings. **Open logs** shows what each service wrote (`server/logs/`).
 
 - **AniWorld through:** AniScraper (the default) gives direct streams where it can resolve the hoster. SerienStreamAPI gives the hosters' own players. AnimeToast always comes from AniScraper.
-- **Other backend settings** (those in [`.env.example`](.env.example)): put them in `server.env` in that `server` folder, one `KEY=value` per line, and restart the app.
+- **Other backend settings** (those in [`.env.example`](.env.example)): put them in `server.env` in that `server` folder, one `KEY=value` per line, and restart the app. The built-in server sets its own addresses, keys and redirect URLs; it ignores those in `server.env` (a copied Docker `.env` can't point it at `http://aniscraper:8000`).
+- **Proxies:** requests between the services never go through a proxy, including one set in Windows' Internet settings.
+- **Signing in:** on MyAnimeList's or AniList's pages, **← NotFlix** (top left), Alt+← or the mouse's back button returns to the app.
 - **Data:** the database lives in `server/postgres`. Caches and job queues are in memory and start empty with each run.
 
 ### Another server

@@ -193,7 +193,9 @@ class Supervisor:
         self.start_postgres(self.data_dir / "postgres", pg_port, secret["dbPassword"])
         self.service("redis", [python, launcher, "redis", "--port", str(redis_port)])
 
-        backend_env = {
+        # The services this runs: their addresses and secrets win over the user's server.env
+        # (where e.g. a copied Docker .env would point ANISCRAPER_URL at http://aniscraper:8000).
+        managed = {
             "DATABASE_URL": (
                 f"postgresql+psycopg://notflix:{secret['dbPassword']}@{HOST}:{pg_port}/notflix"
             ),
@@ -204,13 +206,18 @@ class Supervisor:
             "MAL_REDIRECT_URI": f"{web_origin}/api/auth/callback",
             "ANILIST_REDIRECT_URI": f"{web_origin}/api/auth/anilist/callback",
             "ANISCRAPER_URL": f"http://{HOST}:{scraper_port}",
-            "ANIVEXA_URL": f"http://{HOST}:{anivexa_port}" if "anivexa" in components else "",
-            "ANIWORLD_API_URL": (
-                f"http://{HOST}:{aniworld_port}" if "aniworld-api" in components else ""
-            ),
-            "MEDIA_DIR": str(self.data_dir / "media"),
-            **extra_env,
         }
+        if "anivexa" in components:
+            managed["ANIVEXA_URL"] = f"http://{HOST}:{anivexa_port}"
+        if "aniworld-api" in components:
+            managed["ANIWORLD_API_URL"] = f"http://{HOST}:{aniworld_port}"
+        backend_env = {"MEDIA_DIR": str(self.data_dir / "media"), **extra_env, **managed}
+        ignored = sorted(k for k in extra_env if k in managed and extra_env[k] != managed[k])
+        if ignored:
+            print(
+                f"server.env: ignoring {', '.join(ignored)} (set by the built-in server)",
+                file=sys.stderr,
+            )
 
         def port_open(port: int):
             def check() -> bool:
@@ -289,7 +296,20 @@ def say(message: dict) -> None:
     sys.stdout.flush()
 
 
+def keep_local_traffic_direct() -> None:
+    """Requests between the services (127.0.0.1) never go through a proxy. On Windows a proxy
+    from the Internet settings would otherwise take them too (Python reads it from there), and
+    fail them: so those settings become environment variables, next to NO_PROXY."""
+    for scheme, url in urllib.request.getproxies().items():
+        if scheme != "no":
+            os.environ.setdefault(f"{scheme}_proxy", url)
+    existing = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
+    direct = ",".join(filter(None, [existing, "localhost,127.0.0.1,::1"]))
+    os.environ["NO_PROXY"] = os.environ["no_proxy"] = direct
+
+
 def supervise() -> None:
+    keep_local_traffic_direct()
     first = sys.stdin.readline()
     if not first:
         return
