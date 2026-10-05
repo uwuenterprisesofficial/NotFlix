@@ -38,6 +38,7 @@ async def test_browse_anonymous_without_mal_credentials(client):
         "signed_in": False,
         "mal_configured": False,
         "anilist_configured": False,
+        "syncing": False,
     }
 
 

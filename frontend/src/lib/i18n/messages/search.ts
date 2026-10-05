@@ -32,6 +32,15 @@ export const search = {
     de: " · aus Serien, die NotFlix schon kennt",
   },
   "search.nothing": { en: "Nothing found.", de: "Nichts gefunden." },
+  "search.searching": { en: "Searching…", de: "Suche…" },
+  "search.searchingMore": {
+    en: "Searching MyAnimeList for more…",
+    de: "Suche auf MyAnimeList nach mehr…",
+  },
+  "search.failed": {
+    en: "MyAnimeList didn't answer. Try again in a moment.",
+    de: "MyAnimeList hat nicht geantwortet. Versuch es gleich nochmal.",
+  },
   "search.previous": { en: "‹ Previous", de: "‹ Zurück" },
   "search.next": { en: "Next ›", de: "Weiter ›" },
   "search.page": { en: "Page {page}", de: "Seite {page}" },

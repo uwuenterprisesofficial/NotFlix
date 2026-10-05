@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, status
 from app.api.admin import is_admin
 from app.api.deps import DB, CurrentUser, ListUser
 from app.schemas import AccountOut, Me, StatsStatusOut, SyncResult
-from app.services import anilist_account, list_writer, mal, stats_jobs
+from app.services import anilist_account, list_writer, mal, stats_jobs, sync_jobs
 from app.services.sync import sync_user
 
 router = APIRouter(prefix="/me", tags=["me"])
@@ -21,12 +21,16 @@ async def me(user: CurrentUser):
         mal=AccountOut(name=user.mal_name) if user.has_mal else None,
         anilist=AccountOut(name=user.anilist_name) if user.has_anilist else None,
         writing=list_writer.progress(user.id),
+        syncing=sync_jobs.running(user.id),
     )
 
 
 @router.post("/sync", response_model=SyncResult)
 async def sync(user: ListUser, db: DB):
     try:
+        # A sync already running in the background (after signing in): its result.
+        if sync_jobs.running(user.id) and (result := await sync_jobs.wait(user.id)) is not None:
+            return result
         result = await sync_user(db, user)
     except (mal.MalError, anilist_account.AniListError) as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e

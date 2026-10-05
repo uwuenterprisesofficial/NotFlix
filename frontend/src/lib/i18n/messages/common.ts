@@ -171,6 +171,15 @@ export const common = {
     de: "Weil dir {title} gefallen hat",
   },
   "home.emptyTitle": { en: "Nothing here yet", de: "Noch nichts hier" },
+  "home.importingTitle": { en: "Importing your list…", de: "Deine Liste wird importiert…" },
+  "home.importingBody": {
+    en: "Your shows and recommendations appear here by themselves in a moment.",
+    de: "Deine Serien und Empfehlungen erscheinen hier gleich von selbst.",
+  },
+  "home.importingUpdate": {
+    en: "Updating your list and recommendations…",
+    de: "Liste und Empfehlungen werden aktualisiert…",
+  },
   "home.emptyBody": {
     en: "Press “Sync lists” to import your list and build recommendations.",
     de: "Klicke auf „Listen synchronisieren“, um deine Liste zu importieren und Empfehlungen zu erstellen.",

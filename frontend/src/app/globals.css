@@ -9,6 +9,16 @@
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
+/* The search page's progress bar: a stripe sliding across. */
+@keyframes search-progress {
+  from {
+    left: -33%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
 @utility no-scrollbar {
   scrollbar-width: none;
   &::-webkit-scrollbar {

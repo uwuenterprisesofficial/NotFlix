@@ -7,7 +7,7 @@ from app.api.calendar import cards as calendar_cards
 from app.api.deps import DB, OptionalUser
 from app.models import Anime, ListEntry, ListStatus, Recommendation
 from app.schemas import AnimeDetail, BrowseResponse, ResumeOut, Row
-from app.services import airing, anilist_account, catalog, mal, positions
+from app.services import airing, anilist_account, catalog, mal, positions, sync_jobs
 from app.services.taste import predictor_for
 
 router = APIRouter(tags=["browse"])
@@ -142,4 +142,5 @@ async def browse(user: OptionalUser, db: DB):
         signed_in=user is not None,
         mal_configured=catalog.mal_configured(),
         anilist_configured=anilist_account.configured(),
+        syncing=user is not None and sync_jobs.running(user.id),
     )
