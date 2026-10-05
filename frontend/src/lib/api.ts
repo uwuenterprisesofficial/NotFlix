@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { backendUrl } from "./backend";
+import { API_KEY_HEADER, apiKey, backendUrl } from "./backend";
 
 export class ApiError extends Error {
   constructor(
@@ -16,7 +16,7 @@ export async function api<T>(path: string): Promise<T> {
   // of the backend's session cookie.
   const cookie = (await headers()).get("cookie");
   const res = await fetch(`${backendUrl()}${path}`, {
-    headers: cookie ? { cookie } : {},
+    headers: { ...(cookie ? { cookie } : {}), [API_KEY_HEADER]: apiKey() },
     cache: "no-store",
   });
   if (!res.ok) throw new ApiError(res.status, await res.text());

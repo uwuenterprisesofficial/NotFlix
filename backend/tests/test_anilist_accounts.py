@@ -301,15 +301,33 @@ async def test_desktop_sign_in_with_both_returns_to_the_desktop(client, provider
     first = await client.get(
         "/auth/callback", params={"code": "c", "state": _state(start.headers["location"])}
     )
-    # On to AniList on the server's origin (its session remembers the desktop).
-    assert first.headers["location"].endswith("/api/auth/login?provider=anilist&link=true")
-    start = await client.get("/auth/login", params={"provider": "anilist", "link": "true"})
+    # Signed in on the desktop, which then starts the AniList sign-in itself (its proxy has the
+    # API key; the server's web app may not).
+    location = urlsplit(first.headers["location"])
+    assert f"{location.scheme}://{location.netloc}{location.path}" == (
+        f"{DESKTOP}/api/auth/handoff"
+    )
+    query = parse_qs(location.query)
+    assert query["to"] == ["/api/auth/login?provider=anilist&link=true"]
+    client.cookies.clear()
+    await client.get("/auth/handoff", params={"token": query["token"][0]})
+    start = await client.get(
+        "/auth/login",
+        params={"provider": "anilist", "link": "true"},
+        headers={"x-notflix-origin": DESKTOP},
+    )
     done = await client.get(
         "/auth/anilist/callback", params={"code": "c", "state": _state(start.headers["location"])}
     )
     location = done.headers["location"]
     assert location.startswith(f"{DESKTOP}/api/auth/handoff?token=")
     assert parse_qs(urlsplit(location).query)["to"] == ["/settings?login=ok&account=anilist"]
+    client.cookies.clear()
+    await client.get(
+        "/auth/handoff", params={"token": parse_qs(urlsplit(location).query)["token"][0]}
+    )
+    me = (await client.get("/me")).json()
+    assert (me["mal"], me["anilist"]) == ({"name": "mal-user"}, {"name": "al-user"})
 
 
 @pytest.mark.parametrize(

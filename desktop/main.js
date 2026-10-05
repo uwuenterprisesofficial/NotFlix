@@ -2,10 +2,11 @@
 //
 // The app runs the web frontend's own server (the Next.js standalone build in server/) on this
 // PC and shows it in a window. That server passes /api/* on to the NotFlix backend chosen in the
-// app's settings, which can run anywhere (e.g. on a home server). The backend's address is kept
-// in config.json in the app's data folder; changing it restarts the local server.
+// app's settings, which can run anywhere (e.g. on a home server), adding the backend's API key.
+// The address and key are kept in config.json in the app's data folder (the key encrypted with
+// the system's key store where there is one); changing them restarts the local server.
 
-const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, safeStorage, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
@@ -51,6 +52,24 @@ function writeConfig(config) {
   fs.writeFileSync(configPath(), JSON.stringify(config, null, 2));
 }
 
+function readKey(config) {
+  if (config.keyEncrypted) {
+    try {
+      return safeStorage.decryptString(Buffer.from(config.keyEncrypted, "base64"));
+    } catch {
+      return ""; // encrypted by another user or system: enter it again
+    }
+  }
+  return config.key || "";
+}
+
+function withKey(config, key) {
+  const { key: _plain, keyEncrypted: _encrypted, ...rest } = config;
+  return safeStorage.isEncryptionAvailable()
+    ? { ...rest, keyEncrypted: safeStorage.encryptString(key).toString("base64") }
+    : { ...rest, key };
+}
+
 /** An http(s) address without a trailing slash, or null. */
 function normalize(raw) {
   let url;
@@ -65,24 +84,30 @@ function normalize(raw) {
   return url.toString().replace(/\/+$/, "");
 }
 
-/** Whether a NotFlix backend answers at `url`: "ok", "unreachable" or "notNotflix". */
-async function check(url) {
+/** Whether a NotFlix backend answers at `url` and takes `key`: "ok", "unreachable",
+ * "wrongKey" or "notNotflix". */
+async function check(url, key) {
   let res;
   try {
-    res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) });
+    res = await fetch(`${url}/health`, {
+      headers: { "x-api-key": key },
+      signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
+    });
   } catch {
     return "unreachable";
   }
   const body = await res.json().catch(() => null);
+  if (res.status === 401 && /API key/.test(body?.detail ?? "")) return "wrongKey";
   return res.ok && body?.status === "ok" ? "ok" : "notNotflix";
 }
 
 /** The backend's web app (its FRONTEND_URL): sign-ins come back through it. */
-async function learnPublicOrigin(backend) {
+async function learnPublicOrigin(backend, key) {
   publicOrigin = null;
   if (!backend) return;
   try {
     const res = await fetch(`${backend}/auth/providers`, {
+      headers: { "x-api-key": key },
       signal: AbortSignal.timeout(CHECK_TIMEOUT_MS),
     });
     const body = await res.json();
@@ -125,6 +150,7 @@ async function waitUntilUp(url, child) {
 
 async function startServer() {
   const config = readConfig();
+  const key = readKey(config);
   const port = await choosePort(config.port);
   if (port !== config.port) writeConfig({ ...config, port });
   const log = fs.createWriteStream(path.join(app.getPath("userData"), "server.log"));
@@ -140,6 +166,7 @@ async function startServer() {
       PORT: String(port),
       NOTFLIX_DESKTOP: "1",
       API_INTERNAL_URL: config.backend || NO_BACKEND,
+      API_KEY: key,
     },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -148,7 +175,7 @@ async function startServer() {
   child.stderr.pipe(log);
   server = child;
   origin = `http://127.0.0.1:${port}`;
-  await Promise.all([waitUntilUp(origin, child), learnPublicOrigin(config.backend)]);
+  await Promise.all([waitUntilUp(origin, child), learnPublicOrigin(config.backend, key)]);
 }
 
 function stopServer() {
@@ -227,15 +254,22 @@ function createWindow() {
   void win.loadURL(`${origin}${start}`);
 }
 
-ipcMain.handle("backend:get", () => readConfig().backend ?? null);
+ipcMain.handle("backend:get", () => {
+  const config = readConfig();
+  return { url: config.backend ?? null, hasKey: readKey(config) !== "" };
+});
 
-ipcMain.handle("backend:set", async (event, raw) => {
+ipcMain.handle("backend:set", async (event, raw, rawKey) => {
   if (!isApp(event.senderFrame?.url ?? "")) return { ok: false, error: "invalid" };
   const backend = normalize(raw);
   if (!backend) return { ok: false, error: "invalid" };
-  const status = await check(backend);
+  const config = readConfig();
+  // Left empty: the saved one.
+  const key = String(rawKey ?? "").trim() || readKey(config);
+  if (!key) return { ok: false, error: "missingKey" };
+  const status = await check(backend, key);
   if (status !== "ok") return { ok: false, error: status };
-  writeConfig({ ...readConfig(), backend });
+  writeConfig(withKey({ ...config, backend }, key));
   await stopServer();
   await startServer();
   // Signed in at another backend (or not at all): start over.

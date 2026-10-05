@@ -5,21 +5,28 @@ import { type BackendError, useDesktop } from "@/lib/desktop";
 import { useT } from "../I18nProvider";
 
 /**
- * The desktop app's backend address (only shown in the desktop app). Saving checks that a
- * NotFlix backend answers there; the app then restarts its local server with it and reloads.
+ * The desktop app's backend address and API key (only shown in the desktop app). Saving checks
+ * that a NotFlix backend answers there and takes the key; the app then restarts its local
+ * server with them and reloads.
  */
+const FIELD =
+  "mt-1 block w-full rounded bg-neutral-800 px-3 py-2 text-sm ring-1 ring-white/10 outline-none focus:ring-white/40";
+
 export function ServerSettings({ unreachable = false }: { unreachable?: boolean }) {
   const { t } = useT();
   const desktop = useDesktop();
   const [current, setCurrent] = useState<string | null>(null);
   const [url, setUrl] = useState("");
+  const [key, setKey] = useState("");
+  const [hasKey, setHasKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<BackendError | null>(null);
 
   useEffect(() => {
-    void desktop?.backend().then((value) => {
-      setCurrent(value);
-      setUrl((typed) => typed || value || "");
+    void desktop?.backend().then((saved) => {
+      setCurrent(saved.url);
+      setHasKey(saved.hasKey);
+      setUrl((typed) => typed || saved.url || "");
     });
   }, [desktop]);
 
@@ -30,7 +37,7 @@ export function ServerSettings({ unreachable = false }: { unreachable?: boolean 
     if (!desktop) return;
     setBusy(true);
     setError(null);
-    const result = await desktop.setBackend(url.trim());
+    const result = await desktop.setBackend(url.trim(), key.trim());
     // On success the app reloads; until then it says so.
     if (!result.ok) {
       setError(result.error);
@@ -47,16 +54,32 @@ export function ServerSettings({ unreachable = false }: { unreachable?: boolean 
           {current ? t("server.unreachable", { url: current }) : t("server.missing")}
         </p>
       )}
-      <form onSubmit={save} className="mt-4 flex flex-col gap-3 sm:flex-row">
-        <input
-          type="url"
-          required
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://notflix.example.com/api"
-          aria-label={t("server.address")}
-          className="min-w-0 flex-1 rounded bg-neutral-800 px-3 py-2 text-sm ring-1 ring-white/10 outline-none focus:ring-white/40"
-        />
+      <form onSubmit={save} className="mt-4 space-y-3">
+        <label className="block">
+          <span className="text-sm font-semibold">{t("server.address")}</span>
+          <input
+            type="url"
+            name="url"
+            required
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://notflix.example.com/api"
+            className={FIELD}
+          />
+        </label>
+        <label className="block">
+          <span className="text-sm font-semibold">{t("server.key")}</span>
+          <input
+            type="password"
+            name="key"
+            autoComplete="off"
+            required={!hasKey}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder={hasKey ? t("server.keySaved") : "API_KEY"}
+            className={FIELD}
+          />
+        </label>
         <button
           type="submit"
           disabled={busy}

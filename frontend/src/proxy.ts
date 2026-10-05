@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { backendUrl, isDesktop } from "@/lib/backend";
+import { API_KEY_HEADER, apiKey, backendUrl, isDesktop } from "@/lib/backend";
 
 // Tells the backend which origin the browser uses, so a sign-in started in the desktop app
 // returns there (the backend only accepts loopback origins for this).
@@ -20,6 +20,8 @@ export function proxy(request: NextRequest) {
   // app's /api.
   const host = request.headers.get("host");
   if (isDesktop() && host) headers.set(ORIGIN_HEADER, `http://${host}`);
+  const key = apiKey();
+  if (key) headers.set(API_KEY_HEADER, key);
   return NextResponse.rewrite(target, { request: { headers } });
 }
 

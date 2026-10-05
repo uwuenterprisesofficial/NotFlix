@@ -95,9 +95,8 @@ async def login(
             pending["user_id"] = signed_in
     if then and then != provider and configured(then):
         pending["then"] = then
-    # Started from the desktop app (its proxy says so), or chained from a sign-in that was.
-    chained = request.session.pop("origin", None) if link else None
-    if desktop := desktop_origin(request.headers.get(ORIGIN_HEADER) or chained):
+    # Started from the desktop app (its proxy says so).
+    if desktop := desktop_origin(request.headers.get(ORIGIN_HEADER)):
         pending["origin"] = desktop
     if provider == "mal":
         pending["verifier"] = mal.new_code_verifier()
@@ -187,19 +186,18 @@ async def _finish(
         # Another list is part of the user now: its statistics need recomputing.
         await stats_jobs.forget(user.id)
 
+    prefix = get_settings().public_api_prefix
     if then := pending.get("then"):
-        # The next provider, linked to this user (the session on this origin says who).
-        prefix = get_settings().public_api_prefix
-        if pending.get("origin"):
-            request.session["origin"] = pending["origin"]
-        return RedirectResponse(f"{frontend}{prefix}/auth/login?provider={then}&link=true")
-    target = "/settings" if pending.get("link") else "/"
-    target = f"{target}?login=ok&account={provider}"
+        # The next provider, linked to this user (the session says who).
+        target = f"{prefix}/auth/login?provider={then}&link=true"
+    else:
+        target = "/settings" if pending.get("link") else "/"
+        target = f"{target}?login=ok&account={provider}"
     if origin := pending.get("origin"):
-        # Back to the desktop app: a one-time token signs it in there.
+        # Back to the desktop app: a one-time token signs it in there. (Signing in with both,
+        # the second sign-in then starts there too, through its proxy, which has the API key.)
         token = secrets.token_urlsafe(32)
         await redis().set(f"handoff:{token}", user.id, ex=HANDOFF_TTL_S)
-        prefix = get_settings().public_api_prefix
         return RedirectResponse(
             f"{origin}{prefix}/auth/handoff?token={token}&to={quote(target, safe='')}"
         )

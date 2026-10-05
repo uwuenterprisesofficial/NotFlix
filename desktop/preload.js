@@ -6,6 +6,6 @@ const { contextBridge, ipcRenderer } = require("electron");
 if (location.protocol === "http:" && location.hostname === "127.0.0.1") {
   contextBridge.exposeInMainWorld("notflixDesktop", {
     backend: () => ipcRenderer.invoke("backend:get"),
-    setBackend: (url) => ipcRenderer.invoke("backend:set", String(url)),
+    setBackend: (url, key) => ipcRenderer.invoke("backend:set", String(url), String(key ?? "")),
   });
 }

@@ -34,7 +34,7 @@ The browser only talks to Next.js. `/api/*` is proxied to FastAPI, so the sessio
 ## Getting started
 
 1. Create a MAL API client at <https://myanimelist.net/apiconfig>. Choose app type **web** and set the redirect URL to `http://localhost:3000/api/auth/callback`.
-2. `cp .env.example .env`, then fill in `MAL_CLIENT_ID`, `MAL_CLIENT_SECRET` and `SECRET_KEY`.
+2. `cp .env.example .env`, then fill in `MAL_CLIENT_ID`, `MAL_CLIENT_SECRET`, `SECRET_KEY` and `API_KEY` (see [API key](#api-key)); to use NotFlix in the browser, also set `WEB_API_KEY` to the same key.
 3. `docker compose up --build`
 4. Open <http://localhost:3000>, sign in, and press **Sync MAL**.
 
@@ -54,14 +54,22 @@ Needs Postgres, Redis and ffmpeg installed locally.
 cd backend
 uv sync
 uv run alembic upgrade head
-uv run uvicorn app.main:app --reload        # API on :8000
+uv run uvicorn app.main:app --reload        # API on :8000 (API_KEY in .env)
 uv run rq worker analysis                   # analysis worker
 uv run rq worker catalog                    # catalogue worker
 
 cd ../frontend
 npm install
-npm run dev                                 # UI on :3000
+API_KEY=<the API_KEY> npm run dev           # UI on :3000
 ```
+
+### API key
+
+The API answers only requests that carry its key (`API_KEY`, at least 16 characters) in the `X-API-Key` header; everything else gets `401`, including `/health` and `/docs`, and the API doesn't start without a key. Browsers never see the key: the frontend's server adds it to the requests it passes on to the API.
+
+- **Desktop app:** you enter the key next to the server's address. It stays in the app (encrypted with the system's key store where there is one).
+- **Web app:** it adds `WEB_API_KEY` (in `docker compose`; `API_KEY` in its environment otherwise). Set it to the API key to use NotFlix in a browser; anyone who can open the web app then uses the API through it, so only expose it where that's fine. Left empty, the web app adds no key and only passes on requests that bring the right one themselves: the desktop app can then connect through the web app's `/api`, and browsers get nothing.
+- **Sign-in redirects** from MyAnimeList and AniList (`/auth/callback`, `/auth/anilist/callback`) are the only requests without the key: the provider sends the browser there. They only finish a sign-in that was started with the key (matched by its one-time `state`).
 
 ## Desktop app
 
@@ -77,12 +85,12 @@ npm run dist:win        # or dist:mac, dist:linux; the installer lands in deskto
 
 For development, `npm run server` (builds the frontend into `desktop/server/`) and then `npm start`.
 
-**Connect it.** On first start the sign-in page shows a **Server** box: enter the backend's address and press **Connect**. The app checks that a NotFlix backend answers there (`/health`), saves it, and restarts its local server. Either address works:
+**Connect it.** On first start the sign-in page shows a **Server** box: enter the backend's address and its [API key](#api-key), and press **Connect**. The app checks that a NotFlix backend answers there and takes the key (`/health`), saves both, and restarts its local server. Either address works:
 
 - the backend itself, e.g. `http://my-server:8000` (when port 8000 is reachable from the PC), or
-- the web app's address with `/api`, e.g. `https://notflix.example.com/api`.
+- the web app's address with `/api`, e.g. `https://notflix.example.com/api` (this works whether or not the web app has a key of its own).
 
-The address can be changed later under **Settings → Server** or **File → Server settings…**, and the box also shows on any page that can't reach the backend. It's kept in `config.json` in the app's data folder (`%APPDATA%\notflix-desktop` on Windows), next to `server.log`, the local server's output.
+The address and key can be changed later (leave the key empty to keep the saved one) under **Settings → Server** or **File → Server settings…**, and the box also shows on any page that can't reach the backend. It's kept in `config.json` in the app's data folder (`%APPDATA%\notflix-desktop` on Windows), next to `server.log`, the local server's output.
 
 **Signing in** needs nothing new at MyAnimeList or AniList: the redirect URLs stay the server's (`MAL_REDIRECT_URI`, `ANILIST_REDIRECT_URI`, `FRONTEND_URL` in the server's `.env`). The provider's page opens in the app's window and returns to the server's web app, which hands the sign-in back to the desktop app with a one-time token (valid for 2 minutes; only `localhost`/`127.0.0.1` addresses are accepted as targets). So `FRONTEND_URL` must be an address the PC can open.
 
