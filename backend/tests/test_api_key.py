@@ -31,7 +31,7 @@ async def test_oauth_redirects_come_without_it(anonymous):
     # key (its state), they only report a failed sign-in.
     for path in ("/auth/callback", "/auth/anilist/callback"):
         res = await anonymous.get(path, params={"code": "c", "state": "made-up"})
-        assert res.status_code == 307 and res.headers["location"].endswith("/?login=failed")
+        assert res.status_code == 307 and res.headers["location"].endswith("&reason=expired")
 
 
 @pytest.mark.parametrize("key", ["", "short"])

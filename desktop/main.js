@@ -316,6 +316,30 @@ function allowedInWindow(url) {
   return SIGN_IN_HOSTS.some((h) => target.hostname === h || target.hostname.endsWith(`.${h}`));
 }
 
+const PROVIDER_HOSTS = { "myanimelist.net": "mal", "anilist.co": "anilist" };
+
+async function explainProviderError() {
+  let url;
+  try {
+    url = new URL(win.webContents.getURL());
+  } catch {
+    return;
+  }
+  const provider = PROVIDER_HOSTS[url.hostname.replace(/^www\./, "")];
+  if (!provider || !url.pathname.includes("oauth")) return;
+  const text = await win.webContents
+    .executeJavaScript("document.body ? document.body.innerText.slice(0, 1000) : ''")
+    .catch(() => "");
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return; // a normal page (the provider's sign-in form)
+  }
+  if (!body?.error) return;
+  void win.loadURL(`${origin}/login?login=failed&provider=${provider}&reason=client`);
+}
+
 function openOutside(url) {
   if (/^https?:\/\//.test(url)) void shell.openExternal(url);
 }
@@ -340,6 +364,9 @@ function createWindow() {
   win.once("ready-to-show", () => win.show());
   win.on("closed", () => (win = null));
 
+  // A provider that rejects the sign-in (wrong client ID, or a redirect URL that doesn't match
+  // the registered one) shows a bare JSON error page: back to the sign-in page, which explains.
+  win.webContents.on("did-finish-load", () => void explainProviderError());
   win.webContents.on("will-navigate", (event) => {
     if (allowedInWindow(event.url)) return;
     // While signing in, the provider's own pages go where they need to.

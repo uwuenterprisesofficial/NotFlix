@@ -15,7 +15,7 @@ token can never be sent to another site.
 
 import json
 import secrets
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -56,6 +56,13 @@ def _frontend(pending: dict | None) -> str:
     return (pending or {}).get("origin") or get_settings().frontend_url
 
 
+def _failed(pending: dict | None, provider: Provider, reason: str) -> RedirectResponse:
+    """Back to the sign-in page, saying why: "denied" (not allowed at the provider), "expired"
+    (no such sign-in, or too old) or "token" (the provider didn't take the client secret)."""
+    query = f"login=failed&provider={provider}&reason={reason}"
+    return RedirectResponse(f"{_frontend(pending)}/login?{query}")
+
+
 def configured(provider: str) -> bool:
     if provider == "mal":
         return bool(get_settings().mal_client_id)
@@ -63,13 +70,16 @@ def configured(provider: str) -> bool:
 
 
 @router.get("/providers")
-async def providers() -> dict[str, bool | str]:
-    """Which sign-in providers are set up, and the web app's public address (FRONTEND_URL), e.g.
-    for invite links made in the desktop app."""
+async def providers() -> dict[str, Any]:
+    """Which sign-in providers are set up, the web app's public address (FRONTEND_URL, e.g. for
+    invite links made in the desktop app), and the redirect URLs to register at the providers
+    (shown when a provider rejects a sign-in)."""
+    settings = get_settings()
     return {
         "mal": configured("mal"),
         "anilist": configured("anilist"),
-        "public_url": get_settings().frontend_url,
+        "public_url": settings.frontend_url,
+        "redirects": {"mal": settings.mal_redirect_uri, "anilist": settings.anilist_redirect_uri},
     }
 
 
@@ -213,7 +223,7 @@ async def handoff(request: Request, token: str, to: str = "/") -> RedirectRespon
     if not to.startswith("/") or to.startswith(("//", "/\\")):
         to = "/"
     if user_id is None:
-        return RedirectResponse("/?login=failed")
+        return RedirectResponse("/login?login=failed&reason=expired")
     request.session["user_id"] = int(user_id)
     return RedirectResponse(to)
 
@@ -228,11 +238,16 @@ async def callback(
 ) -> RedirectResponse:
     """MyAnimeList's OAuth redirect (the URL registered at MAL, so it keeps its name)."""
     pending = await _pending("mal", state)
-    if error or not code or pending is None:
-        return RedirectResponse(f"{_frontend(pending)}/?login=failed")
-    tokens = await mal.exchange_code(code, pending["verifier"])
-    async with mal.MalClient(tokens.access_token) as client:
-        profile = await client.me()
+    if pending is None:
+        return _failed(None, "mal", "expired")
+    if error or not code:
+        return _failed(pending, "mal", "denied")
+    try:
+        tokens = await mal.exchange_code(code, pending["verifier"])
+        async with mal.MalClient(tokens.access_token) as client:
+            profile = await client.me()
+    except mal.MalError:
+        return _failed(pending, "mal", "token")
     return await _finish(
         request, db, pending, profile["id"], profile["name"], profile.get("picture"),
         {
@@ -252,14 +267,16 @@ async def anilist_callback(
     error: str | None = None,
 ) -> RedirectResponse:
     pending = await _pending("anilist", state)
-    if error or not code or pending is None:
-        return RedirectResponse(f"{_frontend(pending)}/?login=failed")
+    if pending is None:
+        return _failed(None, "anilist", "expired")
+    if error or not code:
+        return _failed(pending, "anilist", "denied")
     try:
         token = await anilist_account.exchange_code(code)
         async with anilist_account.AniListClient(token.access_token) as client:
             viewer = await client.viewer()
     except anilist_account.AniListError:
-        return RedirectResponse(f"{_frontend(pending)}/?login=failed")
+        return _failed(pending, "anilist", "token")
     avatar = viewer.get("avatar") or {}
     return await _finish(
         request, db, pending, viewer["id"], viewer["name"], avatar.get("large"),

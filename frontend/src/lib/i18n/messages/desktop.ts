@@ -21,8 +21,8 @@ export const desktop = {
   "server.anilistClientId": { en: "AniList client ID", de: "AniList-Client-ID" },
   "server.anilistClientSecret": { en: "AniList client secret", de: "AniList-Client-Secret" },
   "server.redirects": {
-    en: "Redirect URLs to register there:",
-    de: "Dort einzutragende Redirect-URLs:",
+    en: "Register exactly these redirect URLs there (a MyAnimeList client has only one, so this app needs a client of its own if you also use NotFlix elsewhere):",
+    de: "Trage dort genau diese Redirect-URLs ein (ein MyAnimeList-Client hat nur eine: diese App braucht einen eigenen Client, wenn du NotFlix auch anderswo nutzt):",
   },
   "server.aniworldVia": { en: "AniWorld through", de: "AniWorld über" },
   "server.viaAniScraper": {

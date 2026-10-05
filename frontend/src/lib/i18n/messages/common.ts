@@ -55,6 +55,26 @@ export const common = {
     en: "Signing in failed. Try again.",
     de: "Anmeldung fehlgeschlagen. Versuch es nochmal.",
   },
+  "login.failed.denied": {
+    en: "Signing in was cancelled at {list}.",
+    de: "Die Anmeldung wurde bei {list} abgebrochen.",
+  },
+  "login.failed.expired": {
+    en: "This sign-in took too long or was already used. Try again.",
+    de: "Diese Anmeldung hat zu lange gedauert oder wurde schon benutzt. Versuch es nochmal.",
+  },
+  "login.failed.token": {
+    en: "{list} didn't accept the client secret. Check that the client ID and secret belong together.",
+    de: "{list} hat das Client-Secret nicht akzeptiert. Prüfe, ob Client-ID und Secret zusammengehören.",
+  },
+  "login.failed.client": {
+    en: "{list} rejected the sign-in (\"Client authentication failed\"). Either the client ID is wrong, or the redirect URL registered for it doesn't match.",
+    de: "{list} hat die Anmeldung abgelehnt („Client authentication failed“). Entweder stimmt die Client-ID nicht, oder die dafür eingetragene Redirect-URL passt nicht.",
+  },
+  "login.failed.redirect": {
+    en: "The redirect URL registered at {list} must be exactly this (a client has only one: use a separate client for a second NotFlix):",
+    de: "Die bei {list} eingetragene Redirect-URL muss genau diese sein (ein Client hat nur eine: für ein zweites NotFlix einen eigenen Client anlegen):",
+  },
 
   // Accounts in Settings
   "accounts.title": { en: "Your lists", de: "Deine Listen" },
