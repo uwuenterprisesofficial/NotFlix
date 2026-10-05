@@ -2,7 +2,7 @@
 // which the app runs (and electron-builder packs). `--no-build` copies the last build.
 
 import { execSync } from "node:child_process";
-import { cpSync, existsSync, rmSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,8 +18,22 @@ function run(command) {
   });
 }
 
+/** The frontend's dependencies are installed, for this system. (`docker compose` leaves an
+ * empty node_modules folder behind, and one installed on another system lacks this one's
+ * native Next.js compiler.) */
+function installed() {
+  const modules = join(frontend, "node_modules");
+  if (!existsSync(join(modules, "next", "package.json"))) return false;
+  const swc = `swc-${process.platform}-${process.arch}`;
+  try {
+    return readdirSync(join(modules, "@next")).some((name) => name.startsWith(swc));
+  } catch {
+    return false;
+  }
+}
+
 if (!process.argv.includes("--no-build")) {
-  if (!existsSync(join(frontend, "node_modules"))) run("npm ci");
+  if (!installed()) run("npm ci");
   run("npm run build");
 }
 
