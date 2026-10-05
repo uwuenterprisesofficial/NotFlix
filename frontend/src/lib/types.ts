@@ -158,6 +158,8 @@ export type BrowseResponse = {
   signed_in: boolean;
   mal_configured: boolean;
   anilist_configured: boolean;
+  /** The list is being imported in the background (right after the first sign-in). */
+  syncing?: boolean;
 };
 
 export type ListProvider = "mal" | "anilist";
@@ -167,6 +169,8 @@ export type Me = {
   name: string;
   picture: string | null;
   last_synced_at: string | null;
+  /** The list is being synced in the background (e.g. right after the first sign-in). */
+  syncing?: boolean;
   /** Watch Together without a list (joined through an invite link with a name). */
   guest: boolean;
   /** May open the admin page. */

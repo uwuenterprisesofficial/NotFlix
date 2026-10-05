@@ -26,7 +26,7 @@ from app.api.deps import DB, CurrentUser
 from app.core.cache import redis
 from app.core.config import get_settings
 from app.models import User
-from app.services import anilist_account, mal, stats_jobs, together
+from app.services import anilist_account, mal, stats_jobs, sync_jobs, together
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -190,11 +190,15 @@ async def _finish(
         user.name, user.picture = name, picture
     if not user.picture:
         user.picture = picture
+    first_sign_in = user.last_synced_at is None
     await db.commit()
     request.session["user_id"] = user.id
     if current is not None:
         # Another list is part of the user now: its statistics need recomputing.
         await stats_jobs.forget(user.id)
+    if first_sign_in or current is not None:
+        # The new list in NotFlix right away, without pressing "Sync".
+        sync_jobs.start(user.id)
 
     prefix = get_settings().public_api_prefix
     if then := pending.get("then"):

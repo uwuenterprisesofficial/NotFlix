@@ -207,6 +207,8 @@ class BrowseResponse(BaseModel):
     signed_in: bool
     mal_configured: bool
     anilist_configured: bool = False
+    # The list is being imported in the background (right after the first sign-in).
+    syncing: bool = False
 
 
 class AccountOut(BaseModel):
@@ -230,6 +232,8 @@ class Me(ORM):
     anilist: AccountOut | None = None  # linked AniList account
     # Entries being added to the other list after a sync, while that runs.
     writing: dict[str, ListWriteOut] | None = None
+    # The list is being synced in the background (e.g. right after the first sign-in).
+    syncing: bool = False
 
 
 class SyncResult(BaseModel):

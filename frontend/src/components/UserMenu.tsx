@@ -21,7 +21,9 @@ export function UserMenu({ me }: { me: Me }) {
   );
   const { t, lang } = useT();
   const router = useRouter();
-  const [syncing, setSyncing] = useState(false);
+  const [clicked, setSyncing] = useState(false);
+  // Also while the list syncs in the background (after the first sign-in).
+  const syncing = clicked || !!me.syncing;
   const [message, setMessage] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 

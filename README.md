@@ -36,7 +36,7 @@ The browser only talks to Next.js. `/api/*` is proxied to FastAPI, so the sessio
 1. Create a MAL API client at <https://myanimelist.net/apiconfig>. Choose app type **web** and set the redirect URL to `http://localhost:3000/api/auth/callback`.
 2. `cp .env.example .env`, then fill in `MAL_CLIENT_ID`, `MAL_CLIENT_SECRET`, `SECRET_KEY` and `API_KEY` (see [API key](#api-key)); to use NotFlix in the browser, also set `WEB_API_KEY` to the same key.
 3. `docker compose up --build`
-4. Open <http://localhost:3000>, sign in, and press **Sync MAL**.
+4. Open <http://localhost:3000> and sign in: your list is imported by itself (the home page fills in once it's done). **Sync lists** imports it again later.
 
 **Faster everyday use.** Plain `docker compose up` runs the development setup: the frontend is Next's dev server (every page is compiled on its first visit, and React runs its slower development build) and the backend reloads on code changes. For watching rather than developing, use the production override, which serves the optimized build:
 
@@ -295,7 +295,7 @@ The schedule comes from AniList's public airing schedule (`airingSchedules`: eve
 
 Sign in (**Sign in** in the top bar) with MyAnimeList, AniList or both; under **Settings → Your lists** you can link the other one later or remove one (not the last). Set up AniList with a client from <https://anilist.co/settings/developer> (redirect URL `http://localhost:3000/api/auth/anilist/callback`) as `ANILIST_CLIENT_ID` / `ANILIST_CLIENT_SECRET` in `.env`. An account belongs to one NotFlix user: linking one another user has moves it over.
 
-**Sync lists** reads every linked list:
+The first sign-in, and linking another list, sync in the background by themselves. **Sync lists** reads every linked list:
 
 - **Show data comes from MyAnimeList**, whose ids NotFlix uses everywhere. AniList entries are matched by their MAL id (AniList's `idMal`); the few without one are skipped (the sync message says how many). A show only AniList has is shown with AniList's data at first, and its MAL details are filled in the background (the same job the statistics use; with the app's MAL client id when you have no MAL account).
 - **With both lists, each is completed with what only the other has**: an entry missing on MAL is added there with the other list's status, progress and score, and the same for AniList. This runs in the background after the sync (AniList allows only a few dozen requests a minute); **Settings → Your lists** shows how far it is. Where both lists have a show, MAL's entry is what NotFlix shows; nothing already on a list is changed.

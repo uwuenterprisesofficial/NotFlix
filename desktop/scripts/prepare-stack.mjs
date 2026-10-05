@@ -123,6 +123,37 @@ function prepareSources() {
   copy(join(desktop, "stack", "loopback.cjs"), join(stack, "loopback.cjs"));
 }
 
+/** Import the backend, its workers and AniScraper once with the bundled Python, so a package
+ * missing from their requirements stops the build here rather than the service in the app. */
+function checkImports(python) {
+  const check = (name, dir, modules) => {
+    const code = [
+      "import importlib, sys",
+      `sys.path.insert(0, ${JSON.stringify(dir)})`,
+      ...modules.map((m) => `importlib.import_module(${JSON.stringify(m)})`),
+    ].join("; ");
+    try {
+      execFileSync(python, ["-c", code], {
+        cwd: dir,
+        env: { ...process.env, API_KEY: "build-check-0123456789" },
+        stdio: ["ignore", "ignore", "pipe"],
+        encoding: "utf8",
+      });
+    } catch (error) {
+      const missing = /No module named '([^']+)'/.exec(error.stderr ?? "")?.[1];
+      const requirements = name === "AniScraper" ? "aniscraper/requirements.txt" : "backend/pyproject.toml";
+      throw new Error(
+        missing
+          ? `${name} needs the Python package "${missing.split(".")[0]}": add it to ${requirements}`
+          : `${name} doesn't start:\n${error.stderr}`,
+      );
+    }
+  };
+  check("AniScraper", join(stack, "aniscraper"), ["main"]);
+  check("The backend", join(stack, "backend"), ["app.main", "app.worker.tasks", "app.worker.catalog"]);
+  console.log("Backend and AniScraper import fine");
+}
+
 // --- ffmpeg (intro/outro detection), from the imageio-ffmpeg wheel for this system ---
 
 function prepareFfmpeg(python) {
@@ -222,6 +253,7 @@ rmSync(stack, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 const python = preparePython();
 prepareSources();
+checkImports(python);
 prepareFfmpeg(python);
 preparePostgres();
 const components = ["postgres", "redis", "backend", "aniscraper", "ffmpeg"];

@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 from typing import Literal
 
 from fastapi import APIRouter, Query
@@ -95,14 +97,16 @@ async def search(
     db: DB,
     q: str = Query(min_length=1, max_length=100),
     page: int = Query(1, ge=1, le=50),
+    quick: bool = False,
 ):
     """Title search over the catalogue (the database, alternative titles included) and MAL.
     MAL's results are cached per query, shows already in the catalogue come from there, and
     new ones are added to it in the background. Without MAL (or for a query too short for
-    it) only the catalogue is searched."""
+    it) only the catalogue is searched. `quick` searches only the catalogue (milliseconds):
+    the search page shows that while MAL's answer is on its way."""
     q = q.strip()
     nodes = None
-    if catalog.mal_configured() and len(q) >= MAL_MIN_QUERY:
+    if not quick and catalog.mal_configured() and len(q) >= MAL_MIN_QUERY:
         nodes = await _mal_search(q, page)
     if nodes is not None:
         ids = [n["id"] for n in nodes[:PAGE_SIZE]]
@@ -127,16 +131,23 @@ async def search(
     )
 
 
+_genres_refresh: asyncio.Task | None = None
+
+
+async def _refresh_genres() -> None:
+    with contextlib.suppress(jikan.JikanError):
+        await set_json("jikan:genres", await jikan.genres(), GENRES_TTL_SECONDS)
+
+
 @router.get("/genres", response_model=list[GenreOut])
 async def genres():
-    """Every genre, theme and demographic to pick from, grouped as MAL's site does."""
+    """Every genre, theme and demographic to pick from, grouped as MAL's site does. Never waits
+    for Jikan: until its list (with counts) is cached, the known tags answer and it's fetched
+    in the background (the search page shouldn't wait for it)."""
+    global _genres_refresh
     found = await get_json("jikan:genres") if jikan.enabled() else None
-    if found is None and jikan.enabled():
-        try:
-            found = await jikan.genres()
-            await set_json("jikan:genres", found, GENRES_TTL_SECONDS)
-        except jikan.JikanError:
-            found = None
+    if found is None and jikan.enabled() and (_genres_refresh is None or _genres_refresh.done()):
+        _genres_refresh = asyncio.create_task(_refresh_genres())
     if not found:
         found = [{"id": i, "name": name, "count": None} for i, name in KNOWN_TAGS.items()]
     unique = {g["id"]: g for g in found}.values()

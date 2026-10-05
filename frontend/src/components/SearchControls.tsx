@@ -1,8 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useRef, useState } from "react";
 import { formatNumber, type MessageKey, tagName } from "@/lib/i18n";
+import { type Order, readQuery, searchHref } from "@/lib/search";
 import type { Genre, TagCategory } from "@/lib/types";
 import { useT } from "./I18nProvider";
 
@@ -20,30 +21,42 @@ const ORDER_LABEL = {
   for_you: "search.orderForYou",
 } as const;
 
-export function SearchControls({
-  q,
-  genreId,
-  order,
-  genres,
-}: {
-  q: string;
-  genreId: number | null;
-  order: keyof typeof ORDER_LABEL;
-  genres: Genre[];
-}) {
-  const { t, lang } = useT();
-  const router = useRouter();
-  const [text, setText] = useState(q);
+// Typing searches by itself after this pause.
+const TYPING_PAUSE_MS = 350;
 
-  function go(next: { q?: string; genre?: number | null; order?: string }) {
-    const query = new URLSearchParams();
-    const nq = (next.q ?? text).trim();
-    const genre = next.genre === undefined ? genreId : next.genre;
-    const nextOrder = next.order ?? order;
-    if (nq) query.set("q", nq);
-    if (genre) query.set("genre", String(genre));
-    if (nextOrder !== "score") query.set("order", nextOrder);
-    router.push(`/search?${query}`);
+/** Title, genre and order of the search page. They live in its URL, changed without a page
+ * load (the results below fetch what they show): typing replaces the current history entry,
+ * a submitted search or another genre/order adds one. */
+export function SearchControls({ genres }: { genres: Genre[] }) {
+  const { t, lang } = useT();
+  const params = useSearchParams();
+  const { q, genre: genreId, order } = readQuery(params);
+  const [text, setText] = useState(q);
+  // The URL changed by itself (back/forward): show its query.
+  const [shown, setShown] = useState(q);
+  if (q !== shown) {
+    setShown(q);
+    setText(q);
+  }
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  function go(next: { q?: string; genre?: number | null; order?: Order }, replace = false) {
+    clearTimeout(timer.current);
+    const href = searchHref({
+      q: (next.q ?? text).trim(),
+      genre: next.genre === undefined ? genreId : next.genre,
+      order: next.order ?? order,
+    });
+    if (href === `/search${params.size ? `?${params}` : ""}`) return;
+    if (replace) window.history.replaceState(null, "", href);
+    else window.history.pushState(null, "", href);
+  }
+
+  function type(value: string) {
+    setText(value);
+    clearTimeout(timer.current);
+    // Searching starts once typing pauses (not for every letter).
+    timer.current = setTimeout(() => go({ q: value }, true), TYPING_PAUSE_MS);
   }
 
   return (
@@ -59,7 +72,8 @@ export function SearchControls({
         type="search"
         name="q"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => type(e.target.value)}
+        autoFocus={!q}
         placeholder={t("search.placeholder")}
         aria-label={t("search.titleLabel")}
         className="min-w-0 flex-1 basis-64 rounded border border-white/20 bg-surface-raised px-3 py-2 outline-none focus:border-white/60"
@@ -91,7 +105,7 @@ export function SearchControls({
       <select
         aria-label={t("search.order")}
         value={order}
-        onChange={(e) => go({ order: e.target.value })}
+        onChange={(e) => go({ order: e.target.value as Order })}
         className="rounded border border-white/20 bg-surface-raised px-3 py-2"
         title={q ? t("search.orderInfo") : undefined}
       >

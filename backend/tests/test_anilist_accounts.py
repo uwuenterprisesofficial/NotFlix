@@ -201,6 +201,10 @@ def providers(monkeypatch, clean):
     monkeypatch.setattr(auth.mal.MalClient, "me", mal_me)
     monkeypatch.setattr(auth.anilist_account, "exchange_code", al_exchange)
     monkeypatch.setattr(auth.anilist_account, "AniListClient", Viewer)
+    # Signing in syncs the list in the background: recorded here instead (no MAL in tests).
+    synced: list[int] = []
+    monkeypatch.setattr(auth.sync_jobs, "start", synced.append)
+    return synced
 
 
 def _state(location: str) -> str:
@@ -380,3 +384,17 @@ async def test_failed_sign_ins_say_why(client, providers, monkeypatch):
     # Unknown (or used) state.
     again = await client.get("/auth/callback", params={"code": "c", "state": state})
     assert again.headers["location"].endswith("&provider=mal&reason=expired")
+
+
+async def test_the_first_sign_in_and_linking_sync_the_list(client, providers):
+    await _sign_in(client, "mal")
+    me = (await client.get("/me")).json()
+    assert providers == [me["id"]]  # first sign-in: synced
+    with sync_session() as db:
+        db.get(User, me["id"]).last_synced_at = datetime.now(UTC)
+        db.commit()
+    await client.post("/auth/logout")
+    await _sign_in(client, "mal")
+    assert providers == [me["id"]]  # synced before: not again
+    await _sign_in(client, "anilist", link="true")
+    assert providers == [me["id"], me["id"]]  # another list linked: synced again

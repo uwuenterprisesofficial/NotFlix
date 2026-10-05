@@ -95,6 +95,12 @@ async def test_search_uses_the_catalogue_and_queues_new_shows(
     with sync_session() as db:
         assert db.get(Anime, 30) is None  # stored by the worker, not by the search
 
+    # Quick: the catalogue alone, without asking MAL (what the page shows meanwhile).
+    calls = len(mal_calls)
+    quick = (await client.get("/search", params={"q": "one piece", "quick": "true"})).json()
+    assert quick["source"] == "local" and [a["id"] for a in quick["items"]] == [21, 99]
+    assert len(mal_calls) == calls
+
     # The same search again doesn't ask MAL.
     await client.get("/search", params={"q": "One Piece"})
     assert [c for c in mal_calls if c[0] == "search"] == [("search", "one piece")]
