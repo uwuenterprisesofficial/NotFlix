@@ -186,13 +186,16 @@ def enabled_providers() -> list[StreamProvider]:
     s = get_settings()
     providers: list[StreamProvider] = [DatabaseProvider()]
     # AniWorld, in order of preference: the bundled AniScraper service, another self-hosted
-    # AniWorld API, or scraping the site from the backend itself.
-    if s.aniscraper_url:
-        providers.append(AniScraperProvider(s.aniscraper_url))
-    elif s.aniworld_api_url:
-        providers.append(AniWorldApiProvider(s.aniworld_api_url))
-    elif s.aniworld_url:
-        providers.append(AniWorldProvider(s.aniworld_url, s.aniworld_series_path))
+    # AniWorld API, or scraping the site from the backend itself (or the one ANIWORLD_VIA names).
+    sources = {
+        "aniscraper": s.aniscraper_url and (lambda: AniScraperProvider(s.aniscraper_url)),
+        "api": s.aniworld_api_url and (lambda: AniWorldApiProvider(s.aniworld_api_url)),
+        "site": s.aniworld_url
+        and (lambda: AniWorldProvider(s.aniworld_url, s.aniworld_series_path)),
+    }
+    chosen = sources.get(s.aniworld_via) or next((f for f in sources.values() if f), None)
+    if chosen:
+        providers.append(chosen())
     if s.aniscraper_url:  # AniScraper also covers animetoast.cc
         providers.append(AnimeToastProvider(s.aniscraper_url))
     if s.reanime_url:

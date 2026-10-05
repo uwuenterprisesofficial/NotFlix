@@ -2,15 +2,17 @@
   "name": "notflix-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "NotFlix as a desktop app, connected to a NotFlix server",
+  "description": "NotFlix as a desktop app: with its own built-in server, or connected to a NotFlix server",
   "main": "main.js",
   "scripts": {
     "server": "node scripts/prepare-server.mjs",
+    "stack": "node scripts/prepare-stack.mjs",
     "start": "electron .",
-    "dist": "npm run server && electron-builder",
-    "dist:win": "npm run server && electron-builder --win",
-    "dist:mac": "npm run server && electron-builder --mac",
-    "dist:linux": "npm run server && electron-builder --linux"
+    "dist": "npm run server && npm run stack && electron-builder",
+    "dist:win": "npm run server && npm run stack && electron-builder --win",
+    "dist:mac": "npm run server && npm run stack && electron-builder --mac",
+    "dist:linux": "npm run server && npm run stack && electron-builder --linux",
+    "dist:client": "npm run server && electron-builder"
   },
   "devDependencies": {
     "electron": "^44.5.1",
@@ -21,11 +23,15 @@
     "productName": "NotFlix",
     "files": [
       "main.js",
+      "builtin-server.js",
       "preload.js",
       "package.json"
     ],
     "win": {
-      "target": "nsis"
+      "target": [
+        "nsis",
+        "portable"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -39,6 +45,9 @@
       "target": "AppImage",
       "category": "Video"
     },
-    "afterPack": "scripts/after-pack.cjs"
+    "afterPack": "scripts/after-pack.cjs",
+    "portable": {
+      "artifactName": "NotFlix-${version}-portable.exe"
+    }
   }
 }

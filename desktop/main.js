@@ -1,16 +1,20 @@
 // NotFlix desktop app.
 //
 // The app runs the web frontend's own server (the Next.js standalone build in server/) on this
-// PC and shows it in a window. That server passes /api/* on to the NotFlix backend chosen in the
-// app's settings, which can run anywhere (e.g. on a home server), adding the backend's API key.
-// The address and key are kept in config.json in the app's data folder (the key encrypted with
-// the system's key store where there is one); changing them restarts the local server.
+// PC and shows it in a window. That server passes /api/* on to a NotFlix backend, adding its API
+// key. The backend is either
+//   - the built-in server (builtin-server.js): the backend and everything it needs, run on this
+//     PC from the bundle the app was built with, or
+//   - another server (e.g. on a home server), by its address and API key.
+// The choice and its settings are kept in config.json in the app's data folder (secrets
+// encrypted with the system's key store where there is one); changing them restarts what runs.
 
-const { app, BrowserWindow, Menu, ipcMain, safeStorage, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, safeStorage, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
+const { BuiltInServer, readEnvFile } = require("./builtin-server");
 
 // A fixed port keeps the app's origin, and so its local storage (player settings, resume
 // points), the same between runs. The next few are tried when it's taken.
@@ -26,12 +30,18 @@ const CHECK_TIMEOUT_MS = 8_000;
 const serverDir = app.isPackaged
   ? path.join(process.resourcesPath, "server")
   : path.join(__dirname, "server");
+// The built-in server's bundle; null when the app was built without it.
+const builtIn = BuiltInServer.find(
+  app.isPackaged ? path.join(process.resourcesPath, "stack") : path.join(__dirname, "build", "stack"),
+);
 
 let win = null;
 let server = null;
 let origin = null; // the local server, e.g. http://127.0.0.1:47300
 // Where the backend's sign-in callbacks land (its web app), learnt from the backend.
 let publicOrigin = null;
+let builtInRunning = false;
+let builtInError = null; // why the built-in server didn't start
 
 // --- Settings ---
 
@@ -52,22 +62,77 @@ function writeConfig(config) {
   fs.writeFileSync(configPath(), JSON.stringify(config, null, 2));
 }
 
-function readKey(config) {
-  if (config.keyEncrypted) {
-    try {
-      return safeStorage.decryptString(Buffer.from(config.keyEncrypted, "base64"));
-    } catch {
-      return ""; // encrypted by another user or system: enter it again
-    }
+/** A secret as stored: encrypted with the system's key store where there is one. */
+function seal(value) {
+  if (!value) return "";
+  return safeStorage.isEncryptionAvailable()
+    ? `enc:${safeStorage.encryptString(value).toString("base64")}`
+    : value;
+}
+
+function unseal(stored) {
+  if (!stored) return "";
+  if (!stored.startsWith("enc:")) return stored;
+  try {
+    return safeStorage.decryptString(Buffer.from(stored.slice(4), "base64"));
+  } catch {
+    return ""; // encrypted by another user or system: enter it again
   }
-  return config.key || "";
+}
+
+/** The other server's API key. */
+function readKey(config) {
+  if (config.keyEncrypted) return unseal(`enc:${config.keyEncrypted}`);
+  return unseal(config.key);
 }
 
 function withKey(config, key) {
   const { key: _plain, keyEncrypted: _encrypted, ...rest } = config;
-  return safeStorage.isEncryptionAvailable()
-    ? { ...rest, keyEncrypted: safeStorage.encryptString(key).toString("base64") }
-    : { ...rest, key };
+  return { ...rest, key: seal(key) };
+}
+
+/** "builtin" (this PC) or "remote" (another server). */
+function mode(config) {
+  if (config.mode === "remote" || !builtIn) return "remote";
+  return config.mode === "builtin" || !config.backend ? "builtin" : "remote";
+}
+
+/** The built-in server's passwords (made on first use) and settings. */
+function builtInConfig(config) {
+  const current = config.builtIn ?? {};
+  if (current.secrets) return current;
+  const next = { ...current, secrets: BuiltInServer.secrets() };
+  writeConfig({ ...config, builtIn: next });
+  return next;
+}
+
+/** The built-in server's settings for the page (secrets only as "set or not"). */
+function builtInSettings(settings = {}) {
+  return {
+    malClientId: settings.malClientId ?? "",
+    hasMalSecret: !!unseal(settings.malClientSecret),
+    anilistClientId: settings.anilistClientId ?? "",
+    hasAnilistSecret: !!unseal(settings.anilistClientSecret),
+    aniworldVia: settings.aniworldVia === "serienstream" ? "serienstream" : "aniscraper",
+  };
+}
+
+/** The backend's settings from the app's: sign-in apps, AniWorld source, and server.env. */
+function builtInEnv(settings = {}) {
+  return {
+    MAL_CLIENT_ID: settings.malClientId ?? "",
+    MAL_CLIENT_SECRET: unseal(settings.malClientSecret),
+    ANILIST_CLIENT_ID: settings.anilistClientId ?? "",
+    ANILIST_CLIENT_SECRET: unseal(settings.anilistClientSecret),
+    ANIWORLD_VIA:
+      settings.aniworldVia === "serienstream" && builtIn?.has("aniworld-api") ? "api" : "aniscraper",
+    // Anything else the backend reads (see .env.example), one KEY=value per line.
+    ...readEnvFile(path.join(dataDir(), "server.env")),
+  };
+}
+
+function dataDir() {
+  return path.join(app.getPath("userData"), "server");
 }
 
 /** An http(s) address without a trailing slash, or null. */
@@ -148,11 +213,48 @@ async function waitUntilUp(url, child) {
   throw new Error("The server didn't start in time");
 }
 
-async function startServer() {
-  const config = readConfig();
-  const key = readKey(config);
+/** Start the backend (built-in, or learn about the other one), then this app's own server. */
+async function startAll() {
+  let config = readConfig();
   const port = await choosePort(config.port);
-  if (port !== config.port) writeConfig({ ...config, port });
+  if (port !== config.port) writeConfig((config = { ...config, port }));
+  let target = { url: config.backend || NO_BACKEND, key: readKey(config) };
+  if (mode(config) === "builtin") {
+    const { secrets, settings } = builtInConfig(config);
+    try {
+      builtInRunning = true;
+      target = await builtIn.start({
+        dataDir: dataDir(),
+        // Sign-ins return through localhost (what MyAnimeList and AniList accept as redirect
+        // URLs) and are handed over to this window's 127.0.0.1 (see backend/app/api/auth.py).
+        webOrigin: `http://localhost:${port}`,
+        secrets,
+        env: builtInEnv(settings),
+        node: process.execPath, // Electron's own Node.js runs Anivexa
+        taken: [port],
+      });
+      builtInError = null;
+    } catch (error) {
+      builtInError = String(error?.message ?? error);
+      await stopBuiltIn();
+      target = { url: NO_BACKEND, key: "" };
+    }
+  }
+  await startServer(port, target);
+}
+
+async function stopAll() {
+  await stopServer();
+  await stopBuiltIn();
+}
+
+async function stopBuiltIn() {
+  if (!builtInRunning) return;
+  builtInRunning = false;
+  await builtIn.stop();
+}
+
+async function startServer(port, target) {
   const log = fs.createWriteStream(path.join(app.getPath("userData"), "server.log"));
   // Electron's own binary runs the server as plain Node.js.
   const child = spawn(process.execPath, [path.join(serverDir, "server.js")], {
@@ -165,8 +267,8 @@ async function startServer() {
       HOSTNAME: "127.0.0.1",
       PORT: String(port),
       NOTFLIX_DESKTOP: "1",
-      API_INTERNAL_URL: config.backend || NO_BACKEND,
-      API_KEY: key,
+      API_INTERNAL_URL: target.url,
+      API_KEY: target.key,
     },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -175,7 +277,7 @@ async function startServer() {
   child.stderr.pipe(log);
   server = child;
   origin = `http://127.0.0.1:${port}`;
-  await Promise.all([waitUntilUp(origin, child), learnPublicOrigin(config.backend, key)]);
+  await Promise.all([waitUntilUp(origin, child), learnPublicOrigin(target.url, target.key)]);
 }
 
 function stopServer() {
@@ -207,8 +309,10 @@ function allowedInWindow(url) {
     return false;
   }
   if (target.origin === origin || target.origin === publicOrigin) return true;
-  const backend = readConfig().backend;
-  if (backend && target.origin === new URL(backend).origin) return true;
+  const config = readConfig();
+  if (mode(config) === "remote" && config.backend && target.origin === new URL(config.backend).origin) {
+    return true;
+  }
   return SIGN_IN_HOSTS.some((h) => target.hostname === h || target.hostname.endsWith(`.${h}`));
 }
 
@@ -249,14 +353,73 @@ function createWindow() {
     if (isApp(referrer?.url ?? "")) openOutside(url); // embeds' pop-ups are dropped
     return { action: "deny" };
   });
+}
 
-  const start = readConfig().backend ? "/" : "/login";
-  void win.loadURL(`${origin}${start}`);
+const SPLASH = `data:text/html;charset=utf-8,${encodeURIComponent(
+  `<!doctype html><title>NotFlix</title>
+  <body style="margin:0;height:100vh;display:grid;place-items:center;background:#141414;color:#aaa;font:16px system-ui">
+  <div style="text-align:center"><div style="color:#e50914;font:900 42px system-ui">NOTFLIX</div><p>Starting…</p></div>`,
+)}`;
+
+function showSplash() {
+  void win?.loadURL(SPLASH);
+}
+
+/** The app, once everything runs: the sign-in (and server settings) while there's no backend
+ * yet or it failed. */
+function showApp(page) {
+  const config = readConfig();
+  const ready = mode(config) === "builtin" ? !builtInError : !!config.backend;
+  void win?.loadURL(`${origin}${page ?? (ready ? "/" : "/login")}`);
+}
+
+/** Restart with changed settings: the splash meanwhile, the start page after. */
+async function restart() {
+  showSplash();
+  await stopAll();
+  await startAll();
+  showApp("/");
 }
 
 ipcMain.handle("backend:get", () => {
   const config = readConfig();
-  return { url: config.backend ?? null, hasKey: readKey(config) !== "" };
+  return {
+    mode: mode(config),
+    url: config.backend ?? null,
+    hasKey: readKey(config) !== "",
+    builtIn: builtIn && {
+      error: builtInError,
+      settings: builtInSettings(config.builtIn?.settings),
+      serienStream: builtIn.has("aniworld-api"),
+    },
+  };
+});
+
+ipcMain.handle("builtin:set", async (event, raw) => {
+  if (!builtIn || !isApp(event.senderFrame?.url ?? "")) return { ok: false, error: "invalid" };
+  const config = readConfig();
+  const current = builtInConfig(config);
+  const old = current.settings ?? {};
+  const text = (value) => String(value ?? "").trim();
+  // Secrets left empty keep the saved ones.
+  const settings = {
+    malClientId: text(raw?.malClientId),
+    malClientSecret: text(raw?.malClientSecret) ? seal(text(raw.malClientSecret)) : old.malClientSecret,
+    anilistClientId: text(raw?.anilistClientId),
+    anilistClientSecret: text(raw?.anilistClientSecret)
+      ? seal(text(raw.anilistClientSecret))
+      : old.anilistClientSecret,
+    aniworldVia: raw?.aniworldVia === "serienstream" ? "serienstream" : "aniscraper",
+  };
+  writeConfig({ ...readConfig(), mode: "builtin", builtIn: { ...current, settings } });
+  await restart();
+  return builtInError ? { ok: false, error: "builtInFailed" } : { ok: true };
+});
+
+ipcMain.handle("builtin:logs", (event) => {
+  if (!builtIn || !isApp(event.senderFrame?.url ?? "")) return;
+  fs.mkdirSync(path.join(dataDir(), "logs"), { recursive: true });
+  void shell.openPath(path.join(dataDir(), "logs"));
 });
 
 ipcMain.handle("backend:set", async (event, raw, rawKey) => {
@@ -269,11 +432,9 @@ ipcMain.handle("backend:set", async (event, raw, rawKey) => {
   if (!key) return { ok: false, error: "missingKey" };
   const status = await check(backend, key);
   if (status !== "ok") return { ok: false, error: status };
-  writeConfig(withKey({ ...config, backend }, key));
-  await stopServer();
-  await startServer();
   // Signed in at another backend (or not at all): start over.
-  void win?.loadURL(`${origin}/`);
+  writeConfig(withKey({ ...config, backend, mode: "remote" }, key));
+  await restart();
   return { ok: true };
 });
 
@@ -343,17 +504,21 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     buildMenu();
+    createWindow();
+    showSplash();
     try {
-      await startServer();
+      await startAll();
     } catch (error) {
-      const { dialog } = require("electron");
       dialog.showErrorBox("NotFlix couldn't start", String(error?.message ?? error));
       app.quit();
       return;
     }
-    createWindow();
+    showApp();
     app.on("activate", () => {
-      if (!win) createWindow();
+      if (!win) {
+        createWindow();
+        showApp();
+      }
     });
   });
 
@@ -363,9 +528,9 @@ if (!app.requestSingleInstanceLock()) {
 
   let stopping = false;
   app.on("before-quit", (event) => {
-    if (stopping || !server) return;
+    if (stopping || (!server && !builtInRunning)) return;
     stopping = true;
     event.preventDefault();
-    void stopServer().finally(() => app.quit());
+    void stopAll().finally(() => app.quit());
   });
 }

@@ -22,6 +22,7 @@ x-backend: &backend
     # other on the container port (8000), not the port published to the host (8001).
     ANISCRAPER_URL: ${ANISCRAPER_URL-http://aniscraper:8000}
     ANIWORLD_API_URL: ${ANIWORLD_API_URL:-}
+    ANIWORLD_VIA: ${ANIWORLD_VIA:-}
     ANIWORLD_URL: ${ANIWORLD_URL-https://aniworld.to}
     # No default here: Compose before 2.24 cuts ${VAR:-default} at the first '}'.
     ANIWORLD_SERIES_PATH: ${ANIWORLD_SERIES_PATH:-}

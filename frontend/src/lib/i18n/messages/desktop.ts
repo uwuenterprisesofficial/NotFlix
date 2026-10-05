@@ -3,9 +3,39 @@ import type { Messages } from "../core";
 export const desktop = {
   "server.title": { en: "Server", de: "Server" },
   "server.info": {
-    en: "The NotFlix backend this app connects to.",
-    de: "Das NotFlix-Backend, mit dem sich diese App verbindet.",
+    en: "Where NotFlix's backend runs for this app.",
+    de: "Wo das NotFlix-Backend für diese App läuft.",
   },
+  "server.builtIn": { en: "This PC (built-in)", de: "Dieser PC (eingebaut)" },
+  "server.remote": { en: "Another server", de: "Anderer Server" },
+  "server.builtInInfo": {
+    en: "NotFlix runs completely on this PC: database, sources and everything else start with the app. To sign in, create an API client at MyAnimeList and/or AniList and enter it here.",
+    de: "NotFlix läuft komplett auf diesem PC: Datenbank, Quellen und alles andere starten mit der App. Zum Anmelden lege bei MyAnimeList und/oder AniList einen API-Client an und trage ihn hier ein.",
+  },
+  "server.builtInError": {
+    en: "The built-in server didn't start: {error}",
+    de: "Der eingebaute Server ist nicht gestartet: {error}",
+  },
+  "server.malClientId": { en: "MyAnimeList client ID", de: "MyAnimeList-Client-ID" },
+  "server.malClientSecret": { en: "MyAnimeList client secret", de: "MyAnimeList-Client-Secret" },
+  "server.anilistClientId": { en: "AniList client ID", de: "AniList-Client-ID" },
+  "server.anilistClientSecret": { en: "AniList client secret", de: "AniList-Client-Secret" },
+  "server.redirects": {
+    en: "Redirect URLs to register there:",
+    de: "Dort einzutragende Redirect-URLs:",
+  },
+  "server.aniworldVia": { en: "AniWorld through", de: "AniWorld über" },
+  "server.viaAniScraper": {
+    en: "AniScraper (direct streams where possible)",
+    de: "AniScraper (wo möglich direkte Streams)",
+  },
+  "server.viaSerienStream": {
+    en: "SerienStreamAPI (hoster players)",
+    de: "SerienStreamAPI (Player der Hoster)",
+  },
+  "server.saveRestart": { en: "Save and restart", de: "Speichern und neu starten" },
+  "server.restarting": { en: "Restarting…", de: "Starte neu…" },
+  "server.logs": { en: "Open logs", de: "Logs öffnen" },
   "server.address": { en: "Backend address", de: "Backend-Adresse" },
   "server.key": { en: "API key", de: "API-Schlüssel" },
   "server.keySaved": {
@@ -41,6 +71,10 @@ export const desktop = {
   "server.error.missingKey": {
     en: "Enter the server's API key.",
     de: "Gib den API-Schlüssel des Servers ein.",
+  },
+  "server.error.builtInFailed": {
+    en: "The built-in server didn't start: see its logs.",
+    de: "Der eingebaute Server ist nicht gestartet: siehe Logs.",
   },
   "server.error.notNotflix": {
     en: "Something answers there, but it isn't a NotFlix backend.",

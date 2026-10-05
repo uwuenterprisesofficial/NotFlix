@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     # at http://aniscraper:8000), another self-hosted AniWorld API, or scraping ANIWORLD_URL.
     aniscraper_url: str = ""
     aniworld_api_url: str = ""
+    # Which of them AniWorld comes from when several are set: "aniscraper", "api" or "site";
+    # empty: the first one set, in the order above. (AniScraper keeps serving AnimeToast.)
+    aniworld_via: str = ""
 
     # AniWorld (German dub/sub). Empty disables the provider. The series path changes with site
     # redesigns, so it is configurable.
