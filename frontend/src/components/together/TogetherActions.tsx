@@ -2,8 +2,21 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useDesktop } from "@/lib/desktop";
 import { PENDING_INVITE_KEY } from "@/lib/together";
 import { useT } from "../I18nProvider";
+
+/** Where others open links: the desktop app's own server is only on this PC, so its links point
+ * to the web app (the backend's FRONTEND_URL). */
+async function publicOrigin(desktop: boolean): Promise<string> {
+  if (desktop) {
+    const providers = await fetch("/api/auth/providers")
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    if (providers?.public_url) return String(providers.public_url).replace(/\/+$/, "");
+  }
+  return window.location.origin;
+}
 
 /** Create an invite link and copy it. */
 export function InviteLink() {
@@ -12,6 +25,7 @@ export function InviteLink() {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const desktop = useDesktop();
 
   async function create() {
     setBusy(true);
@@ -19,7 +33,7 @@ export function InviteLink() {
     const res = await fetch("/api/together/invites", { method: "POST" }).catch(() => null);
     if (res?.ok) {
       const { code } = await res.json();
-      setLink(`${window.location.origin}/together/join/${code}`);
+      setLink(`${await publicOrigin(!!desktop)}/together/join/${code}`);
     } else {
       setFailed(true);
     }

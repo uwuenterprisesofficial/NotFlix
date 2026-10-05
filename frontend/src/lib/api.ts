@@ -1,6 +1,5 @@
 import { headers } from "next/headers";
-
-const API_URL = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
+import { backendUrl } from "./backend";
 
 export class ApiError extends Error {
   constructor(
@@ -16,7 +15,7 @@ export async function api<T>(path: string): Promise<T> {
   // Forward the raw header: cookies().toString() URL-encodes values, which breaks the signature
   // of the backend's session cookie.
   const cookie = (await headers()).get("cookie");
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(`${backendUrl()}${path}`, {
     headers: cookie ? { cookie } : {},
     cache: "no-store",
   });

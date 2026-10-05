@@ -1,0 +1,44 @@
+{
+  "name": "notflix-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NotFlix as a desktop app, connected to a NotFlix server",
+  "main": "main.js",
+  "scripts": {
+    "server": "node scripts/prepare-server.mjs",
+    "start": "electron .",
+    "dist": "npm run server && electron-builder",
+    "dist:win": "npm run server && electron-builder --win",
+    "dist:mac": "npm run server && electron-builder --mac",
+    "dist:linux": "npm run server && electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "dev.notflix.desktop",
+    "productName": "NotFlix",
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.entertainment"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Video"
+    },
+    "afterPack": "scripts/after-pack.cjs"
+  }
+}

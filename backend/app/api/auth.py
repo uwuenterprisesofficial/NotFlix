@@ -4,16 +4,26 @@ GET /auth/login?provider=mal|anilist starts one provider's OAuth flow. `then=<ot
 the other one afterwards (signing in with both), `link=true` adds the account to the signed-in
 user instead of signing in (Settings). An account can belong to one user only: linking one
 that another user has moves it over (and removes that user if nothing is left).
+
+A frontend on another origin (the desktop app's local server on http://127.0.0.1:<port>) signs
+in through the same flow: the provider sends the browser back to the registered redirect URL
+(the server), so the pending login is kept in Redis by its `state`, not in the session cookie.
+After the callback, a one-time token carries the sign-in back to that origin
+(`/auth/handoff`), which sets the session there. Only loopback origins are accepted, so a
+token can never be sent to another site.
 """
 
+import json
 import secrets
 from typing import Literal
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser
+from app.core.cache import redis
 from app.core.config import get_settings
 from app.models import User
 from app.services import anilist_account, mal, stats_jobs, together
@@ -21,6 +31,29 @@ from app.services import anilist_account, mal, stats_jobs, together
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 Provider = Literal["mal", "anilist"]
+
+PENDING_TTL_S = 15 * 60  # time to finish signing in at the provider
+HANDOFF_TTL_S = 120
+# The header the frontend's proxy sets: the origin the browser talks to.
+ORIGIN_HEADER = "x-notflix-origin"
+LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
+
+
+def desktop_origin(value: str | None) -> str | None:
+    """A frontend origin other than FRONTEND_URL that sign-ins return to: only loopback ones
+    (the desktop app's own server). Anything else is ignored."""
+    if not value:
+        return None
+    parts = urlsplit(value)
+    if parts.scheme not in ("http", "https") or parts.hostname not in LOOPBACK_HOSTS:
+        return None
+    origin = f"{parts.scheme}://{parts.netloc}"
+    frontend = urlsplit(get_settings().frontend_url)
+    return None if origin == f"{frontend.scheme}://{frontend.netloc}" else origin
+
+
+def _frontend(pending: dict | None) -> str:
+    return (pending or {}).get("origin") or get_settings().frontend_url
 
 
 def configured(provider: str) -> bool:
@@ -30,9 +63,14 @@ def configured(provider: str) -> bool:
 
 
 @router.get("/providers")
-async def providers() -> dict[str, bool]:
-    """Which sign-in providers are set up."""
-    return {"mal": configured("mal"), "anilist": configured("anilist")}
+async def providers() -> dict[str, bool | str]:
+    """Which sign-in providers are set up, and the web app's public address (FRONTEND_URL), e.g.
+    for invite links made in the desktop app."""
+    return {
+        "mal": configured("mal"),
+        "anilist": configured("anilist"),
+        "public_url": get_settings().frontend_url,
+    }
 
 
 @router.get("/login")
@@ -49,22 +87,36 @@ async def login(
         link = False  # nothing to link to: a plain sign-in
     state = secrets.token_urlsafe(24)
     pending = {"provider": provider, "state": state, "link": link}
+    if signed_in := request.session.get("user_id"):
+        # Who's signed in (on the origin the login started from): a guest becomes, or merges
+        # into, the account.
+        pending["session_user"] = signed_in
+        if link:
+            pending["user_id"] = signed_in
     if then and then != provider and configured(then):
         pending["then"] = then
+    # Started from the desktop app (its proxy says so), or chained from a sign-in that was.
+    chained = request.session.pop("origin", None) if link else None
+    if desktop := desktop_origin(request.headers.get(ORIGIN_HEADER) or chained):
+        pending["origin"] = desktop
     if provider == "mal":
         pending["verifier"] = mal.new_code_verifier()
         url = mal.authorize_url(state, pending["verifier"])
     else:
         url = anilist_account.authorize_url(state)
-    request.session["oauth"] = pending
+    # By state, not in the session: the callback may arrive on another origin than this.
+    await redis().set(f"oauth:{state}", json.dumps(pending), ex=PENDING_TTL_S)
     return RedirectResponse(url)
 
 
-def _pending(request: Request, provider: str, state: str | None) -> dict | None:
-    pending = request.session.pop("oauth", None)
+async def _pending(provider: str, state: str | None) -> dict | None:
+    if not state:
+        return None
+    raw = await redis().getdel(f"oauth:{state}")
+    pending = json.loads(raw) if raw else None
     if not pending or pending.get("provider") != provider:
         return None
-    return pending if secrets.compare_digest(pending["state"], state or "") else None
+    return pending if secrets.compare_digest(pending["state"], state) else None
 
 
 async def _owner(db: DB, provider: str, account_id: int) -> User | None:
@@ -88,13 +140,13 @@ async def _finish(
     provider = pending["provider"]
     frontend = get_settings().frontend_url
     current = None
-    if pending.get("link") and request.session.get("user_id"):
-        current = await db.get(User, request.session["user_id"])
+    if pending.get("link") and pending.get("user_id"):
+        current = await db.get(User, pending["user_id"])
     owner = await _owner(db, provider, account_id)
 
     # A Watch Together guest signing in keeps their connections: the guest becomes this
     # account's user, or (when the account has one already) merges into it.
-    session_user = await db.get(User, request.session.get("user_id") or 0)
+    session_user = await db.get(User, pending.get("session_user") or 0)
     guest = session_user if session_user is not None and session_user.is_guest else None
     if guest is not None:
         if owner is None:
@@ -136,10 +188,36 @@ async def _finish(
         await stats_jobs.forget(user.id)
 
     if then := pending.get("then"):
+        # The next provider, linked to this user (the session on this origin says who).
         prefix = get_settings().public_api_prefix
+        if pending.get("origin"):
+            request.session["origin"] = pending["origin"]
         return RedirectResponse(f"{frontend}{prefix}/auth/login?provider={then}&link=true")
     target = "/settings" if pending.get("link") else "/"
-    return RedirectResponse(f"{frontend}{target}?login=ok&account={provider}")
+    target = f"{target}?login=ok&account={provider}"
+    if origin := pending.get("origin"):
+        # Back to the desktop app: a one-time token signs it in there.
+        token = secrets.token_urlsafe(32)
+        await redis().set(f"handoff:{token}", user.id, ex=HANDOFF_TTL_S)
+        prefix = get_settings().public_api_prefix
+        return RedirectResponse(
+            f"{origin}{prefix}/auth/handoff?token={token}&to={quote(target, safe='')}"
+        )
+    return RedirectResponse(f"{frontend}{target}")
+
+
+@router.get("/handoff")
+async def handoff(request: Request, token: str, to: str = "/") -> RedirectResponse:
+    """Finish a sign-in that took place on another origin (see the module docstring): the
+    token (once, for 2 minutes) sets this origin's session."""
+    user_id = await redis().getdel(f"handoff:{token}")
+    # Relative paths only: the browser stays on the origin it came from.
+    if not to.startswith("/") or to.startswith(("//", "/\\")):
+        to = "/"
+    if user_id is None:
+        return RedirectResponse("/?login=failed")
+    request.session["user_id"] = int(user_id)
+    return RedirectResponse(to)
 
 
 @router.get("/callback")
@@ -151,9 +229,9 @@ async def callback(
     error: str | None = None,
 ) -> RedirectResponse:
     """MyAnimeList's OAuth redirect (the URL registered at MAL, so it keeps its name)."""
-    pending = _pending(request, "mal", state)
+    pending = await _pending("mal", state)
     if error or not code or pending is None:
-        return RedirectResponse(f"{get_settings().frontend_url}/?login=failed")
+        return RedirectResponse(f"{_frontend(pending)}/?login=failed")
     tokens = await mal.exchange_code(code, pending["verifier"])
     async with mal.MalClient(tokens.access_token) as client:
         profile = await client.me()
@@ -175,15 +253,15 @@ async def anilist_callback(
     state: str | None = None,
     error: str | None = None,
 ) -> RedirectResponse:
-    pending = _pending(request, "anilist", state)
+    pending = await _pending("anilist", state)
     if error or not code or pending is None:
-        return RedirectResponse(f"{get_settings().frontend_url}/?login=failed")
+        return RedirectResponse(f"{_frontend(pending)}/?login=failed")
     try:
         token = await anilist_account.exchange_code(code)
         async with anilist_account.AniListClient(token.access_token) as client:
             viewer = await client.viewer()
     except anilist_account.AniListError:
-        return RedirectResponse(f"{get_settings().frontend_url}/?login=failed")
+        return RedirectResponse(f"{_frontend(pending)}/?login=failed")
     avatar = viewer.get("avatar") or {}
     return await _finish(
         request, db, pending, viewer["id"], viewer["name"], avatar.get("large"),

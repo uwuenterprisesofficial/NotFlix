@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AccountSettings } from "@/components/AccountSettings";
 import { SettingsForm } from "@/components/SettingsForm";
+import { ServerSettings } from "@/components/desktop/ServerSettings";
 import { cookies } from "next/headers";
 import { api, apiOrNull } from "@/lib/api";
 import { DESIGN_COOKIE, isDesign } from "@/lib/design";
@@ -30,6 +31,7 @@ export default async function SettingsPage() {
         <AccountSettings me={me} providers={providers} />
       </section>
       <SettingsForm design={isDesign(chosen) ? chosen : "standard"} />
+      <ServerSettings />
       {me?.admin && (
         <section className="mt-10">
           <h2 className="text-lg font-semibold">{t("admin.title")}</h2>

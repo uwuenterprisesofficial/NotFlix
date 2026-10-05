@@ -63,6 +63,36 @@ npm install
 npm run dev                                 # UI on :3000
 ```
 
+## Desktop app
+
+`desktop/` is an Electron app for your PC that connects to a NotFlix backend on a server. It runs the web frontend's own server on the PC (at `http://127.0.0.1:47300`) and shows it in a window; that server passes `/api/*` on to the backend you choose.
+
+**Build it** on the system you'll use it on (the bundled server is built for that system):
+
+```sh
+cd desktop
+npm install
+npm run dist:win        # or dist:mac, dist:linux; the installer lands in desktop/dist/
+```
+
+For development, `npm run server` (builds the frontend into `desktop/server/`) and then `npm start`.
+
+**Connect it.** On first start the sign-in page shows a **Server** box: enter the backend's address and press **Connect**. The app checks that a NotFlix backend answers there (`/health`), saves it, and restarts its local server. Either address works:
+
+- the backend itself, e.g. `http://my-server:8000` (when port 8000 is reachable from the PC), or
+- the web app's address with `/api`, e.g. `https://notflix.example.com/api`.
+
+The address can be changed later under **Settings → Server** or **File → Server settings…**, and the box also shows on any page that can't reach the backend. It's kept in `config.json` in the app's data folder (`%APPDATA%\notflix-desktop` on Windows), next to `server.log`, the local server's output.
+
+**Signing in** needs nothing new at MyAnimeList or AniList: the redirect URLs stay the server's (`MAL_REDIRECT_URI`, `ANILIST_REDIRECT_URI`, `FRONTEND_URL` in the server's `.env`). The provider's page opens in the app's window and returns to the server's web app, which hands the sign-in back to the desktop app with a one-time token (valid for 2 minutes; only `localhost`/`127.0.0.1` addresses are accepted as targets). So `FRONTEND_URL` must be an address the PC can open.
+
+Good to know:
+
+- Invite links made in the desktop app point to the web app (`FRONTEND_URL`), since the app's own server only runs on your PC.
+- Links to other sites open in your browser; MyAnimeList's and AniList's sign-in pages stay in the window.
+- Episodes start by themselves (autoplay is allowed in the app).
+- The server must run this version too (the backend for the sign-in hand-over; the web app if the desktop app connects through its `/api`).
+
 ## Streams
 
 The player lists every source it finds for an episode, grouped by language: German Dub, German Sub, English Dub, English Sub. The language is picked automatically from the NotFlix language (see **Languages** below): dub, then sub in that language, then dub, then sub in the other. A language you pick by hand (in the player or the episode list) is remembered for that show in this browser.

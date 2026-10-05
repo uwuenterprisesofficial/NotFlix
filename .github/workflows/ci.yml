@@ -48,3 +48,5 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - name: Desktop app scripts parse
+        run: for f in ../desktop/*.js ../desktop/scripts/*; do node --check "$f"; done
