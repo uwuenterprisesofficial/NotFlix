@@ -144,8 +144,14 @@ async def changed_since(anime_id: int, after_ms: int) -> list[int]:
     return sorted(int(ep) for ep in found)
 
 
-async def _store(anime_id: int, provider: str, results: dict[int, list[SourceOption]]) -> list[int]:
-    """Replace the cached options of these episodes; returns the scan's new episode coverage."""
+async def _store(
+    anime_id: int,
+    provider: str,
+    results: dict[int, list[SourceOption]],
+    running: _Scan | None = None,
+) -> list[int]:
+    """Replace the cached options of these episodes; returns the scan's new episode coverage.
+    A running scan counts them as stored as soon as they're in the database."""
     episodes = list(results)
     async with AsyncSessionLocal() as db:
         await db.execute(
@@ -178,6 +184,8 @@ async def _store(anime_id: int, provider: str, results: dict[int, list[SourceOpt
         if scan is not None:
             scan.episodes = covered
         await db.commit()
+    if running is not None:
+        running.stored |= set(episodes)
     await _note_changes(anime_id, episodes)
     return covered
 
@@ -203,10 +211,8 @@ class _Writer:
                 return
             batch, self.pending = self.pending, {}
             # _store also extends the scan's coverage, so these count as checked right away.
-            await _store(self.anime_id, self.provider, batch)
+            await _store(self.anime_id, self.provider, batch, self.running)
             self.written |= set(batch)
-            if self.running is not None:
-                self.running.stored |= set(batch)
             self.last = time.monotonic()
 
 

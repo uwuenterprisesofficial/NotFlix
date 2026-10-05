@@ -48,3 +48,21 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+
+  desktop:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Scripts parse
+        run: for f in *.js scripts/* stack/*.cjs; do node --check "$f"; done
+      - name: Built-in server's Python
+        run: uvx ruff@0.16.8 check --line-length 100 stack && uvx ruff@0.16.8 format --check --line-length 100 stack
+      - name: SerienStreamAPI service builds
+        run: dotnet build stack/aniworld-api -c Release

@@ -1,18 +1,15 @@
 import type { NextConfig } from "next";
 import { IMAGE_HOSTS } from "./src/lib/images";
 
-const apiUrl = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
-
 const nextConfig: NextConfig = {
   output: "standalone",
   images: {
     remotePatterns: IMAGE_HOSTS.map((host) => new URL(`https://${host}/**`)),
+    // The desktop app's server runs on the user's PC: images load straight from their CDNs
+    // instead of being resized there (which needs sharp, a native module).
+    unoptimized: process.env.NOTFLIX_DESKTOP_BUILD === "1",
   },
-  // The browser only ever talks to this origin; /api/* is proxied to FastAPI so the session
-  // cookie is first-party and the MAL OAuth callback can live at /api/auth/callback.
-  async rewrites() {
-    return [{ source: "/api/:path*", destination: `${apiUrl}/:path*` }];
-  },
+  // /api/* goes to the FastAPI backend: see src/proxy.ts.
 };
 
 export default nextConfig;

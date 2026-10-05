@@ -5,6 +5,7 @@ import pytest
 os.environ.setdefault(
     "DATABASE_URL", "postgresql+psycopg://notflix:notflix@localhost:5432/notflix_test"
 )
+os.environ["API_KEY"] = API_KEY = "test-api-key-0123456789"
 os.environ["MAL_CLIENT_ID"] = ""
 os.environ["ANILIST_CLIENT_ID"] = ""
 # Tests never reach external streaming sites; provider tests inject their own HTTP clients.
@@ -48,7 +49,9 @@ async def client(database):
     from app.main import app
     from app.services import airing, list_writer, source_scan, stats_jobs
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", headers={"x-api-key": API_KEY}
+    ) as c:
         yield c
     await source_scan.wait_idle()
     await stats_jobs.wait_idle()

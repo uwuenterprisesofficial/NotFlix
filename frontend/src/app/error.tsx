@@ -1,6 +1,7 @@
 "use client";
 
 import { useT } from "@/components/I18nProvider";
+import { ServerSettings } from "@/components/desktop/ServerSettings";
 
 export default function Error({
   error,
@@ -20,6 +21,9 @@ export default function Error({
       <button onClick={() => retry()} className="mt-6 rounded bg-brand px-5 py-2 font-semibold">
         {t("error.retry")}
       </button>
+      <div className="text-left">
+        <ServerSettings unreachable />
+      </div>
     </div>
   );
 }

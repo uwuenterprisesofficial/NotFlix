@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from sqlalchemy import delete, select
@@ -258,6 +259,94 @@ async def test_linking_takes_the_account_from_another_user(client, providers):
 
 
 async def test_providers_and_unconfigured_login(client):
-    assert (await client.get("/auth/providers")).json() == {"mal": False, "anilist": False}
+    providers = (await client.get("/auth/providers")).json()
+    assert providers == {"mal": False, "anilist": False, "public_url": "http://localhost:3000"}
     resp = await client.get("/auth/login", params={"provider": "anilist"})
     assert resp.status_code == 503
+
+
+DESKTOP = "http://localhost:47300"
+
+
+async def test_sign_in_from_the_desktop_app_hands_the_session_over(client, providers):
+    # The desktop app's proxy says which origin the browser uses.
+    start = await client.get(
+        "/auth/login", params={"provider": "mal"}, headers={"x-notflix-origin": DESKTOP}
+    )
+    done = await client.get(
+        "/auth/callback", params={"code": "c", "state": _state(start.headers["location"])}
+    )
+    location = done.headers["location"]
+    assert location.startswith(f"{DESKTOP}/api/auth/handoff?token=")
+    token = parse_qs(urlsplit(location).query)["token"][0]
+
+    # The desktop origin has a session of its own: the handoff sets it, once.
+    client.cookies.clear()
+    assert (await client.get("/me")).status_code == 401
+    back = await client.get("/auth/handoff", params={"token": token, "to": "/?login=ok"})
+    assert back.headers["location"] == "/?login=ok"
+    assert (await client.get("/me")).json()["name"] == "mal-user"
+    client.cookies.clear()
+    again = await client.get("/auth/handoff", params={"token": token})
+    assert again.headers["location"] == "/?login=failed"
+    assert (await client.get("/me")).status_code == 401
+
+
+async def test_desktop_sign_in_with_both_returns_to_the_desktop(client, providers):
+    start = await client.get(
+        "/auth/login",
+        params={"provider": "mal", "then": "anilist"},
+        headers={"x-notflix-origin": DESKTOP},
+    )
+    first = await client.get(
+        "/auth/callback", params={"code": "c", "state": _state(start.headers["location"])}
+    )
+    # Signed in on the desktop, which then starts the AniList sign-in itself (its proxy has the
+    # API key; the server's web app may not).
+    location = urlsplit(first.headers["location"])
+    assert f"{location.scheme}://{location.netloc}{location.path}" == (
+        f"{DESKTOP}/api/auth/handoff"
+    )
+    query = parse_qs(location.query)
+    assert query["to"] == ["/api/auth/login?provider=anilist&link=true"]
+    client.cookies.clear()
+    await client.get("/auth/handoff", params={"token": query["token"][0]})
+    start = await client.get(
+        "/auth/login",
+        params={"provider": "anilist", "link": "true"},
+        headers={"x-notflix-origin": DESKTOP},
+    )
+    done = await client.get(
+        "/auth/anilist/callback", params={"code": "c", "state": _state(start.headers["location"])}
+    )
+    location = done.headers["location"]
+    assert location.startswith(f"{DESKTOP}/api/auth/handoff?token=")
+    assert parse_qs(urlsplit(location).query)["to"] == ["/settings?login=ok&account=anilist"]
+    client.cookies.clear()
+    await client.get(
+        "/auth/handoff", params={"token": parse_qs(urlsplit(location).query)["token"][0]}
+    )
+    me = (await client.get("/me")).json()
+    assert (me["mal"], me["anilist"]) == ({"name": "mal-user"}, {"name": "al-user"})
+
+
+@pytest.mark.parametrize(
+    "origin", ["https://evil.example", "http://localhost:3000", "javascript:alert(1)", ""]
+)
+async def test_other_origins_are_ignored(client, providers, origin):
+    start = await client.get(
+        "/auth/login", params={"provider": "mal"}, headers={"x-notflix-origin": origin}
+    )
+    done = await client.get(
+        "/auth/callback", params={"code": "c", "state": _state(start.headers["location"])}
+    )
+    assert done.headers["location"] == "http://localhost:3000/?login=ok&account=mal"
+
+
+@pytest.mark.parametrize("to", ["https://evil.example/", "//evil.example/", "/\\evil.example"])
+async def test_handoff_stays_on_its_origin(client, providers, to):
+    from app.core.cache import redis
+
+    await redis().set("handoff:t", 1, ex=60)
+    res = await client.get("/auth/handoff", params={"token": "t", "to": to})
+    assert res.headers["location"] == "/"

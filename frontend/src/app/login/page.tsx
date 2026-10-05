@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { ServerSettings } from "@/components/desktop/ServerSettings";
 import { api, apiOrNull } from "@/lib/api";
 import { getT } from "@/lib/i18n/server";
 import type { Me } from "@/lib/types";
@@ -11,10 +12,12 @@ export async function generateMetadata(): Promise<Metadata> {
 
 // Plain anchors: these are full-page redirects to MyAnimeList/AniList, not client navigations.
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
+  // The backend may be unreachable (in the desktop app: not chosen yet, or wrong): the page
+  // still shows, with the server settings.
   const [{ t }, me, providers, params] = await Promise.all([
     getT(),
-    apiOrNull<Me>("/me"),
-    api<{ mal: boolean; anilist: boolean }>("/auth/providers"),
+    apiOrNull<Me>("/me").catch(() => null),
+    api<{ mal: boolean; anilist: boolean }>("/auth/providers").catch(() => null),
     searchParams,
   ]);
   // A guest signs in here to use their own list (keeping their Watch Together connections).
@@ -39,7 +42,8 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
       <p className="mt-2 text-muted">{t("login.info")}</p>
       {params.login === "failed" && <p className="mt-4 text-red-400">{t("login.failed")}</p>}
       {me?.guest && <p className="mt-4 text-sm">{t("guest.note")}</p>}
-      <div className="mt-8 space-y-4">
+      {providers ? (
+        <div className="mt-8 space-y-4">
         {option(
           "/api/auth/login?provider=mal",
           t("login.mal"),
@@ -70,7 +74,11 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
             true,
             t("login.bothInfo"),
           )}
-      </div>
+        </div>
+      ) : (
+        <p className="mt-8 text-red-400">{t("error.body")}</p>
+      )}
+      <ServerSettings unreachable={!providers} />
     </div>
   );
 }

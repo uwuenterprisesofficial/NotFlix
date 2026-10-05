@@ -2,6 +2,7 @@ import { type Lang, LOCALE, type Messages, interpolate } from "./core";
 import { admin } from "./messages/admin";
 import { analysis } from "./messages/analysis";
 import { common } from "./messages/common";
+import { desktop } from "./messages/desktop";
 import { detail } from "./messages/detail";
 import { player } from "./messages/player";
 import { search } from "./messages/search";
@@ -20,6 +21,7 @@ const messages = {
   ...stats,
   ...together,
   ...admin,
+  ...desktop,
 } satisfies Messages;
 
 export type MessageKey = keyof typeof messages;

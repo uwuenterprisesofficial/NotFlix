@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from redis.exceptions import RedisError
 from rq import Queue, Worker
 from rq.job import Job
 from sqlalchemy import delete, func, select
@@ -216,7 +217,10 @@ async def admin_status(_: AdminUser, db: DB) -> dict[str, Any]:
         "episode_sources": await db.scalar(select(func.count()).select_from(EpisodeSource)),
         "stream_failures": await db.scalar(select(func.count()).select_from(StreamFailure)),
     }
-    info = await redis().info("memory")
+    try:
+        info = await redis().info("memory")
+    except RedisError:
+        info = {}  # not every Redis-compatible server has INFO (the desktop app's doesn't)
 
     return {
         "now": now,

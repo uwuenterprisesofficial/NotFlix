@@ -1061,3 +1061,22 @@ def test_hoster_direct():
     # Played through the proxy: the link belongs to the IP AniScraper extracted it from.
     assert stream_out(mp4).url.startswith("/api/proxy?t=")
     assert resolved_from_json(resolved_to_json(Resolved([mp4]))).streams == [mp4]
+
+
+@pytest.mark.parametrize(
+    ("via", "expected"),
+    [("", "AniScraperProvider"), ("api", "AniWorldApiProvider"), ("site", "AniWorldProvider")],
+)
+def test_aniworld_source_can_be_chosen(monkeypatch, via, expected):
+    from app.core.config import get_settings
+    from app.providers.base import enabled_providers
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "aniscraper_url", "http://scraper")
+    monkeypatch.setattr(settings, "aniworld_api_url", "http://api")
+    monkeypatch.setattr(settings, "aniworld_url", "https://aniworld.to")
+    monkeypatch.setattr(settings, "aniworld_via", via)
+    names = [type(p).__name__ for p in enabled_providers()]
+    aniworld = [n for n in names if n.startswith(("AniWorld", "AniScraper"))]
+    assert aniworld == [expected]
+    assert "AnimeToastProvider" in names  # AniScraper keeps serving AnimeToast

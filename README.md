@@ -34,7 +34,7 @@ The browser only talks to Next.js. `/api/*` is proxied to FastAPI, so the sessio
 ## Getting started
 
 1. Create a MAL API client at <https://myanimelist.net/apiconfig>. Choose app type **web** and set the redirect URL to `http://localhost:3000/api/auth/callback`.
-2. `cp .env.example .env`, then fill in `MAL_CLIENT_ID`, `MAL_CLIENT_SECRET` and `SECRET_KEY`.
+2. `cp .env.example .env`, then fill in `MAL_CLIENT_ID`, `MAL_CLIENT_SECRET`, `SECRET_KEY` and `API_KEY` (see [API key](#api-key)); to use NotFlix in the browser, also set `WEB_API_KEY` to the same key.
 3. `docker compose up --build`
 4. Open <http://localhost:3000>, sign in, and press **Sync MAL**.
 
@@ -54,14 +54,91 @@ Needs Postgres, Redis and ffmpeg installed locally.
 cd backend
 uv sync
 uv run alembic upgrade head
-uv run uvicorn app.main:app --reload        # API on :8000
+uv run uvicorn app.main:app --reload        # API on :8000 (API_KEY in .env)
 uv run rq worker analysis                   # analysis worker
 uv run rq worker catalog                    # catalogue worker
 
 cd ../frontend
 npm install
-npm run dev                                 # UI on :3000
+API_KEY=<the API_KEY> npm run dev           # UI on :3000
 ```
+
+### API key
+
+The API answers only requests that carry its key (`API_KEY`, at least 16 characters) in the `X-API-Key` header; everything else gets `401`, including `/health` and `/docs`, and the API doesn't start without a key. Browsers never see the key: the frontend's server adds it to the requests it passes on to the API.
+
+- **Desktop app:** you enter the key next to the server's address. It stays in the app (encrypted with the system's key store where there is one).
+- **Web app:** it adds `WEB_API_KEY` (in `docker compose`; `API_KEY` in its environment otherwise). Set it to the API key to use NotFlix in a browser; anyone who can open the web app then uses the API through it, so only expose it where that's fine. Left empty, the web app adds no key and only passes on requests that bring the right one themselves: the desktop app can then connect through the web app's `/api`, and browsers get nothing.
+- **Sign-in redirects** from MyAnimeList and AniList (`/auth/callback`, `/auth/anilist/callback`) are the only requests without the key: the provider sends the browser there. They only finish a sign-in that was started with the key (matched by its one-time `state`).
+
+## Desktop app
+
+`desktop/` is an Electron app for your PC. It works in one of two ways, chosen under **Settings → Server**:
+
+- **This PC (built-in):** all of NotFlix runs on the PC, started and stopped with the app. That covers PostgreSQL, the backend and its workers, AniScraper, Anivexa, SerienStreamAPI and ffmpeg. Nothing else to install, no Docker.
+- **Another server:** the app connects to a NotFlix backend running elsewhere, e.g. a home server, by its address and [API key](#api-key).
+
+Either way the app runs the web frontend's own server on the PC (`http://127.0.0.1:47300`) and shows it in a window; that server passes `/api/*` on to the backend.
+
+### Build it
+
+Build on the system the app is for (Windows for Windows): the bundle holds that system's binaries. You need Node.js, [uv](https://docs.astral.sh/uv/), git and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
+
+```sh
+cd desktop
+npm install
+npm run dist:win        # or dist:mac, dist:linux
+```
+
+On Windows this makes two files in `desktop/dist/`, each a single executable:
+
+- `NotFlix Setup <version>.exe`, an installer. This is the one to use: it unpacks once and starts quickly.
+- `NotFlix-<version>-portable.exe`, which runs without installing. It unpacks itself (about 700 MB) on every start, so it starts slowly.
+
+What the build does:
+
+- `npm run server` builds the frontend into `desktop/server/`.
+- `npm run stack` builds the built-in server into `desktop/build/stack/` (`scripts/prepare-stack.mjs`):
+  - a portable Python 3.12 (from uv) with the backend's and AniScraper's dependencies, and the [fakeredis](https://github.com/cunla/fakeredis-py) Redis stand-in;
+  - PostgreSQL 18 (from the [embedded-postgres](https://github.com/leinelissen/embedded-postgres) packages);
+  - Anivexa, at a tested commit;
+  - SerienStreamAPI's AniWorld service (`desktop/stack/aniworld-api/`), published as one self-contained executable;
+  - ffmpeg (from imageio-ffmpeg).
+
+  `--without=anivexa,aniworld-api` leaves those out, e.g. without the .NET SDK.
+- `npm run dist:client` builds the app without the built-in server, for connecting to another server only (about 100 MB instead of 700).
+
+For development: `npm run server`, `npm run stack`, then `npm start`.
+
+### This PC (built-in)
+
+On first start the app sets everything up: the database in its data folder (`%APPDATA%\notflix-desktop\server` on Windows), and its own passwords and API key. That takes about 10 seconds behind a splash screen; later starts are a bit faster. Everything listens on `127.0.0.1` only.
+
+To sign in, create an API client at [MyAnimeList](https://myanimelist.net/apiconfig) and/or [AniList](https://anilist.co/settings/developer) and enter it under **Settings → Server**. That box shows the redirect URLs to register (`http://localhost:47300/api/auth/callback` and `…/anilist/callback`). **Save and restart** applies the settings. **Open logs** shows what each service wrote (`server/logs/`).
+
+- **AniWorld through:** AniScraper (the default) gives direct streams where it can resolve the hoster. SerienStreamAPI gives the hosters' own players. AnimeToast always comes from AniScraper.
+- **Other backend settings** (those in [`.env.example`](.env.example)): put them in `server.env` in that `server` folder, one `KEY=value` per line, and restart the app.
+- **Data:** the database lives in `server/postgres`. Caches and job queues are in memory and start empty with each run.
+
+### Another server
+
+Choose **Another server**, enter the backend's address and its [API key](#api-key), and press **Connect**. The app checks that a NotFlix backend answers there and takes the key (`/health`), saves both, and restarts its local server. Either address works:
+
+- the backend itself, e.g. `http://my-server:8000` (when port 8000 is reachable from the PC), or
+- the web app's address with `/api`, e.g. `https://notflix.example.com/api` (this works whether or not the web app has a key of its own).
+
+The key can be left empty later to keep the saved one. The box also shows on any page that can't reach the backend, and **File → Server settings…** opens it. Settings are kept in `config.json` in the app's data folder. Secrets there are encrypted with the system's key store where there is one, as on Windows and macOS.
+
+**Signing in** needs nothing new at MyAnimeList or AniList: the redirect URLs stay the server's (`MAL_REDIRECT_URI`, `ANILIST_REDIRECT_URI`, `FRONTEND_URL` in the server's `.env`). The provider's page opens in the app's window and returns to the server's web app. That web app hands the sign-in back to the desktop app with a one-time token, valid for 2 minutes; only `localhost`/`127.0.0.1` addresses are accepted as targets. So `FRONTEND_URL` must be an address the PC can open.
+
+The server must run this version too: the backend for the sign-in hand-over, and the web app if the desktop app connects through its `/api`.
+
+### Good to know
+
+- Invite links made in the desktop app point to the web app (`FRONTEND_URL`). With the built-in server, Watch Together only works with others who can reach this PC.
+- Links to other sites open in your browser; MyAnimeList's and AniList's sign-in pages stay in the window.
+- Episodes start by themselves (autoplay is allowed in the app).
+- Anivexa has no license of its own and SerienStreamAPI is GPL-3.0: the build fetches them, so keep the app for yourself.
 
 ## Streams
 

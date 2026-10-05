@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     secret_key: str = "change-me"
+    # Every request needs it in the X-API-Key header (see app/core/api_key.py); the API doesn't
+    # start without one.
+    api_key: str = ""
     frontend_url: str = "http://localhost:3000"
 
     mal_client_id: str = ""
@@ -65,6 +68,9 @@ class Settings(BaseSettings):
     # at http://aniscraper:8000), another self-hosted AniWorld API, or scraping ANIWORLD_URL.
     aniscraper_url: str = ""
     aniworld_api_url: str = ""
+    # Which of them AniWorld comes from when several are set: "aniscraper", "api" or "site";
+    # empty: the first one set, in the order above. (AniScraper keeps serving AnimeToast.)
+    aniworld_via: str = ""
 
     # AniWorld (German dub/sub). Empty disables the provider. The series path changes with site
     # redesigns, so it is configurable.
