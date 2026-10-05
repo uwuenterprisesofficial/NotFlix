@@ -66,7 +66,11 @@ function preparePython() {
     run("uv", ["venv", "--python", process.env.NOTFLIX_STACK_PYTHON, target]);
   } else {
     const downloads = join(work, "python");
-    run("uv", ["python", "install", PYTHON_VERSION, "--install-dir", downloads]);
+    // Only into the build folder: no python.exe in ~/.local/bin, no Windows registry entry.
+    run("uv", [
+      "python", "install", PYTHON_VERSION, "--install-dir", downloads, "--no-bin",
+      ...(windows ? ["--no-registry"] : []),
+    ]);
     const installed = readdirSync(downloads).find(
       (name) => name.startsWith(`cpython-${PYTHON_VERSION}`) && !name.endsWith(".lock"),
     );
@@ -77,6 +81,11 @@ function preparePython() {
     ? join(target, process.env.NOTFLIX_STACK_PYTHON ? "Scripts" : "", "python.exe")
     : join(target, "bin", "python3");
 
+  const pip = (...args) =>
+    run("uv", ["pip", "install", "--python", python, "--break-system-packages", "--no-cache", ...args]);
+
+  // The backend's exact versions, from its lock file. Should that not install (a lock edited
+  // locally, say), the newest ones its pyproject.toml allows.
   const requirements = join(work, "requirements.txt");
   const backendDeps = run(
     "uv",
@@ -84,10 +93,14 @@ function preparePython() {
     { capture: true },
   );
   writeFileSync(requirements, backendDeps);
-  run("uv", [
-    "pip", "install", "--python", python, "--break-system-packages", "--no-cache",
-    "-r", requirements, "-r", join(repo, "aniscraper", "requirements.txt"), ...PYTHON_EXTRAS,
-  ]);
+  try {
+    pip("-r", requirements);
+  } catch {
+    console.warn("The backend's lock file didn't install; using its pyproject.toml instead.");
+    pip("-r", join(repo, "backend", "pyproject.toml"));
+  }
+  // Then AniScraper's and the launcher's: what's installed already and fits stays as it is.
+  pip("-r", join(repo, "aniscraper", "requirements.txt"), ...PYTHON_EXTRAS);
   return python;
 }
 
