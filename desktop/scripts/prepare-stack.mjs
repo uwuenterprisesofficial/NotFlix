@@ -37,10 +37,13 @@ const without = new Set(
 
 function run(command, args, options = {}) {
   console.log(`> ${command} ${args.join(" ")}`);
-  return execFileSync(command, args, {
+  // npm is a .cmd script on Windows, which only runs through a shell (that splits at spaces,
+  // so those arguments are quoted). Everything else is started directly.
+  const shell = windows && command === "npm";
+  return execFileSync(command, shell ? args.map((a) => (/\s/.test(a) ? `"${a}"` : a)) : args, {
     stdio: options.capture ? ["ignore", "pipe", "inherit"] : "inherit",
     encoding: "utf8",
-    shell: windows, // npm, uv and dotnet are .cmd/.exe shims there
+    shell,
     ...options,
   });
 }
@@ -155,15 +158,64 @@ function prepareAnivexa() {
 
 // --- SerienStreamAPI's AniWorld service, one self-contained executable ---
 
-function prepareAniworldApi() {
+const DOTNET_CHANNEL = "8.0";
+
+/** Whether `dotnet` here can build: an SDK of version 8 or newer, not just a runtime. */
+function hasSdk(dotnet) {
+  try {
+    const sdks = run(dotnet, ["--list-sdks"], { capture: true });
+    return sdks.split("\n").some((line) => Number.parseInt(line, 10) >= 8);
+  } catch {
+    return false;
+  }
+}
+
+/** A .NET SDK: the installed one, else one put into the build folder with Microsoft's
+ * dotnet-install script (no admin rights needed, nothing installed for the system). */
+async function dotnetSdk() {
+  if (hasSdk("dotnet")) return "dotnet";
+  const dir = join(work, "dotnet");
+  const local = join(dir, windows ? "dotnet.exe" : "dotnet");
+  if (existsSync(local) && hasSdk(local)) return local;
+  console.log(`No .NET ${DOTNET_CHANNEL} SDK found: installing one into ${dir}`);
+  const script = join(work, windows ? "dotnet-install.ps1" : "dotnet-install.sh");
+  const res = await fetch(`https://dot.net/v1/${windows ? "dotnet-install.ps1" : "dotnet-install.sh"}`);
+  if (!res.ok) throw new Error(`Couldn't download the .NET install script (${res.status})`);
+  writeFileSync(script, Buffer.from(await res.arrayBuffer()));
+  if (windows) {
+    run("powershell", [
+      "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+      "-Channel", DOTNET_CHANNEL, "-InstallDir", dir, "-NoPath",
+    ]);
+  } else {
+    run("bash", [script, "--channel", DOTNET_CHANNEL, "--install-dir", dir, "--no-path"]);
+  }
+  if (!hasSdk(local)) throw new Error("The .NET SDK didn't install");
+  return local;
+}
+
+async function prepareAniworldApi() {
   const rid = {
     "win32-x64": "win-x64", "win32-arm64": "win-arm64", "darwin-x64": "osx-x64",
     "darwin-arm64": "osx-arm64", "linux-x64": "linux-x64", "linux-arm64": "linux-arm64",
   }[`${process.platform}-${process.arch}`];
-  run("dotnet", [
-    "publish", join(desktop, "stack", "aniworld-api"), "-c", "Release", "-r", rid,
-    "-o", join(stack, "aniworld-api"),
-  ]);
+  const dotnet = await dotnetSdk();
+  run(
+    dotnet,
+    [
+      "publish", join(desktop, "stack", "aniworld-api"), "-c", "Release", "-r", rid,
+      "-o", join(stack, "aniworld-api"),
+    ],
+    {
+      env: {
+        ...process.env,
+        DOTNET_CLI_TELEMETRY_OPTOUT: "1",
+        DOTNET_NOLOGO: "1",
+        // The SDK in the build folder finds its own runtime there.
+        ...(dotnet === "dotnet" ? {} : { DOTNET_ROOT: dirname(dotnet) }),
+      },
+    },
+  );
 }
 
 rmSync(stack, { recursive: true, force: true });
@@ -173,10 +225,18 @@ prepareSources();
 prepareFfmpeg(python);
 preparePostgres();
 const components = ["postgres", "redis", "backend", "aniscraper", "ffmpeg"];
+// Optional parts: without them the built-in server still works (no English sources from
+// Anivexa; AniWorld only through AniScraper).
+const skipped = [];
 for (const [name, prepare] of [["anivexa", prepareAnivexa], ["aniworld-api", prepareAniworldApi]]) {
   if (without.has(name)) continue;
-  prepare();
-  components.push(name);
+  try {
+    await prepare();
+    components.push(name);
+  } catch (error) {
+    rmSync(join(stack, name), { recursive: true, force: true });
+    skipped.push(`${name}: ${error.message.split("\n")[0]}`);
+  }
 }
 writeFileSync(
   join(stack, "manifest.json"),
@@ -192,3 +252,4 @@ writeFileSync(
   ),
 );
 console.log(`Built-in server ready in ${stack} (${components.join(", ")})`);
+for (const reason of skipped) console.warn(`Left out ${reason}`);

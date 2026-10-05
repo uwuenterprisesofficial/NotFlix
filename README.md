@@ -82,7 +82,7 @@ Either way the app runs the web frontend's own server on the PC (`http://127.0.0
 
 ### Build it
 
-Build on the system the app is for (Windows for Windows): the bundle holds that system's binaries. You need Node.js, [uv](https://docs.astral.sh/uv/), git and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
+Build on the system the app is for (Windows for Windows): the bundle holds that system's binaries. You need Node.js, [uv](https://docs.astral.sh/uv/) and git. The [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (for the SerienStreamAPI service) is used when installed. Without one, the build puts one into `desktop/build/work/dotnet` (Microsoft's `dotnet-install` script; no admin rights needed). Should that fail too, the app is built without the SerienStreamAPI service, with a warning (the same for Anivexa).
 
 ```sh
 cd desktop
