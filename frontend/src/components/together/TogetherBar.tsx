@@ -2,12 +2,13 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { allowedImage } from "@/lib/images";
 import type { Connection, Language, RoomStream } from "@/lib/types";
 import { useT } from "../I18nProvider";
 import type { useSources } from "../player/useSources";
+import { useTogetherSessions } from "./Session";
 import type { Party } from "./WatchParty";
 
 type Sources = ReturnType<typeof useSources>;
@@ -132,19 +133,19 @@ function InRoom({
       {sources.stream?.kind === "embed" && (
         <span className="text-amber-400">{t("together.embedNoSync")}</span>
       )}
-      <Link href={party.leaveHref} className="ml-auto text-muted hover:text-white">
+      <button onClick={party.leave} className="ml-auto text-muted hover:text-white">
         {t("together.leave")}
-      </Link>
+      </button>
     </div>
   );
 }
 
-/** Pick someone to watch with: opens `href` (a watch page), or this page, in their room. */
+/** Pick someone to watch with: invites them, and opens `href` (a watch page) if given. Once
+ * they join, whatever either of you plays opens for both. */
 export function WatchTogetherMenu({ href, large = false }: { href?: string; large?: boolean }) {
   const { t } = useT();
   const router = useRouter();
-  const pathname = usePathname();
-  const search = useSearchParams();
+  const sessions = useTogetherSessions();
   const [open, setOpen] = useState(false);
   const [connections, setConnections] = useState<Connection[] | null>(null);
   const loading = useRef(false);
@@ -158,14 +159,10 @@ export function WatchTogetherMenu({ href, large = false }: { href?: string; larg
       .then(setConnections, () => setConnections([]));
   }
 
-  function start(id: number) {
-    if (href) {
-      router.push(`${href}${href.includes("?") ? "&" : "?"}together=${id}`);
-      return;
-    }
-    const params = new URLSearchParams(search.toString());
-    params.set("together", String(id));
-    router.replace(`${pathname}?${params}`);
+  async function start(id: number) {
+    setOpen(false);
+    if (!(await sessions?.start(id))) return;
+    if (href) router.push(href);
   }
 
   return (

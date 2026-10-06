@@ -7,7 +7,7 @@ from app.api import friends
 from app.api.admin import is_admin
 from app.api.deps import DB, CurrentUser, ListUser
 from app.api.search import _from_catalogue
-from app.models import Anime, ListEntry, ListStatus
+from app.models import Anime, ListEntry, ListStatus, Recommendation
 from app.schemas import (
     AccountOut,
     AnimeCard,
@@ -161,6 +161,63 @@ async def library(user: ListUser, db: DB):
         ],
         related_pending=related.loading(user.id),
     )
+
+
+# Still to watch on the list (or not on it): what Up Next may suggest.
+OPEN_STATUSES = {ListStatus.plan_to_watch, ListStatus.watching, ListStatus.on_hold}
+
+
+@router.get("/up-next", response_model=AnimeCard | None)
+async def up_next(after: int, user: ListUser, db: DB):
+    """What to watch after the last episode of `after` there is: its sequel when that's out
+    and not seen, else the best recommendation, else the best of the plan-to-watch list."""
+    predictor = await predictor_for(db, user)
+    entries = {
+        e.anime_id: e
+        for e in await db.scalars(select(ListEntry).where(ListEntry.user_id == user.id))
+    }
+
+    def still_to_watch(anime: Anime) -> bool:
+        entry = entries.get(anime.id)
+        return (
+            anime.id != after
+            and anime.status != "not_yet_aired"
+            and (entry is None or entry.status in OPEN_STATUSES)
+        )
+
+    def card(anime: Anime, reason: str | None = None) -> AnimeCard:
+        return catalog.to_card(anime, entries.get(anime.id), reason, predictor)
+
+    current = await db.get(Anime, after)
+    title = (current.title_en or current.title) if current else ""
+    sequels = [
+        r["row"]
+        for r in (await related.cached([after])).get(after) or []
+        if r["relation"] == "SEQUEL"
+    ]
+    for anime in await _from_catalogue(
+        db, [r["id"] for r in sequels], {r["id"]: r for r in sequels}
+    ):
+        if still_to_watch(anime):
+            return card(anime, f"related:SEQUEL:{title}")
+
+    recs = (
+        await db.execute(
+            select(Recommendation, Anime)
+            .join(Anime, Anime.id == Recommendation.anime_id)
+            .where(Recommendation.user_id == user.id)
+            .order_by(Recommendation.score.desc())
+        )
+    ).all()
+    for rec, anime in recs:
+        if still_to_watch(anime):
+            return card(anime, rec.reason)
+
+    planned = await catalog.anime_by_ids(
+        db, [i for i, e in entries.items() if e.status == ListStatus.plan_to_watch]
+    )
+    best = _by_appeal(card(a) for a in planned if still_to_watch(a))
+    return best[0] if best else None
 
 
 @router.get("/stats", response_model=StatsStatusOut)

@@ -232,7 +232,7 @@ The library endpoints sit behind the server's API key like everything else. When
 
 The player lists every source it finds for an episode, grouped by language: German Dub, German Sub, English Dub, English Sub. The language is picked automatically from the NotFlix language (see **Languages** below): dub, then sub in that language, then dub, then sub in the other. A language you pick by hand (in the player or the episode list) is remembered for that show in this browser.
 
-It resolves all sources of the language at once and plays the first **direct** stream that works (NotFlix's own player, so Skip Intro and Next Episode work). A direct stream that errors or loads nothing within 20 s is skipped, and the next one continues from the same position. When no source has a direct stream (it waits up to 8 s for one), the embedded player is the fallback. Every source and stream, marked *Direct · MP4*, *Direct · HLS* or *Embed*, is in the dropdown on the right under the video; the language dropdown (with flags) is on the left. When you continue with **Next Episode**, the same provider and hoster are preferred. The Next Episode card appears when the detected ending starts, or 1:30 before the end when no ending was detected. Fullscreen (the button in the corner, a double-click or `f`) enlarges the whole player, so Skip Intro and Next Episode stay visible, and it stays on when the next episode starts. On iPhones, where only the video itself can go fullscreen, the overlays aren't shown in fullscreen.
+It resolves all sources of the language at once and plays the first **direct** stream that works (NotFlix's own player, so Skip Intro and Next Episode work). A direct stream that errors or loads nothing within 20 s is skipped, and the next one continues from the same position. When no source has a direct stream (it waits up to 8 s for one), the embedded player is the fallback. Every source and stream, marked *Direct · MP4*, *Direct · HLS* or *Embed*, is in the dropdown on the right under the video; the language dropdown (with flags) is on the left. When you continue with **Next Episode**, the same provider and hoster are preferred. The Next Episode card appears when the detected ending starts, or 1:30 before the end when no ending was detected. After the last episode there is (the last one aired, for an airing show), the card suggests another show instead, with the same countdown (`GET /api/me/up-next?after=<id>`). It picks the show's sequel when it has aired and you haven't watched it, else your best-scored recommendation you haven't watched, else what you'd like most on your Plan to Watch list. Fullscreen (the button in the corner, a double-click or `f`) enlarges the whole player, so Skip Intro and Next Episode stay visible, and it stays on when the next episode starts. On iPhones, where only the video itself can go fullscreen, the overlays aren't shown in fullscreen.
 
 Sources come from providers in `backend/app/providers/`:
 
@@ -342,7 +342,7 @@ Who may open it: the users in `ADMINS` (MAL or AniList names, or NotFlix user id
 
 ## Watch Together
 
-Connect with someone, get recommendations for both of you, and watch with a synced player (**Together** in the menu).
+Connect with friends, get recommendations for both of you, and watch together with a synced player (**Together** in the menu).
 
 **Connecting.** **Invite someone** creates a link (`/together/join/<code>`, valid once, for 7 days). Whoever opens it while signed in (with MyAnimeList, AniList or both) is connected with you; opened while signed out, the invite is taken up right after signing in. A connection can be removed from its page (**Disconnect**).
 
@@ -365,14 +365,23 @@ Each card shows both sides: a score (★9) or a predicted one (~8.4). The **tast
 - Only recommendations between people who are still connected are shown. A guest who signs in keeps theirs.
 - API: `POST /api/friends/recommendations` (`anime_id`, `connection_ids`, `message`), `GET /api/friends/recommendations` (received, sent, unseen), `POST /api/friends/recommendations/seen`, `DELETE /api/friends/recommendations/{id}`, `GET /api/friends/recommendations/anime/{id}`.
 
-**The synced player.** **Watch together** on a show's page or under the player opens it in your room with that person (`?together=<id>` on the watch page). Each connection has one room, kept in Redis: which episode, the position at a server time, and whether it's playing. Both players follow it through server-sent events (`GET /api/together/{id}/room/events`, proxied by Next like the rest of the API) and send their own play, pause and seeks (`POST /api/together/{id}/room`), last change wins.
+**Friend codes.** Every account has a friend code (`ABCD-EF23`, on the **Together** page; `GET /api/together/code`, `POST /api/together/code` for a new one, after which the old one stops working). Entering someone's code under **Add a friend by their code** connects you right away (`POST /api/together/connect`). Codes ignore case, spaces and dashes, and leave out characters that are easy to misread (0/O, 1/I).
 
-- Either of you can pause, play or seek; the other player does the same. A player that drifts is brought back in step by playing up to 15% faster or slower; only more than 4 s off does it jump (which means buffering). It's never corrected while it's buffering or right after a jump, so a slow stream isn't made to jump over and over. Clocks are compared with the server's.
-- Alone in the room (the other person isn't on that episode), the player works exactly as without a room: it starts by itself, resumes where you stopped and is never corrected. It only keeps the room up to date with where you are, so whoever joins starts there.
-- Starting another episode (Next Episode, autoplay, or picking one) takes the other person along. Opening the room on an episode starts it for both.
-- Joining a room that's playing starts at its position; when the browser doesn't allow playback without a click, **Join playback** starts it.
+**Watching together: sessions.** Watching together only happens in a session, and only while it's active. Players outside an active session are never synced.
+
+- **Watch together** (on a show's page, under the player, or next to a connection on the Together page) starts a session with that person. It invites them, and your side shows "Waiting for …" (**Cancel** ends it). The invitation pops up for them anywhere in NotFlix: **Join** or **Not now**. The app asks for sessions every few seconds (every 2.5 s while waiting), which also shows you as online to your connections.
+- Once both joined, the session is active, anywhere in the app: a small bar says who you're watching with (with **Leave**).
+- Whatever either of you opens is opened for the other one too, from whatever page they're on, and it starts playing for both. That includes picking an episode, Next Episode, autoplay and the suggestion after the last episode.
+- **Leave** (in the bar, or under the player) ends the session for both. So does disconnecting. You're in one session at a time: starting another one leaves yours. Sessions are kept in Redis (`together:session:<connection id>`) for 12 hours after the last connected player.
+- API: `GET /api/together/sessions`, `POST /api/together/{id}/session` (start or join), `DELETE /api/together/{id}/session` (leave).
+
+**The synced player.** Each connection has one room, kept in Redis: which episode, the position at a server time, and whether it's playing. It starts empty when a session becomes active. While the session is active, both players follow the room through server-sent events (`GET /api/together/{id}/room/events`, proxied by Next like the rest of the API). They send their own play, pause and seeks (`POST /api/together/{id}/room`), and the last change wins.
+
+- Pause, play and seeks go to the other player right away: pausing pauses both.
+- Otherwise the players are kept close, not exact, so each plays smoothly. Within 2 s of each other nothing is corrected. Further apart, the player that's off plays up to 6% faster or slower (barely noticeable) until it's within 0.75 s again. Only more than 10 s off does it jump, because a jump means buffering. A player is never corrected while it's buffering or right after a jump, so a slow stream isn't made to jump over and over. Seeks of less than 3 s aren't passed on. Clocks are compared with the server's.
+- Alone in the room (the other person isn't on that episode yet), the player works exactly as without a room: it starts by itself, resumes where you stopped and is never corrected. It only keeps the room up to date with where you are, so whoever joins starts there.
+- Joining a room that's playing starts at its position. When the browser doesn't allow playback without a click, **Join playback** starts it.
 - The bar under the player shows who you're watching with and whether they're there. When they use another stream (language or source), **Use the same** switches yours to it: different releases of an episode can be cut differently.
-- While someone is watching in your room without you, a notice anywhere in NotFlix offers to **Join**.
 - Only direct streams can be synced; an embedded third-party player can't be controlled.
 
 ## Catalogue

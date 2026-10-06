@@ -12,6 +12,10 @@ than the stored one.
 
 Who has the room open (and where) is kept per user with a short expiry, refreshed while their
 event stream is connected.
+
+A session is what makes a room count: one of the pair starts it (the other is invited), and it's
+active once both have joined. Only then do the players follow the room. Leaving ends it for
+both. A user is in one session at a time: joining another leaves theirs.
 """
 
 import asyncio
@@ -48,6 +52,71 @@ def _state_key(connection_id: int) -> str:
 
 def _channel(connection_id: int) -> str:
     return f"together:events:{connection_id}"
+
+
+def _session_key(connection_id: int) -> str:
+    return f"together:session:{connection_id}"
+
+
+SESSION_TTL_S = 12 * 3600
+
+
+async def session(connection_id: int) -> list[int]:
+    """Who has joined the connection's session (both: it's active)."""
+    return sorted(int(u) for u in await redis().smembers(_session_key(connection_id)))
+
+
+async def sessions(connection_ids: list[int]) -> dict[int, list[int]]:
+    """The sessions of these connections that anyone joined."""
+    pipe = redis().pipeline()
+    for cid in connection_ids:
+        pipe.smembers(_session_key(cid))
+    found = await pipe.execute()
+    return {
+        cid: sorted(int(u) for u in members)
+        for cid, members in zip(connection_ids, found, strict=True)
+        if members
+    }
+
+
+async def _publish_session(connection_id: int) -> None:
+    joined = await session(connection_id)
+    await redis().publish(
+        _channel(connection_id),
+        json.dumps({"type": "session", "joined": joined, "now": now_ms()}),
+    )
+
+
+async def join(connection_id: int, user_id: int, pair: list[int]) -> list[int]:
+    """Join (or start) the connection's session. Once both are in, it starts afresh: the room
+    forgets what it played before, and the next episode either opens is the one."""
+    key = _session_key(connection_id)
+    before = await session(connection_id)
+    await redis().sadd(key, user_id)
+    await redis().expire(key, SESSION_TTL_S)
+    joined = await session(connection_id)
+    if set(joined) >= set(pair) and not set(before) >= set(pair):
+        await clear(connection_id)
+    await _publish_session(connection_id)
+    return joined
+
+
+async def leave(connection_id: int) -> None:
+    """End the session, for both."""
+    await redis().delete(_session_key(connection_id))
+    await _publish_session(connection_id)
+
+
+# Someone with the app open asks for their sessions every few seconds: they're online meanwhile.
+ONLINE_TTL_S = 30
+
+
+async def seen(user_id: int) -> None:
+    await redis().set(f"together:online:{user_id}", 1, ex=ONLINE_TTL_S)
+
+
+async def online(user_id: int) -> bool:
+    return bool(await redis().exists(f"together:online:{user_id}"))
 
 
 def _presence_key(connection_id: int, user_id: int) -> str:
@@ -187,6 +256,7 @@ async def events(
             if time.monotonic() - beat >= HEARTBEAT_S:
                 beat = time.monotonic()
                 await _set_presence(connection_id, entry)
+                await redis().expire(_session_key(connection_id), SESSION_TTL_S)
                 yield f": ping {now_ms()}\n\n"
             await asyncio.sleep(0)
     finally:

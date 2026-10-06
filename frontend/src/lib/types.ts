@@ -336,6 +336,15 @@ export type Connection = {
   partner_online: boolean;
 };
 
+/** A Watch Together session: active once both joined (joined only by the partner: an
+ * invitation). */
+export type TogetherSession = {
+  connection_id: number;
+  partner: Person;
+  joined: number[];
+  active: boolean;
+};
+
 export type InviteInfo = {
   inviter: Person;
   expires_at: string;

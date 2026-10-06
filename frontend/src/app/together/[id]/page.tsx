@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AnimeRow } from "@/components/AnimeRow";
 import { Avatar } from "@/components/together/Avatar";
+import { StartSession } from "@/components/together/Session";
 import { Disconnect } from "@/components/together/TogetherActions";
 import { apiOrNull } from "@/lib/api";
 import { genreName, type T } from "@/lib/i18n";
@@ -146,24 +146,29 @@ export default async function ConnectionPage({ params }: PageProps<"/together/[i
         </p>
       )}
 
-      {watching && (
-        <div className="mx-auto mt-6 flex max-w-6xl px-4 md:px-12">
-          <Link
-            href={watchHref(watching, data.id)}
-            className="flex items-center gap-3 rounded-lg bg-white px-4 py-2 font-semibold text-black"
-          >
-            <span aria-hidden className="size-2 rounded-full bg-green-500" />
-            {t("together.toast", {
-              name: data.partner.name,
-              title: watching.title ?? "?",
-              episode: watching.episode,
-            })}
-            <span className="rounded bg-black px-2 py-0.5 text-sm text-white">
-              ▶ {t("together.join")}
-            </span>
-          </Link>
-        </div>
-      )}
+      <div className="mx-auto mt-6 flex max-w-6xl px-4 md:px-12">
+        <StartSession
+          connectionId={data.id}
+          href={watching ? watchHref(watching) : undefined}
+          className="flex items-center gap-3 rounded-lg bg-white px-4 py-2 font-semibold text-black disabled:opacity-60"
+        >
+          {watching ? (
+            <>
+              <span aria-hidden className="size-2 rounded-full bg-green-500" />
+              {t("together.partnerWatching", {
+                name: data.partner.name,
+                title: watching.title ?? "?",
+                episode: watching.episode,
+              })}
+              <span className="rounded bg-black px-2 py-0.5 text-sm text-white">
+                ▶ {t("together.join")}
+              </span>
+            </>
+          ) : (
+            <>👥 {t("together.watchWith", { name: data.partner.name })}</>
+          )}
+        </StartSession>
+      </div>
 
       <div className="mt-8 space-y-6">
         {rows.length === 0 ? (

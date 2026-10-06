@@ -1,9 +1,7 @@
 import Link from "next/link";
-import { Suspense } from "react";
 import { apiOrNull } from "@/lib/api";
 import { getT } from "@/lib/i18n/server";
 import type { Me } from "@/lib/types";
-import { TogetherToast } from "./together/TogetherToast";
 import { UserMenu } from "./UserMenu";
 
 async function currentUser(): Promise<Me | null> {
@@ -117,12 +115,6 @@ export async function Navbar() {
           )}
         </div>
       </nav>
-      {me && (
-        // Reads the URL (whether this page is already in the room).
-        <Suspense fallback={null}>
-          <TogetherToast />
-        </Suspense>
-      )}
     </header>
   );
 }

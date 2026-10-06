@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { FriendRecommendationList } from "@/components/friends/FriendRecommendationList";
 import { Avatar } from "@/components/together/Avatar";
-import { InviteLink } from "@/components/together/TogetherActions";
+import { StartSession } from "@/components/together/Session";
+import { FriendCode, InviteLink } from "@/components/together/TogetherActions";
 import { api, apiOrNull } from "@/lib/api";
 import { getT } from "@/lib/i18n/server";
 import { watchHref } from "@/lib/together";
@@ -48,7 +49,8 @@ export default async function TogetherPage() {
         </p>
       )}
 
-      <div className="mt-8">
+      <div className="mt-8 space-y-3">
+        <FriendCode />
         <InviteLink />
       </div>
 
@@ -83,15 +85,13 @@ export default async function TogetherPage() {
                       : null}
                 </p>
               </div>
-              {c.partner_watching && (
-                <Link
-                  href={watchHref(c.partner_watching, c.id)}
-                  prefetch={false}
-                  className="rounded bg-white px-4 py-1.5 text-sm font-semibold text-black"
-                >
-                  ▶ {t("together.join")}
-                </Link>
-              )}
+              <StartSession
+                connectionId={c.id}
+                href={c.partner_watching ? watchHref(c.partner_watching) : undefined}
+                className="rounded bg-white px-4 py-1.5 text-sm font-semibold text-black disabled:opacity-60"
+              >
+                ▶ {t("together.watchTogether")}
+              </StartSession>
               <Link
                 href={`/together/${c.id}`}
                 // Each would compute that pair's recommendations: only when opened.

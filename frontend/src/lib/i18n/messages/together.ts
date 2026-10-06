@@ -4,8 +4,8 @@ export const together = {
   "nav.together": { en: "Together", de: "Zusammen" },
   "together.title": { en: "Watch Together", de: "Zusammen schauen" },
   "together.subtitle": {
-    en: "Connect with someone: recommendations from both of your lists, and a player that stays in sync.",
-    de: "Verbinde dich mit jemandem: Empfehlungen aus euren beiden Listen und ein Player, der synchron bleibt.",
+    en: "Connect with friends: recommendations from both of your lists, and watching together, where whatever one of you plays opens for both.",
+    de: "Verbinde dich mit Freunden: Empfehlungen aus euren beiden Listen und gemeinsames Schauen, bei dem sich öffnet, was einer von euch startet.",
   },
   "together.signIn": {
     en: "Sign in to watch together.",
@@ -133,12 +133,40 @@ export const together = {
   "together.withName": { en: "With {name}", de: "Mit {name}" },
   "together.joinPlayback": { en: "Join playback", de: "Wiedergabe beitreten" },
 
-  // Anywhere: the partner is watching
-  "together.toast": {
+  // Sessions, anywhere in the app
+  "together.invited": {
+    en: "{name} wants to watch together",
+    de: "{name} will mit dir zusammen schauen",
+  },
+  "together.notNow": { en: "Not now", de: "Nicht jetzt" },
+  "together.waitingFor": { en: "Waiting for {name}…", de: "Warte auf {name}…" },
+  "together.cancel": { en: "Cancel", de: "Abbrechen" },
+  "together.sessionActive": {
+    en: "Watching together with {name}",
+    de: "Du schaust zusammen mit {name}",
+  },
+  "together.partnerWatching": {
     en: "{name} is watching {title} · Episode {episode}",
     de: "{name} schaut {title} · Folge {episode}",
   },
-  "together.dismiss": { en: "Dismiss", de: "Ausblenden" },
+  "together.watchWith": { en: "Watch together with {name}", de: "Mit {name} zusammen schauen" },
+
+  // Friend codes
+  "together.yourCode": { en: "Your friend code", de: "Dein Freundescode" },
+  "together.codeInfo": {
+    en: "Whoever enters it is connected with you.",
+    de: "Wer ihn eingibt, ist mit dir verbunden.",
+  },
+  "together.newCode": { en: "New code", de: "Neuer Code" },
+  "together.newCodeConfirm": {
+    en: "Make a new code? The current one stops working (your connections stay).",
+    de: "Neuen Code erstellen? Der jetzige funktioniert dann nicht mehr (deine Verbindungen bleiben).",
+  },
+  "together.addByCode": { en: "Add a friend by their code", de: "Freund per Code hinzufügen" },
+  "together.add": { en: "Add", de: "Hinzufügen" },
+  "together.ownCode": { en: "That’s your own code.", de: "Das ist dein eigener Code." },
+  "together.unknownCode": { en: "No one has this code.", de: "Niemand hat diesen Code." },
+  "together.connectFailedShort": { en: "Couldn’t connect.", de: "Verbinden fehlgeschlagen." },
 
   // Guests
   "together.or": { en: "or", de: "oder" },

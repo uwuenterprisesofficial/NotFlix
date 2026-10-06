@@ -1,7 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import type Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
+import { allowedImage } from "@/lib/images";
 import { formatTime } from "@/lib/format";
 import type { SkipSegment, Stream } from "@/lib/types";
 import { useT } from "../I18nProvider";
@@ -64,7 +66,12 @@ function typingIn(target: EventTarget | null) {
   );
 }
 
-export type NextEpisode = { label: string; go: () => void };
+export type NextEpisode = {
+  label: string;
+  go: () => void;
+  /** Another show (after a show's last episode): shown with its poster and why. */
+  show?: { title: string; picture: string | null; note: string | null };
+};
 
 /**
  * A <video> we fully control, so the Netflix-style controls work (unlike cross-origin iframes):
@@ -367,6 +374,60 @@ function NextEpisodeCard({
   }, [countdown, left, next]);
 
   const progress = countdown ? (1 - left / NEXT_COUNTDOWN_S) * 100 : 0;
+
+  if (next.show) {
+    const picture = allowedImage(next.show.picture);
+    return (
+      <div className="absolute right-8 bottom-24 flex max-w-sm flex-col items-end gap-2">
+        <div className="flex gap-3 rounded-lg bg-black/80 p-3 shadow-2xl ring-1 ring-white/15 backdrop-blur">
+          {picture && (
+            <Image
+              src={picture}
+              alt=""
+              width={72}
+              height={102}
+              className="h-[102px] w-[72px] shrink-0 rounded object-cover"
+            />
+          )}
+          <div className="flex min-w-0 flex-col justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold tracking-wide text-muted uppercase">
+                {t("player.upNextForYou")}
+              </p>
+              <p className="line-clamp-2 font-bold">{next.show.title}</p>
+              {next.show.note && (
+                <p className="mt-0.5 line-clamp-2 text-xs text-white/70">{next.show.note}</p>
+              )}
+            </div>
+            <button
+              onClick={next.go}
+              className="relative w-fit overflow-hidden rounded bg-white px-4 py-1.5 font-semibold text-black"
+            >
+              <span
+                aria-hidden
+                className="absolute inset-y-0 left-0 bg-neutral-300 transition-[width] duration-200 ease-linear"
+                style={{ width: `${progress}%` }}
+              />
+              <span className="relative">
+                ▶ {t("player.watchIt")}
+                {countdown && (
+                  <span className="ml-2 text-sm font-normal">
+                    {t("player.inSeconds", { s: Math.ceil(left) })}
+                  </span>
+                )}
+              </span>
+            </button>
+          </div>
+        </div>
+        <button
+          onClick={onDismiss}
+          className="rounded bg-black/60 px-3 py-1 text-sm text-white/80 backdrop-blur hover:text-white"
+        >
+          {t("player.watchCredits")}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="absolute right-8 bottom-24 flex flex-col items-end gap-2">

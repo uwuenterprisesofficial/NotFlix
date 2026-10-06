@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { formatTime } from "@/lib/format";
-import type { ListProvider, Progress, SkipSegment } from "@/lib/types";
+import { displayTitle, formatTime, nextEpisode, reasonText } from "@/lib/format";
+import type { AnimeCard, ListProvider, Progress, SkipSegment } from "@/lib/types";
 import { useT } from "../I18nProvider";
 import { streamOf, TogetherBar } from "../together/TogetherBar";
 import { useWatchParty } from "../together/WatchParty";
@@ -93,8 +93,10 @@ export function Player({
     nextParams.set("option", continueWith.label);
   }
   if (continueWith.server) nextParams.set("server", continueWith.server);
-  if (party) nextParams.set("together", String(party.connectionId));
   const nextHref = `/watch/${animeId}/${episode + 1}${nextParams.size ? `?${nextParams}` : ""}`;
+  // After the last episode there is: another show to watch (its sequel, else a recommendation).
+  const upNext = useUpNext(animeId, signedIn && !hasNext);
+  const upNextHref = upNext ? `/watch/${upNext.id}/${nextEpisode(upNext)}` : null;
   const analysis = useAutoAnalysis(animeId, episode, signedIn);
   // Timestamps from the source itself match its exact cut; analysed ones are the fallback
   // (including ones the analysis started while watching finds).
@@ -161,7 +163,11 @@ export function Player({
   function savePosition(at: number, duration: number, final: boolean) {
     if (!signedIn) return;
     const url = `/api/anime/${animeId}/position`;
-    const body = JSON.stringify({ episode, position_s: at, duration_s: duration });
+    const body = JSON.stringify({
+      episode,
+      position_s: at,
+      duration_s: duration,
+    });
     // The tab may be closing: a beacon still goes out.
     if (final && navigator.sendBeacon?.(url, new Blob([body], { type: "application/json" })))
       return;
@@ -193,8 +199,21 @@ export function Player({
                 autoNext={autoNext === "1"}
                 next={
                   hasNext
-                    ? { label: t("player.nextEpisode"), go: () => router.push(nextHref) }
-                    : null
+                    ? {
+                        label: t("player.nextEpisode"),
+                        go: () => router.push(nextHref),
+                      }
+                    : upNext && upNextHref
+                      ? {
+                          label: displayTitle(upNext),
+                          go: () => router.push(upNextHref),
+                          show: {
+                            title: displayTitle(upNext),
+                            picture: upNext.picture_url,
+                            note: upNext.reason ? reasonText(t, upNext.reason) : null,
+                          },
+                        }
+                      : null
                 }
                 onNearEnd={autoMarkWatched}
                 onStart={() => {
@@ -239,6 +258,14 @@ export function Player({
                 className="absolute top-4 right-4 rounded bg-white/90 px-4 py-2 font-semibold text-black opacity-0 shadow-lg transition-opacity group-hover:opacity-100 focus:opacity-100"
               >
                 ▶ {t("player.nextEpisode")}
+              </Link>
+            )}
+            {stream?.kind === "embed" && !hasNext && upNext && upNextHref && (
+              <Link
+                href={upNextHref}
+                className="absolute top-4 right-4 rounded bg-white/90 px-4 py-2 font-semibold text-black opacity-0 shadow-lg transition-opacity group-hover:opacity-100 focus:opacity-100"
+              >
+                ▶ {t("player.upNextShort", { title: displayTitle(upNext) })}
               </Link>
             )}
             {stream?.kind === "embed" && (
@@ -286,7 +313,7 @@ export function Player({
             {t("player.autoSkip")}
           </label>
         )}
-        {stream?.kind === "direct" && hasNext && (
+        {stream?.kind === "direct" && (hasNext || upNext) && (
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -338,6 +365,14 @@ export function Player({
               {t("player.nextEpisodeShort")}
             </Link>
           )}
+          {!hasNext && upNext && upNextHref && (
+            <Link
+              href={upNextHref}
+              className="max-w-xs truncate rounded bg-white px-3 py-1 font-semibold text-black"
+            >
+              {t("player.upNextShort", { title: displayTitle(upNext) })}
+            </Link>
+          )}
         </div>
       </div>
 
@@ -368,7 +403,9 @@ function PlayerStatus({ sources }: { sources: ReturnType<typeof useSources> }) {
   } else if (sources.resolving) {
     title = t("player.loadingSource", { label: sources.active?.label ?? "" });
   } else if (sources.error) {
-    title = t("player.sourceFailed", { label: sources.active?.label ?? t("player.source") });
+    title = t("player.sourceFailed", {
+      label: sources.active?.label ?? t("player.source"),
+    });
     detail = t("player.pickAnother", { error: sources.error });
   } else if (!sources.loading && !sources.active) {
     title = t("player.noWorking", { language: t(`lang.${sources.language}`) });
@@ -426,4 +463,24 @@ function SegmentInfo({
       {embedded && <p className="mt-2">{t("player.embedInfo")}</p>}
     </div>
   );
+}
+
+/** What to watch after this show's last episode there is (see GET /api/me/up-next). */
+function useUpNext(animeId: number, wanted: boolean): AnimeCard | null {
+  const [found, setFound] = useState<{
+    after: number;
+    card: AnimeCard | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!wanted) return;
+    let cancelled = false;
+    fetch(`/api/me/up-next?after=${animeId}`)
+      .then((res) => (res.ok ? (res.json() as Promise<AnimeCard | null>) : null))
+      .catch(() => null)
+      .then((card) => !cancelled && setFound({ after: animeId, card }));
+    return () => {
+      cancelled = true;
+    };
+  }, [animeId, wanted]);
+  return wanted && found?.after === animeId ? found.card : null;
 }

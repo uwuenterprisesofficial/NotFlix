@@ -337,3 +337,93 @@ async def test_guest_signs_in_with_an_existing_account(client):
     assert conn["id"] == cid and conn["partner"]["name"] == "mal-user"
     with sync_session() as db:
         assert db.get(User, guest_id) is None
+
+
+# Sessions and friend codes
+
+
+async def test_a_session_is_active_once_both_joined(client, people, lists):
+    from app.services import rooms
+
+    cid = await _connect(client, people)
+    await rooms.clear(cid)
+    await rooms.leave(cid)
+    # Something played in the room before: forgotten when the session starts.
+    await rooms.update(cid, people.me.id, "load", anime_id=1, episode=3, position=0)
+
+    started = (await client.post(f"/together/{cid}/session")).json()
+    assert started["joined"] == [people.me.id] and started["active"] is False
+    assert started["partner"]["name"] == "anna"
+
+    people.act_as(people.other)
+    [invite] = (await client.get("/together/sessions")).json()
+    assert (invite["connection_id"], invite["active"]) == (cid, False)
+    joined = (await client.post(f"/together/{cid}/session")).json()
+    assert joined["active"] is True
+    assert (await client.get(f"/together/{cid}/room")).json()["state"] is None
+
+    # Leaving ends it for both.
+    assert (await client.delete(f"/together/{cid}/session")).status_code == 204
+    people.act_as(people.me)
+    assert (await client.get("/together/sessions")).json() == []
+    # Asking for sessions (the app does every few seconds) shows as online.
+    [conn] = [c for c in (await client.get("/together")).json() if c["id"] == cid]
+    assert conn["partner_online"] is True
+
+
+async def test_one_session_at_a_time(client, people, lists):
+    from sqlalchemy import delete
+
+    from app.db.session import sync_session
+    from app.models import User
+    from app.services import rooms
+
+    cid = await _connect(client, people)
+    with sync_session() as db:
+        db.execute(delete(User).where(User.name == "bob"))
+        bob = User(name="bob", mal_user_id=77, access_token="a")
+        db.add(bob)
+        db.commit()
+        db.refresh(bob)
+        a, b = sorted((people.me.id, bob.id))
+        db.add(Connection(user_a_id=a, user_b_id=b))
+        db.commit()
+        other = db.scalar(select_connection(people.me.id, bob.id))
+    for c in (cid, other):
+        await rooms.leave(c)
+    await client.post(f"/together/{cid}/session")
+    await client.post(f"/together/{other}/session")
+    sessions = (await client.get("/together/sessions")).json()
+    assert [s["connection_id"] for s in sessions] == [other]
+
+
+def select_connection(one: int, other: int):
+    from sqlalchemy import select
+
+    a, b = sorted((one, other))
+    return select(Connection.id).where(Connection.user_a_id == a, Connection.user_b_id == b)
+
+
+async def test_connecting_with_a_friend_code(client, people):
+    code = await client.get("/together/code")
+    assert code.status_code == 200
+    mine = code.json()["code"]
+    assert len(mine) == 9 and mine[4] == "-"
+    assert (await client.get("/together/code")).json()["code"] == mine  # it stays
+    assert (await client.post("/together/connect", json={"code": mine})).status_code == 409
+
+    people.act_as(people.other)
+    # Typed sloppily: lower case, without the dash, with spaces.
+    typed = f" {mine.replace('-', '').lower()} "
+    conn = (await client.post("/together/connect", json={"code": typed})).json()
+    assert conn["partner"]["name"] == "tester"
+    again = (await client.post("/together/connect", json={"code": mine})).json()
+    assert again["id"] == conn["id"]  # already connected: the same connection
+    assert (await client.post("/together/connect", json={"code": "ZZZZ-ZZZZ"})).status_code == 404
+
+    # A new code: the old one stops working.
+    people.act_as(people.me)
+    new = (await client.post("/together/code")).json()["code"]
+    assert new != mine
+    people.act_as(people.other)
+    assert (await client.post("/together/connect", json={"code": mine})).status_code == 404

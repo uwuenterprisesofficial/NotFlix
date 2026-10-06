@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   createContext,
   type ReactNode,
@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 import { watchHref } from "@/lib/together";
-import type { Connection, Person, Presence, RoomOut, RoomState, RoomStream } from "@/lib/types";
+import type { Person, Presence, RoomOut, RoomState, RoomStream } from "@/lib/types";
 
 export type RoomUpdate = {
   action: RoomState["action"];
@@ -26,7 +26,7 @@ export type RoomUpdate = {
 export type Party = {
   connectionId: number;
   me: number;
-  partner: Person | null;
+  partner: Person;
   /** What the room plays; null before anything was started in it. */
   state: RoomState | null;
   members: Presence[];
@@ -37,58 +37,63 @@ export type Party = {
   /** The server's clock (ms): room positions are timed by it. */
   serverNow: () => number;
   send: (update: RoomUpdate) => void;
-  /** This page without Watch Together. */
-  leaveHref: string;
+  /** End the session (for both). */
+  leave: () => void;
 };
+
+// A partner's episode start older than this when the room is opened isn't followed anymore.
+const FOLLOW_FRESH_MS = 20_000;
 
 const PartyContext = createContext<Party | null>(null);
 
+/** The active Watch Together session's room; null without one. */
 export function useWatchParty() {
   return use(PartyContext);
 }
 
-/**
- * Watch Together on the watch pages (`?together=<connection id>`): the room's state and who's
- * there, from the server's event stream, and changes sent to it. It lives in the watch layout,
- * so it stays connected across episodes. When the partner starts another episode, this page
- * follows.
- */
-export function WatchPartyProvider({ me, children }: { me: number | null; children: ReactNode }) {
-  const search = useSearchParams();
-  const id = Number(search.get("together")) || null;
-  return id && me !== null ? (
-    <Room key={id} connectionId={id} me={me}>
-      {children}
-    </Room>
-  ) : (
-    children
-  );
+export function PartyProvider({ party, children }: { party: Party | null; children: ReactNode }) {
+  return <PartyContext value={party}>{children}</PartyContext>;
 }
 
-function Room({
+/**
+ * An active Watch Together session's room (see Session.tsx), anywhere in the app: the room's
+ * state and who's there, from the server's event stream, and changes sent to it, handed to
+ * `onChange` (for a PartyProvider: the page around it isn't remounted when a session starts or
+ * ends). When the partner starts an episode, this side follows, from whatever page it's on.
+ */
+export function Room({
   connectionId,
   me,
-  children,
+  partner,
+  onSessionChange,
+  leave,
+  onChange,
 }: {
   connectionId: number;
   me: number;
-  children: ReactNode;
+  partner: Person;
+  /** The session changed (e.g. the partner left). */
+  onSessionChange: () => void;
+  leave: () => void;
+  onChange: (party: Party | null) => void;
 }) {
   const router = useRouter();
-  const pathname = usePathname();
-  const search = useSearchParams();
-  const params = useParams<{ id: string; episode?: string }>();
-  const animeId = Number(params.id);
+  const params = useParams<{ id?: string; episode?: string }>();
+  // On a watch page: the show and episode it plays.
   const episode = params.episode ? Number(params.episode) : null;
+  const animeId = episode !== null && params.id ? Number(params.id) : null;
 
   const [state, setState] = useState<RoomState | null>(null);
   const [members, setMembers] = useState<Presence[]>([]);
   const [ready, setReady] = useState(false);
   const [offline, setOffline] = useState(false);
-  const [partner, setPartner] = useState<Person | null>(null);
   const current = useRef<RoomState | null>(null);
   // Server clock minus ours, from the request with the shortest round trip so far.
   const clock = useRef({ offset: 0, rtt: Infinity });
+  const sessionChanged = useRef(onSessionChange);
+  useEffect(() => {
+    sessionChanged.current = onSessionChange;
+  });
 
   const accept = useCallback((next: RoomState | null) => {
     const cur = current.current;
@@ -113,16 +118,9 @@ function Room({
 
   useEffect(() => {
     let cancelled = false;
-    // The clock first, and the partner's name.
     void timed(`/api/together/${connectionId}/room`).then(({ body }) => {
       if (!cancelled && body) accept((body as RoomOut).state);
     });
-    fetch("/api/together")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((all: Connection[]) => {
-        if (!cancelled) setPartner(all.find((c) => c.id === connectionId)?.partner ?? null);
-      })
-      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -147,6 +145,8 @@ function Room({
       } else if (msg.type === "presence") {
         setMembers(msg.members);
         gotPresence = true;
+      } else if (msg.type === "session") {
+        sessionChanged.current();
       }
       if (gotState && gotPresence) setReady(true);
     };
@@ -156,15 +156,19 @@ function Room({
     };
   }, [connectionId, animeId, episode, accept]);
 
-  // The partner started another episode: follow them.
-  const followed = useRef(0);
+  // The partner started an episode: open it here too (it plays by itself), from any page. What
+  // the room had when it was opened (e.g. after a reload) only if it was started just now.
+  const followed = useRef<number | null>(null);
   useEffect(() => {
-    if (!state || state.by === me || state.action !== "load" || followed.current >= state.rev)
-      return;
-    if (state.anime_id === animeId && state.episode === episode) return;
+    if (!state) return;
+    const first = followed.current === null;
+    if (!first && followed.current! >= state.rev) return;
     followed.current = state.rev;
-    router.push(watchHref(state, connectionId));
-  }, [state, me, animeId, episode, connectionId, router]);
+    if (state.by === me || state.action !== "load") return;
+    if (first && serverNow() - state.at > FOLLOW_FRESH_MS) return;
+    if (state.anime_id === animeId && state.episode === episode) return;
+    router.push(watchHref(state));
+  }, [state, me, animeId, episode, router, serverNow]);
 
   const send = useCallback(
     (update: RoomUpdate) => {
@@ -202,10 +206,6 @@ function Room({
     [connectionId, me, serverNow, timed, accept],
   );
 
-  const leave = new URLSearchParams(search.toString());
-  leave.delete("together");
-  const leaveHref = `${pathname}${leave.size ? `?${leave}` : ""}`;
-
   const party = useMemo<Party>(
     () => ({
       connectionId,
@@ -217,9 +217,11 @@ function Room({
       offline,
       serverNow,
       send,
-      leaveHref,
+      leave,
     }),
-    [connectionId, me, partner, state, members, ready, offline, serverNow, send, leaveHref],
+    [connectionId, me, partner, state, members, ready, offline, serverNow, send, leave],
   );
-  return <PartyContext value={party}>{children}</PartyContext>;
+  useEffect(() => onChange(party), [party, onChange]);
+  useEffect(() => () => onChange(null), [onChange]);
+  return null;
 }

@@ -719,3 +719,20 @@ class PrefetchIn(BaseModel):
 
 class PrefetchOut(BaseModel):
     queued: int
+
+
+class SessionOut(BaseModel):
+    """A Watch Together session: who joined it; active once both have."""
+
+    connection_id: int
+    partner: PersonOut
+    joined: list[int]
+    active: bool
+
+
+class FriendCodeOut(BaseModel):
+    code: str  # "ABCD-EFGH"
+
+
+class FriendCodeIn(BaseModel):
+    code: str = Field(min_length=4, max_length=20)

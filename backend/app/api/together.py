@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 
 from app.api.deps import DB, CurrentUser, OptionalUser
 from app.db.session import AsyncSessionLocal
@@ -20,6 +20,8 @@ from app.models import Anime, Connection, ConnectionInvite, ListEntry, User
 from app.schemas import (
     CompatibilityOut,
     ConnectionOut,
+    FriendCodeIn,
+    FriendCodeOut,
     GuestIn,
     InviteInfo,
     InviteOut,
@@ -29,6 +31,7 @@ from app.schemas import (
     RoomState,
     RoomUpdate,
     Row,
+    SessionOut,
     TogetherOut,
 )
 from app.services import catalog, rooms, together
@@ -149,7 +152,8 @@ async def _partner_watching(conn: Connection, user: User) -> tuple[RoomState | N
         and (theirs.get("anime_id"), theirs.get("episode")) == (room["anime_id"], room["episode"])
         and user.id not in members
     )
-    return (RoomState(**room) if watching else None), theirs is not None
+    online = theirs is not None or await rooms.online(partner_id)
+    return (RoomState(**room) if watching else None), online
 
 
 @router.get("", response_model=list[ConnectionOut])
@@ -178,6 +182,123 @@ async def connections(user: CurrentUser, db: DB):
     return out
 
 
+# Sessions: watching together for real (see services/rooms.py)
+
+
+async def _session_out(conn: Connection, partner: User, joined: list[int]) -> SessionOut:
+    pair = {conn.user_a_id, conn.user_b_id}
+    return SessionOut(
+        connection_id=conn.id, partner=_person(partner), joined=joined,
+        active=pair <= set(joined),
+    )  # fmt: skip
+
+
+async def _pair(conn: Connection) -> list[int]:
+    return [conn.user_a_id, conn.user_b_id]
+
+
+@router.get("/sessions", response_model=list[SessionOut])
+async def my_sessions(user: CurrentUser, db: DB):
+    """The user's sessions anyone joined: invitations (only the partner joined), ones waiting
+    for the partner, and the active one. (Asked for every few seconds: the user is online.)"""
+    await rooms.seen(user.id)
+    conns = (
+        await db.scalars(
+            select(Connection).where(
+                or_(Connection.user_a_id == user.id, Connection.user_b_id == user.id)
+            )
+        )
+    ).all()
+    found = await rooms.sessions([c.id for c in conns])
+    out = []
+    for conn in conns:
+        if conn.id in found and (partner := await db.get(User, conn.partner_of(user.id))):
+            out.append(await _session_out(conn, partner, found[conn.id]))
+    return out
+
+
+@router.post("/{connection_id}/session", response_model=SessionOut)
+async def join_session(connection_id: int, user: CurrentUser, db: DB):
+    """Start a session with this connection (inviting them), or join the one they started.
+    Any other session of the user ends."""
+    conn, partner = await _connection(db, connection_id, user)
+    others = await db.scalars(
+        select(Connection.id).where(
+            or_(Connection.user_a_id == user.id, Connection.user_b_id == user.id),
+            Connection.id != conn.id,
+        )
+    )
+    for other_id, joined in (await rooms.sessions(list(others))).items():
+        if user.id in joined:
+            await rooms.leave(other_id)
+    joined = await rooms.join(conn.id, user.id, await _pair(conn))
+    return await _session_out(conn, partner, joined)
+
+
+@router.delete("/{connection_id}/session", status_code=status.HTTP_204_NO_CONTENT)
+async def leave_session(connection_id: int, user: CurrentUser, db: DB) -> None:
+    """Leave the session (or turn down the invitation): it ends for both."""
+    conn, _ = await _connection(db, connection_id, user)
+    await rooms.leave(conn.id)
+
+
+# Friend codes: connecting without a link
+
+
+FRIEND_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # nothing to misread (0/O, 1/I)
+FRIEND_CODE_LENGTH = 8
+
+
+def _format_code(raw: str) -> str:
+    return f"{raw[:4]}-{raw[4:]}"
+
+
+def _normalize_code(code: str) -> str:
+    return "".join(c for c in code.upper() if c in FRIEND_CODE_ALPHABET)
+
+
+async def _new_code(db: DB, user: User) -> str:
+    while True:
+        raw = "".join(secrets.choice(FRIEND_CODE_ALPHABET) for _ in range(FRIEND_CODE_LENGTH))
+        if not await db.scalar(select(User.id).where(User.friend_code == raw)):
+            await db.execute(update(User).where(User.id == user.id).values(friend_code=raw))
+            await db.commit()
+            user.friend_code = raw
+            return raw
+
+
+@router.get("/code", response_model=FriendCodeOut)
+async def friend_code(user: CurrentUser, db: DB):
+    """The user's friend code: whoever enters it is connected with them."""
+    raw = user.friend_code or await _new_code(db, user)
+    return FriendCodeOut(code=_format_code(raw))
+
+
+@router.post("/code", response_model=FriendCodeOut)
+async def new_friend_code(user: CurrentUser, db: DB):
+    """A new code: the old one stops working."""
+    return FriendCodeOut(code=_format_code(await _new_code(db, user)))
+
+
+@router.post("/connect", response_model=ConnectionOut)
+async def connect_by_code(body: FriendCodeIn, user: CurrentUser, db: DB):
+    """Connect with the owner of a friend code."""
+    raw = _normalize_code(body.code)
+    other = await db.scalar(select(User).where(User.friend_code == raw)) if raw else None
+    if other is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No one has this code")
+    if other.id == user.id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "That's your own code")
+    conn = await _between(db, user.id, other.id)
+    if conn is None:
+        a, b = sorted((user.id, other.id))
+        conn = Connection(user_a_id=a, user_b_id=b)
+        db.add(conn)
+        await db.commit()
+        await db.refresh(conn)
+    return ConnectionOut(id=conn.id, partner=_person(other), created_at=conn.created_at)
+
+
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def disconnect(connection_id: int, user: CurrentUser, db: DB) -> None:
     conn, partner = await _connection(db, connection_id, user)
@@ -189,6 +310,7 @@ async def disconnect(connection_id: int, user: CurrentUser, db: DB) -> None:
             await db.delete(person)
     await db.commit()
     await rooms.clear(connection_id)
+    await rooms.leave(connection_id)
     await together.forget(connection_id)
 
 

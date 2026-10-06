@@ -4,18 +4,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { expectedPosition } from "@/lib/together";
 import type { Party } from "./WatchParty";
 
-// With the partner there: further off than this, the video jumps to the room's position;
-// closer, it plays a little faster or slower (up to MAX_RATE_OFFSET) until it's back in step.
-// Jumping means buffering, so it's the last resort.
-const HARD_DRIFT_S = 4;
-const SOFT_DRIFT_S = 0.5;
-const MAX_RATE_OFFSET = 0.15;
+// With the partner there, the two videos are kept close, not exact: within SOFT_DRIFT_S
+// nothing happens. Further off, the video plays a hardly noticeable bit faster or slower (up to
+// MAX_RATE_OFFSET) until it's within IN_STEP_S again; only further off than HARD_DRIFT_S does
+// it jump (jumping means buffering, so it's the last resort). Play, pause and seeks still go
+// to the partner right away.
+const HARD_DRIFT_S = 10;
+const SOFT_DRIFT_S = 2;
+const IN_STEP_S = 0.75;
+const MAX_RATE_OFFSET = 0.06;
+// Paused: the partner's video is moved to the pause position only when this far off.
+const PAUSED_DRIFT_S = 2;
 // After a jump (or while buffering) the video isn't corrected: it has to load first.
 const QUIET_AFTER_SEEK_MS = 5000;
 // A seek by the viewer further than this from the room's position is sent to the partner.
-const SEEK_TOLERANCE_S = 1.5;
+const SEEK_TOLERANCE_S = 3;
 // Alone: the room's clock is corrected (for a partner joining later) when this far off.
-const REANCHOR_S = 2;
+const REANCHOR_S = 3;
 // Without the room's state by then, the video starts anyway, as it would alone.
 const READY_TIMEOUT_MS = 1500;
 const CHECK_EVERY_MS = 1000;
@@ -29,7 +34,8 @@ const CHECK_EVERY_MS = 1000;
  * drifted, e.g. after buffering), so a partner who joins starts right there.
  *
  * With the partner there, each side's own play, pause and seeks go to the room, and the room's
- * changes are applied here. Whatever this hook does to the video itself isn't sent back: a
+ * changes are applied here: pausing pauses both. Otherwise the videos are only kept close (see
+ * SOFT_DRIFT_S), so each plays smoothly. Whatever this hook does to the video itself isn't sent back: a
  * change is only sent when the video no longer matches the room. The video is never corrected
  * while it's buffering or has just jumped, and small differences are caught up by playing a
  * little faster or slower, so a slow stream isn't made to jump (and buffer) over and over.
@@ -54,6 +60,8 @@ export function usePartySync(
   const wasAlone = useRef(false);
   const buffering = useRef(false);
   const lastSeek = useRef(0);
+  // Playing a little faster or slower to get back in step.
+  const catchingUp = useRef(false);
   const ownSeek = useRef<number | null>(null);
 
   const room = useCallback(() => {
@@ -109,8 +117,9 @@ export function usePartySync(
     const drift = video.currentTime - target;
     if (!s.playing) {
       video.playbackRate = 1;
+      catchingUp.current = false;
       if (!video.paused) video.pause();
-      if (Math.abs(drift) > 0.5 && !video.seeking) seekTo(video, target);
+      if (Math.abs(drift) > PAUSED_DRIFT_S && !video.seeking) seekTo(video, target);
       return;
     }
     if (video.duration && target >= video.duration - 0.5) return; // the partner is past the end
@@ -123,16 +132,20 @@ export function usePartySync(
       buffering.current || video.seeking || video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
     if (loading || Date.now() - lastSeek.current < QUIET_AFTER_SEEK_MS) {
       video.playbackRate = 1;
+      catchingUp.current = false;
       return;
     }
     if (Math.abs(drift) > HARD_DRIFT_S) {
       video.playbackRate = 1;
+      catchingUp.current = false;
       seekTo(video, target);
-    } else if (Math.abs(drift) > SOFT_DRIFT_S) {
-      // Behind: a little faster; ahead: a little slower.
-      const offset = Math.max(-MAX_RATE_OFFSET, Math.min(MAX_RATE_OFFSET, drift * 0.1));
+    } else if (Math.abs(drift) > (catchingUp.current ? IN_STEP_S : SOFT_DRIFT_S)) {
+      // Behind: a little faster; ahead: a little slower (gently, so it isn't heard).
+      catchingUp.current = true;
+      const offset = Math.max(-MAX_RATE_OFFSET, Math.min(MAX_RATE_OFFSET, drift * 0.02));
       video.playbackRate = 1 - offset;
     } else {
+      catchingUp.current = false;
       video.playbackRate = 1;
     }
   }, [ref, room, seekTo, play]);

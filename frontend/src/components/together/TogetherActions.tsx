@@ -197,3 +197,114 @@ export function Disconnect({ id, name }: { id: number; name: string }) {
     </button>
   );
 }
+
+/** Your friend code (whoever enters it is connected with you), and connecting by someone's. */
+export function FriendCode() {
+  const { t } = useT();
+  const router = useRouter();
+  const [code, setCode] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [entered, setEntered] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/together/code")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(
+        (body) => body && setCode(body.code),
+        () => {},
+      );
+  }, []);
+
+  async function copy() {
+    if (!code) return;
+    await navigator.clipboard?.writeText(code).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function renew() {
+    if (!window.confirm(t("together.newCodeConfirm"))) return;
+    const res = await fetch("/api/together/code", { method: "POST" }).catch(() => null);
+    if (res?.ok) setCode((await res.json()).code);
+  }
+
+  async function connect(e: React.FormEvent) {
+    e.preventDefault();
+    if (!entered.trim()) return;
+    setBusy(true);
+    setError(null);
+    const res = await fetch("/api/together/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: entered.trim() }),
+    }).catch(() => null);
+    setBusy(false);
+    if (res?.ok) {
+      setEntered("");
+      router.refresh();
+      return;
+    }
+    setError(
+      res?.status === 409
+        ? t("together.ownCode")
+        : res?.status === 404
+          ? t("together.unknownCode")
+          : t("together.connectFailedShort"),
+    );
+  }
+
+  return (
+    <div className="grid gap-4 rounded-lg bg-surface-raised p-4 sm:grid-cols-2">
+      <div>
+        <p className="text-sm text-muted">{t("together.yourCode")}</p>
+        <div className="mt-1 flex items-center gap-2">
+          <span className="font-mono text-2xl font-bold tracking-widest">
+            {code ?? "····-····"}
+          </span>
+          <button
+            onClick={copy}
+            disabled={!code}
+            className="rounded bg-white/10 px-2 py-1 text-sm hover:bg-white/20"
+          >
+            {copied ? `✓ ${t("together.copied")}` : t("together.copy")}
+          </button>
+          <button
+            onClick={renew}
+            title={t("together.newCode")}
+            aria-label={t("together.newCode")}
+            className="px-1 text-muted hover:text-white"
+          >
+            ↻
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-muted">{t("together.codeInfo")}</p>
+      </div>
+      <form onSubmit={connect}>
+        <label htmlFor="friend-code" className="text-sm text-muted">
+          {t("together.addByCode")}
+        </label>
+        <div className="mt-1 flex gap-2">
+          <input
+            id="friend-code"
+            value={entered}
+            onChange={(e) => setEntered(e.target.value.toUpperCase())}
+            placeholder="ABCD-EF23"
+            maxLength={20}
+            autoComplete="off"
+            className="min-w-0 flex-1 rounded bg-black/40 px-3 py-2 font-mono tracking-widest"
+          />
+          <button
+            type="submit"
+            disabled={busy || !entered.trim()}
+            className="rounded bg-brand px-4 py-2 font-semibold hover:bg-brand-dark disabled:opacity-60"
+          >
+            {busy ? t("together.connecting") : t("together.add")}
+          </button>
+        </div>
+        {error && <p className="mt-1 text-sm text-red-400">{error}</p>}
+      </form>
+    </div>
+  );
+}
