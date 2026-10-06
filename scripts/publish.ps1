@@ -11,7 +11,7 @@ param(
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Images = @("backend", "frontend"),
     [string]$Registry = "registry.uwuenterprises.de",
-    [string]$Tag = "publish",
+    [string]$Tag = "latest",
     [string]$Platform = "linux/amd64"
 )
 $ErrorActionPreference = "Stop"

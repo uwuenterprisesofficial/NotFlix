@@ -13,10 +13,9 @@
 name: notflix
 
 x-backend: &backend
-  image: ${REGISTRY:-registry.mfhost.de}/notflix-backend:${TAG:-publish}
+  image: ${REGISTRY:-registry.uwuenterprises.de}/notflix-backend:${TAG:-latest}
   restart: unless-stopped
   # Everything in .env (API_KEY, SECRET_KEY, sign-in apps, providers, ...); the lines below win.
-  env_file: .env
   environment:
     DATABASE_URL: postgresql+psycopg://notflix:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/notflix
     REDIS_URL: redis://redis:6379/0
@@ -71,6 +70,8 @@ services:
       timeout: 6s
       start_period: 60s
       retries: 5
+    ports:
+      - "6500:8000"
 
   # Background jobs: intro/outro analysis, and completing the catalogue. They start once the
   # backend has migrated the database.
@@ -90,19 +91,5 @@ services:
 
   # The web app, and the way in for everything: it passes /api/* on to the backend. Put an
   # HTTPS reverse proxy in front of this port (the API key travels in a header).
-  frontend:
-    image: ${REGISTRY:-registry.mfhost.de}/notflix-frontend:${TAG:-publish}
-    restart: unless-stopped
-    environment:
-      API_INTERNAL_URL: http://backend:8000
-      # The key the web app adds for browsers. Empty: only clients that bring the key themselves
-      # (the desktop app) get through.
-      API_KEY: ${WEB_API_KEY:-}
-    ports:
-      - "${WEB_PORT:-3000}:3000"
-    depends_on:
-      backend:
-        condition: service_healthy
-
 volumes:
   pgdata:
