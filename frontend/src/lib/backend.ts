@@ -41,6 +41,7 @@ const LOCAL_PATHS = [
   /^\/anime\/\d+\/episodes\/\d+\/(sources|resolve|failures)$/,
   /^\/proxy(\/|$)/,
   /^\/providers$/,
+  /^\/prefetch$/,
 ];
 
 export function answeredLocally(path: string): boolean {

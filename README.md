@@ -281,6 +281,16 @@ VALUES (21, 1, 'my-site', 'embed', 'https://example.com/embed/one-piece-1', 'de-
 
 **Direct vs. embed.** Direct streams are played by NotFlix's own player, so Skip Intro, auto-skip, subtitles and the analyzer all work. HLS and header-protected streams are relayed through `/api/proxy` using signed URLs, so the proxy only fetches URLs the backend issued. An embedded third-party player is cross-origin and can't be controlled from outside, so for embeds the intro/outro times are only displayed. When a source reports its own intro/outro times (some Anivexa providers do), those are used for that stream instead of the analysed ones.
 
+### Looking ahead, by priority
+
+Streams are looked for in three priorities. What you want now always comes first:
+
+1. **Opening a show** (its page, the player): its scans run right away. A background scan of that show already running carries on at full speed.
+2. **Lingering on a card** (about 1.2 s after the enlarged card opens, when nothing is known about the show yet): its episode 1 is looked for right away, and the card's preview plays as soon as a stream is found (`/preview?scan=true`).
+3. **In the background:** the home page, My List, the calendar and search results hand their shows to the backend (`POST /api/prefetch`, newest page first). It looks for their streams one show at a time, around your next episode, but only for shows a provider has never looked at. It does this only while you're idle: nothing opened, played, resolved or lingered on for 20 seconds. As soon as you do something, a running background scan holds before its next request, and it carries on when you're idle again. A show is prefetched at most once every 6 hours.
+
+In hybrid mode this all happens on your PC, and what it finds goes to the shared library. A server that doesn't scrape ignores prefetching.
+
 ## Intro/outro detection
 
 **While watching.** When a direct stream starts playing (signed in), the player asks the API to analyse that episode and the next one. Episodes that already have intro/outro times, were analysed before, or are waiting in a job are skipped (`POST /api/anime/{id}/analyze/auto`). "Detecting intro & outro…" shows under the player until the job finishes; the current episode's new times are then used right away for Skip Intro and the Next Episode card.

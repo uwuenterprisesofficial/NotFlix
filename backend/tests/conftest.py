@@ -51,6 +51,7 @@ async def client(database):
         airing,
         library,
         list_writer,
+        prefetch,
         related,
         source_scan,
         stats_jobs,
@@ -61,6 +62,7 @@ async def client(database):
         transport=ASGITransport(app=app), base_url="http://test", headers={"x-api-key": API_KEY}
     ) as c:
         yield c
+    prefetch.clear()
     await source_scan.wait_idle()
     await library.wait_idle()
     await stats_jobs.wait_idle()

@@ -702,3 +702,16 @@ class SharedSynopsisIn(BaseModel):
     language: str = Field(pattern=r"^[a-z]{2}$")
     synopsis: str = Field(min_length=1, max_length=20_000)
     source: str | None = Field(None, max_length=20)
+
+
+class PrefetchShowIn(BaseModel):
+    id: int = Field(gt=0)
+    episode: int = Field(1, ge=1, le=10_000)  # the user's next episode
+
+
+class PrefetchIn(BaseModel):
+    shows: list[PrefetchShowIn] = Field(max_length=300)
+
+
+class PrefetchOut(BaseModel):
+    queued: int

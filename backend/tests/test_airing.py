@@ -114,7 +114,7 @@ async def test_unaired_episodes_are_not_looked_for(client, schedule, monkeypatch
 
     windows = []
 
-    async def ensure_scan(info, window, airing_now, force=False, whole=None):
+    async def ensure_scan(info, window, airing_now, force=False, whole=None, background=False):
         windows.append(window + (whole or []))
 
     async def no_provider(*args):

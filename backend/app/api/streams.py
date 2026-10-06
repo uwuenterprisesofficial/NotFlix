@@ -8,7 +8,8 @@ from sqlalchemy import select
 
 from app.api.deps import DB, OptionalUser, SignedInHere
 from app.core.cache import redis
-from app.models import ListEntry, ProviderMapping, SkipSegment, User
+from app.db.session import AsyncSessionLocal
+from app.models import Anime, ListEntry, ProviderMapping, SkipSegment, User
 from app.providers import base as providers_base
 from app.providers.base import (
     OPTIONS_TIMEOUT_S,
@@ -29,6 +30,8 @@ from app.schemas import (
     EpisodeLanguages,
     EpisodeOptionsOut,
     MappingOut,
+    PrefetchIn,
+    PrefetchOut,
     PreviewOut,
     ProviderCoverageOut,
     ProviderScanOut,
@@ -42,8 +45,8 @@ from app.schemas import (
     StreamOut,
     SubtitleOut,
 )
+from app.services import activity, catalog, library, prefetch, source_scan
 from app.services import airing as airing_info
-from app.services import catalog, library, source_scan
 from app.services.mappings import delete_mapping, save_mapping
 from app.services.proxy import TOKEN_MAX_AGE_S, proxy_url
 
@@ -56,6 +59,13 @@ SCANNING_RECHECK = timedelta(seconds=30)
 EPISODE_WAIT_S = 4
 router = APIRouter(prefix="/anime/{anime_id}", tags=["streams"])
 providers_router = APIRouter(tags=["streams"])
+
+
+@providers_router.post("/prefetch", response_model=PrefetchOut)
+async def prefetch_shows(body: PrefetchIn):
+    """The shows a page shows, in its order: their streams are looked for in the background
+    while nobody needs anything (see services/prefetch.py)."""
+    return PrefetchOut(queued=prefetch.enqueue([(s.id, s.episode) for s in body.shows]))
 
 
 @providers_router.get("/providers", response_model=list[str])
@@ -113,9 +123,18 @@ async def _anime_info(db: DB, anime_id: int) -> AnimeInfo:
 
 
 async def _start_scan(
-    db: DB, anime_id: int, user: User | None, around: int | None = None, force: bool = False
+    db: DB,
+    anime_id: int,
+    user: User | None,
+    around: int | None = None,
+    force: bool = False,
+    background: bool = False,
 ) -> AnimeInfo:
-    """Kick off background scans for the episodes near where the user is."""
+    """Kick off scans for the episodes near where the user is. Someone waiting for them
+    counts as activity (background prefetching holds meanwhile); `background` scans are the
+    prefetching itself."""
+    if not background:
+        activity.touch()
     anime = await catalog.get_anime(db, anime_id)
     info = AnimeInfo.from_model(anime) if anime else AnimeInfo(id=anime_id, title="")
     if around is None:
@@ -138,8 +157,14 @@ async def _start_scan(
     # What others already found (the shared library) first: only the rest is looked for.
     await library.pull(anime_id)
     whole = source_scan.by_distance(list(range(1, known + 1)), around) if known else None
-    await source_scan.ensure_scan(info, window, airing, force, whole=whole)
+    await source_scan.ensure_scan(info, window, airing, force, whole=whole, background=background)
     return info
+
+
+async def scan_in_background(anime_id: int, around: int) -> None:
+    """Prefetching (see services/prefetch.py): a show's scans, as background scans."""
+    async with AsyncSessionLocal() as db:
+        await _start_scan(db, anime_id, None, around=around, background=True)
 
 
 async def _not_aired(db: DB, anime_id: int, episode: int) -> bool:
@@ -317,6 +342,7 @@ async def refresh_availability(
 async def resolve_source(anime_id: int, episode: int, option: str, db: DB, fresh: bool = False):
     """The option's playable streams: stored ones while they're valid (unless `fresh`, e.g.
     because they stopped working), otherwise asked from the provider and stored."""
+    activity.touch()
     if await _not_aired(db, anime_id, episode):
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Episode {episode} hasn't aired yet")
     if not fresh:
@@ -380,6 +406,8 @@ async def reset_animetoast_mapping(anime_id: int, user: SignedInHere):
 PREVIEW_EPISODE = 1
 PREVIEW_RESOLVE_TRIES = 2
 PREVIEW_MISS_TTL_S = 30 * 60
+# How long a lingered-on preview waits for its scan to find episode 1.
+PREVIEW_SCAN_WAIT_S = 12
 LANGUAGE_ORDER = {
     "de": ("de-dub", "de-sub", "en-dub", "en-sub", "unknown"),
     "en": ("en-dub", "en-sub", "de-dub", "de-sub", "unknown"),
@@ -390,26 +418,52 @@ def _direct(resolved: Resolved | None) -> Stream | None:
     return next((s for s in resolved.streams if s.kind == "direct"), None) if resolved else None
 
 
-@router.get("/preview", response_model=PreviewOut)
-async def preview(anime_id: int, db: DB, lang: Literal["de", "en"] = "en"):
-    """A direct stream of episode 1 for the hover card, in the UI's language order, starting
-    at its opening when that's known. Only sources already found for the episode are used
-    (hovering never starts a scan); at most two are resolved, and a show without any isn't
-    tried again for half an hour."""
-    anime = await catalog.get_anime(db, anime_id)
-    if anime is None or await airing_info.aired_episodes(db, anime) == 0:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Nothing has aired")
-    episode = PREVIEW_EPISODE
-    order = LANGUAGE_ORDER[lang]
-    await library.pull(anime_id)
+async def _cached_options(anime_id: int, episode: int) -> list[SourceOption]:
     names = [p.name for p in providers_base.enabled_providers()]
-    options = [
+    return [
         o
         for found in await asyncio.gather(
             *(source_scan.cached_options(anime_id, episode, n) for n in names)
         )
         for o in found or []
     ]
+
+
+async def _scan_for_preview(anime: Anime, episode: int) -> None:
+    """Someone lingers on the card of a show nobody looked at: its episode's sources now
+    (ahead of background prefetching), waiting a moment for them."""
+    activity.touch()
+    airing = anime.num_episodes is None or anime.status == "currently_airing"
+    await source_scan.ensure_scan(AnimeInfo.from_model(anime), [episode], airing)
+    running = [
+        scan
+        for p in providers_base.enabled_providers()
+        if (scan := source_scan.running_scan(anime.id, p.name, episode)) is not None
+    ]
+    await asyncio.gather(
+        *(source_scan.wait_for_episode(s, episode, PREVIEW_SCAN_WAIT_S) for s in running)
+    )
+
+
+@router.get("/preview", response_model=PreviewOut)
+async def preview(anime_id: int, db: DB, lang: Literal["de", "en"] = "en", scan: bool = False):
+    """A direct stream of episode 1 for the hover card, in the UI's language order, starting
+    at its opening when that's known. Normally only sources already found are used (hovering
+    alone never starts a scan); with `scan` (the card was lingered on) a show nobody looked at
+    is scanned for episode 1 right away. At most two sources are resolved, and a show without
+    any isn't tried again for half an hour."""
+    anime = await catalog.get_anime(db, anime_id)
+    if anime is None or await airing_info.aired_episodes(db, anime) == 0:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Nothing has aired")
+    episode = PREVIEW_EPISODE
+    order = LANGUAGE_ORDER[lang]
+    await library.pull(anime_id)
+    options = await _cached_options(anime_id, episode)
+    scanned = False
+    if scan and not options:
+        await _scan_for_preview(anime, episode)
+        options = await _cached_options(anime_id, episode)
+        scanned = bool(options)
     options.sort(key=lambda o: order.index(o.language) if o.language in order else len(order))
     stored = {
         r.option_id: r.resolved for r in await source_scan.cached_resolutions(anime_id, episode)
@@ -422,7 +476,7 @@ async def preview(anime_id: int, db: DB, lang: Literal["de", "en"] = "en"):
             chosen = (o, resolved, stream)
             break
     miss_key = f"preview:miss:{anime_id}:{lang}"
-    if chosen is None and options and not await redis().exists(miss_key):
+    if chosen is None and options and (scanned or not await redis().exists(miss_key)):
         info = AnimeInfo.from_model(anime)
         for o in [o for o in options if o.id not in stored][:PREVIEW_RESOLVE_TRIES]:
             try:

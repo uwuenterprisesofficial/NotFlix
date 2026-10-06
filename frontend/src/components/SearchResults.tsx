@@ -3,10 +3,12 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { tagName } from "@/lib/i18n";
+import { prefetchShows } from "@/lib/prefetch";
 import { readQuery, type SearchQuery, searchHref } from "@/lib/search";
 import type { Genre, SearchResponse } from "@/lib/types";
 import { AnimeCard } from "./AnimeCard";
 import { useT } from "./I18nProvider";
+import { Prefetch } from "./Prefetch";
 
 const GRID =
   "mt-4 grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-x-3 gap-y-6 md:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]";
@@ -114,6 +116,7 @@ function Results({ query, genres }: { query: SearchQuery; genres: Genre[] }) {
         {state.failed && !state.full && <span className="text-red-400">{t("search.failed")}</span>}
       </div>
       {dub && <p className="mt-1 text-xs text-muted">{t("search.dubInfo")}</p>}
+      {state.full && <Prefetch shows={prefetchShows(items)} />}
       {busy && <ProgressBar />}
       {!shown && busy ? (
         <Skeleton />

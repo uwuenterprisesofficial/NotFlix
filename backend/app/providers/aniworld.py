@@ -23,6 +23,7 @@ from app.providers.base import (
     SourceOption,
     Stream,
     hoster_direct,
+    take_turn,
 )
 from app.services import anilist
 from app.services.mappings import get_mapping, save_mapping
@@ -292,6 +293,7 @@ class AniWorldProvider:
 
         async def one(ep: int) -> None:
             async with limit:
+                await take_turn()
                 results[ep] = self._options(await self.episode_links(anime, ep))
             if found is not None:
                 await found({ep: results[ep]})

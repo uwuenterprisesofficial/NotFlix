@@ -15,14 +15,17 @@ import { useStoredValue } from "./player/useStoredValue";
 import { useT } from "./I18nProvider";
 import { PredictionBadge } from "./PredictionBadge";
 
-// One request per show and language per visit (null: no preview).
+// One request per show and language per visit (null: no preview); `scan`: also look for
+// episode 1's sources when nobody has yet (the card was lingered on).
 const previews = new Map<string, Promise<Preview | null>>();
+// Lingering this long on an open card without a preview looks for one right away.
+const LINGER_SCAN_MS = 1200;
 
-function loadPreview(animeId: number, lang: string): Promise<Preview | null> {
-  const key = `${animeId}:${lang}`;
+function loadPreview(animeId: number, lang: string, scan = false): Promise<Preview | null> {
+  const key = `${animeId}:${lang}:${scan}`;
   let request = previews.get(key);
   if (!request) {
-    request = fetch(`/api/anime/${animeId}/preview?lang=${lang}`)
+    request = fetch(`/api/anime/${animeId}/preview?lang=${lang}${scan ? "&scan=true" : ""}`)
       .then((res) => (res.ok ? (res.json() as Promise<Preview>) : null))
       .catch(() => null);
     previews.set(key, request);
@@ -79,9 +82,19 @@ export function HoverPreview({
   useEffect(() => {
     if (upcoming) return;
     let cancelled = false;
-    loadPreview(anime.id, lang).then((p) => !cancelled && setPreview(p));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    loadPreview(anime.id, lang).then((p) => {
+      if (cancelled) return;
+      if (p) return setPreview(p);
+      // Nothing known yet: still here a moment later, it's looked for now (ahead of the
+      // background prefetching).
+      timer = setTimeout(() => {
+        loadPreview(anime.id, lang, true).then((found) => !cancelled && setPreview(found));
+      }, LINGER_SCAN_MS);
+    });
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [anime.id, lang, upcoming]);
 

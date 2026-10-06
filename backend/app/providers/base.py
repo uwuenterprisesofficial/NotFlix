@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable, Coroutine
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, TypeVar
@@ -120,6 +121,18 @@ class StreamProvider(Protocol):
 
 SCAN_CONCURRENCY = 4
 
+# A background scan's gate (see source_scan): awaited before each request it makes, it holds the
+# scan while something more important runs. None for the scans someone is waiting for.
+Gate = Callable[[], Awaitable[None]]
+scan_gate: ContextVar[Gate | None] = ContextVar("scan_gate", default=None)
+
+
+async def take_turn() -> None:
+    """Before a scan's next request: a background scan waits here while it has to."""
+    gate = scan_gate.get()
+    if gate is not None:
+        await gate()
+
 
 # Receives a scan's results as they come in (episode -> options), to store them right away.
 Found = Callable[[dict[int, list[SourceOption]]], Awaitable[None]]
@@ -136,6 +149,7 @@ async def scan_each_episode(
 
     async def one(episode: int) -> None:
         async with limit:
+            await take_turn()
             options = await provider.options(anime, episode)
         results[episode] = options
         if found is not None:
@@ -155,6 +169,7 @@ async def scan(
 ) -> dict[int, list[SourceOption]]:
     """Every episode's options. Results may be handed to `found` along the way (the returned
     dict has them all either way)."""
+    await take_turn()
     custom = getattr(provider, "scan", None)
     if custom is None:
         return await scan_each_episode(provider, anime, episodes, found)

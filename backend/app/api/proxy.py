@@ -4,6 +4,7 @@ from fastapi.responses import Response, StreamingResponse
 from starlette.background import BackgroundTask
 
 from app.core import http as shared_http
+from app.services import activity
 from app.services.proxy import InvalidToken, is_playlist, rewrite_playlist, unsign
 
 router = APIRouter(tags=["proxy"])
@@ -34,6 +35,7 @@ async def proxy(t: str, request: Request):
         url, headers = unsign(t)
     except InvalidToken as e:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
+    activity.touch()  # something plays: background prefetching holds meanwhile
 
     upstream_headers = {"Accept-Encoding": "identity", **headers}
     if "range" in request.headers:

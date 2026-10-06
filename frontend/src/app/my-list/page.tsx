@@ -3,10 +3,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AnimeCard } from "@/components/AnimeCard";
 import { FriendRecommendationList } from "@/components/friends/FriendRecommendationList";
+import { Prefetch } from "@/components/Prefetch";
 import { RefreshWhilePending } from "@/components/RefreshWhilePending";
 import { ApiError, api, apiOrNull } from "@/lib/api";
 import type { MessageKey } from "@/lib/i18n";
 import { getT } from "@/lib/i18n/server";
+import { prefetchShows } from "@/lib/prefetch";
 import type { FriendRecommendations, Row } from "@/lib/types";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -44,6 +46,12 @@ export default async function MyListPage() {
     <div className="px-4 pt-24 pb-16 md:px-12">
       <h1 className="text-3xl font-black">{t("nav.myList")}</h1>
       {library.related_pending && <RefreshWhilePending />}
+      <Prefetch
+        shows={prefetchShows([
+          ...library.sections.flatMap((s) => s.items),
+          ...(fromFriends?.received.map((r) => r.anime) ?? []),
+        ])}
+      />
       {/* Friends' recommendations first; only sent ones after the list. */}
       {fromFriends && fromFriends.received.length > 0 && (
         <FriendRecommendationList data={fromFriends} />

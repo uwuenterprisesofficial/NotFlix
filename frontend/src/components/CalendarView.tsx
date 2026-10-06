@@ -5,11 +5,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { displayTitle, relativeTime } from "@/lib/format";
 import { LOCALE } from "@/lib/i18n";
+import { prefetchShows } from "@/lib/prefetch";
 import { allowedImage } from "@/lib/images";
 import type { AnimeCard, CalendarResponse } from "@/lib/types";
 import { useNow } from "@/lib/useNow";
 import { useT } from "./I18nProvider";
 import { PredictionBadge } from "./PredictionBadge";
+import { Prefetch } from "./Prefetch";
 
 const DAY_MS = 86_400_000;
 const REFRESH_POLL_MS = 3000;
@@ -82,6 +84,7 @@ export function CalendarView() {
 
   return (
     <div className="mt-6">
+      <Prefetch shows={prefetchShows(items)} />
       <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
         <button
           onClick={() => setOffset(offset - 1)}

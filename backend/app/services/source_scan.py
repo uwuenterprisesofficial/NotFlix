@@ -4,6 +4,10 @@ Opening a show (or an episode) calls `ensure_scan`, which starts an asyncio task
 process for each provider whose cached data is missing, stale or doesn't cover the episodes the
 user is near. Reads always come from the cache first; scans only refresh it.
 
+Scans someone waits for (a show opened, a preview lingered on) run right away. Background scans
+(prefetch.py: shows on the pages, while nobody needs anything) wait before each request while
+anything else goes on, and become ordinary scans when the show is opened meanwhile.
+
 Results are stored as they come in (a few episodes at a time, the ones nearest to the user
 first), not when a provider is done, so a long show's first episodes are there in seconds.
 Providers that list a whole show in a request or two cover every aired episode; the others
@@ -34,6 +38,7 @@ from app.providers.base import (
     resolved_from_json,
     resolved_to_json,
 )
+from app.services import activity
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +47,9 @@ FINISHED_TTL = timedelta(days=7)
 RUNNING_STALE_AFTER = timedelta(minutes=10)  # a scan lost to an API restart
 FAILED_RETRY_AFTER = timedelta(minutes=2)
 SCAN_TIMEOUT_S = 300
+# A background scan may be held for long (it waits while anything else goes on).
+BACKGROUND_SCAN_TIMEOUT_S = 3600
+BACKGROUND_POLL_S = 0.5
 # Resolved streams: hosters' direct links carry expiring tokens, embed pages stay put.
 RESOLVED_DIRECT_TTL = timedelta(hours=3)
 RESOLVED_EMBED_TTL = timedelta(days=7)
@@ -63,6 +71,8 @@ class _Scan:
     # Goes episode by episode (so progress means something); a listing arrives all at once.
     stepwise: bool = True
     stored: set[int] = field(default_factory=set)
+    # Prefetching (see prefetch.py): it waits while anything else goes on, until promoted.
+    background: bool = False
 
 
 # (anime id, provider) -> the running scan
@@ -225,11 +235,33 @@ class _Writer:
             self.last = time.monotonic()
 
 
+def foreground_busy() -> bool:
+    """A scan someone waits for is running."""
+    return any(not s.background for s in _running.values())
+
+
+def quiet() -> bool:
+    """Nothing goes on that background work would get in the way of."""
+    return activity.idle() and not foreground_busy()
+
+
+async def _hold(scan: _Scan) -> None:
+    """A background scan's gate: wait while it's in the way (or until it's promoted)."""
+    while scan.background and not quiet():
+        await asyncio.sleep(BACKGROUND_POLL_S)
+
+
 async def _scan_provider(provider: StreamProvider, anime: AnimeInfo, episodes: list[int]) -> None:
-    writer = _Writer(anime.id, provider.name, _running.get((anime.id, provider.name)))
+    running = _running.get((anime.id, provider.name))
+    writer = _Writer(anime.id, provider.name, running)
+    background = running is not None and running.background
+    if background:
+        # Every request of this scan (and of the tasks it starts) takes its turn.
+        providers_base.scan_gate.set(lambda: _hold(running))
+    timeout = BACKGROUND_SCAN_TIMEOUT_S if background else SCAN_TIMEOUT_S
     try:
         results = await providers_base.guarded(
-            provider, providers_base.scan(provider, anime, episodes, writer.add), SCAN_TIMEOUT_S
+            provider, providers_base.scan(provider, anime, episodes, writer.add), timeout
         )
     except Exception as e:
         log.warning("Scan of %s for anime %s failed: %s", provider.name, anime.id, e)
@@ -271,16 +303,25 @@ async def ensure_scan(
     airing: bool,
     force: bool = False,
     whole: list[int] | None = None,
+    background: bool = False,
 ) -> None:
-    """Start a background scan for every provider whose cached data isn't good enough. `window`
-    is in the order to scan (nearest to the user first); providers that list a whole show get
-    `whole` (every aired episode) when it's known."""
+    """Start a scan for every provider whose cached data isn't good enough. `window` is in the
+    order to scan (nearest to the user first); providers that list a whole show get `whole`
+    (every aired episode) when it's known.
+
+    `background` (prefetching): only providers that never looked at the show, and the scans
+    wait while anything else goes on. Otherwise a background scan of the show already running
+    is promoted: it carries on at full speed."""
     ttl = scan_ttl(airing)
     scans = await provider_scans(anime.id)
     now = datetime.now(UTC)
     for p in providers_base.enabled_providers():
         key = (anime.id, p.name)
-        if key in _running:
+        if (running := _running.get(key)) is not None:
+            if not background:
+                running.background = False
+            continue
+        if background and p.name in scans:
             continue
         if force:
             providers_base.clear_backoff(p.name)  # "unreachable" may be over: try it now
@@ -294,7 +335,9 @@ async def ensure_scan(
             episodes=previous.episodes if previous else [],
         )  # fmt: skip
         task = asyncio.create_task(_scan_provider(p, anime, episodes))
-        _running[key] = _Scan(task, episodes, stepwise=not providers_base.lists_whole_show(p))
+        _running[key] = _Scan(
+            task, episodes, stepwise=not providers_base.lists_whole_show(p), background=background
+        )
         task.add_done_callback(lambda _, key=key: _running.pop(key, None))
 
 
@@ -327,6 +370,12 @@ def progress(anime_id: int) -> tuple[int, int] | None:
     if not scans:
         return None
     return sum(len(s.stored) for s in scans), sum(len(s.episodes) for s in scans)
+
+
+async def wait_show(anime_id: int) -> None:
+    """Wait for the running scans of a show."""
+    while tasks := [s.task for key, s in _running.items() if key[0] == anime_id]:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def scanning_provider(anime_id: int, provider: str) -> bool:
