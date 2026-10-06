@@ -107,7 +107,7 @@ docker compose up -d
 
 In `.env`:
 
-- `API_KEY`, `SECRET_KEY`, `POSTGRES_PASSWORD`: long random values, e.g. from `openssl rand -base64 32`.
+- `API_KEY`, `SECRET_KEY`, `POSTGRES_PASSWORD`: long random values of letters and digits, e.g. from `openssl rand -hex 32`. Avoid `$`, `@`, `%` and quotes. `POSTGRES_PASSWORD` only counts when the database is created; see below to change it later.
 - `FRONTEND_URL`: the address the web app is reached at from outside, e.g. `https://notflix.example.com`. Sign-ins come back there.
 - The sign-in apps (`MAL_*`, `ANILIST_*`). Register the redirect URLs `<FRONTEND_URL>/api/auth/callback` (MyAnimeList) and `<FRONTEND_URL>/api/auth/anilist/callback` (AniList), and enter the same in `MAL_REDIRECT_URI` and `ANILIST_REDIRECT_URI`.
 - `WEB_API_KEY`: set it to `API_KEY` to use NotFlix in a browser. Leave it empty if only the desktop app should get in: the app sends the key itself.
@@ -138,6 +138,11 @@ With nginx, turn off buffering (`proxy_buffering off;`), or Watch Together's liv
 - Publish again (`scripts/publish.sh`), then on the server run `docker compose pull && docker compose up -d --remove-orphans`. The first log line must show the new build.
 - Use `deploy/docker-compose.yml` and nothing else. The repository's root `docker-compose.yml` (and `docker-compose.prod.yml`) build from the source and mount `./backend` over the image's code. A tool that deploys from the git repository (Portainer, Coolify, Dokploy, …) must point at `deploy/docker-compose.yml`, not the root.
 - Don't override the backend's `command`. It must stay `notflix-start`, which runs the migrations and then the API.
+
+**`password authentication failed for user "notflix"`** means the database was created with another password. PostgreSQL only reads `POSTGRES_PASSWORD` the first time it starts with an empty volume. The development compose file uses `notflix`, and both compose files share the volume `notflix_pgdata` (same project name). The backend then prints how to fix it. Either:
+
+- keep the data and give the database the password from `.env`: `docker compose exec db psql -U notflix -c "ALTER USER notflix PASSWORD '<POSTGRES_PASSWORD>'"`, then `docker compose restart backend`;
+- or, if there's nothing to keep yet, start the database afresh, **which deletes it**: `docker compose down -v && docker compose up -d`.
 
 Since this version, migrations no longer depend on `alembic.ini` or the working directory. An empty folder mounted over the code now stops the backend with a message that says so.
 
