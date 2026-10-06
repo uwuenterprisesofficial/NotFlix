@@ -74,17 +74,64 @@ The API answers only requests that carry its key (`API_KEY`, at least 16 charact
 - **Web app:** it adds `WEB_API_KEY` (in `docker compose`; `API_KEY` in its environment otherwise). Set it to the API key to use NotFlix in a browser; anyone who can open the web app then uses the API through it, so only expose it where that's fine. Left empty, the web app adds no key and only passes on requests that bring the right one themselves: the desktop app can then connect through the web app's `/api`, and browsers get nothing.
 - **Sign-in redirects** from MyAnimeList and AniList (`/auth/callback`, `/auth/anilist/callback`) are the only requests without the key: the provider sends the browser there. They only finish a sign-in that was started with the key (matched by its one-time `state`).
 
-### Publishing the backend image
+### Deploying on a server
 
-To build the backend's Docker image and push it to `registry.mfhost.de/notflix-backend:publish`, log in once and run the script:
+The `docker-compose.yml` in the repository's root is for development: it builds from the source and mounts it into the containers. On a server, use the images from the registry and [`deploy/docker-compose.yml`](deploy/docker-compose.yml) instead. That compose file runs the API with its two workers, the web app, PostgreSQL and Redis. Nothing is mounted over the images' code.
+
+The server doesn't scrape. Every stream source is switched off there (AniScraper, AniWorld, Anivexa, ReAnime), whatever `.env` says. The server keeps accounts, lists, scores, friends, Watch Together and the [shared stream library](#both-streams-on-this-pc-hybrid). The desktop apps look for streams and play them on their PCs, in hybrid mode, and send what they find to the library. A show is then looked up once for everyone. As a consequence:
+
+- In a browser, the web app has the lists, friends and recommendations, but no streams to play. Watch in the desktop app.
+- German synopses come from AniWorld and AnimeToast too. The desktop apps look them up and share them, so a show has its German synopsis on the server (in browsers as well) once someone opened it in the app with NotFlix in German. Until then it shows MyAnimeList's English one.
+
+**1. Build and push the images** (on your PC, from the repository):
 
 ```sh
 docker login registry.mfhost.de
-scripts/publish-backend.sh             # Linux, macOS, Git Bash
-.\scripts\publish-backend.ps1          # Windows PowerShell
+scripts/publish.sh                     # Linux, macOS, Git Bash
+.\scripts\publish.ps1                  # Windows PowerShell
 ```
 
-It builds for `linux/amd64` by default, also on an ARM Mac. To change the name, tag or platform, use `IMAGE=… TAG=… PLATFORM=… scripts/publish-backend.sh`, or `-Image`, `-Tag` and `-Platform` in PowerShell. When the container starts, it runs the database migrations (`alembic upgrade head`) and then the API on port 8000. It needs the same environment as in `docker-compose.yml`: `DATABASE_URL`, `REDIS_URL`, `API_KEY`, `SECRET_KEY`, and the sign-in and provider settings from `.env.example`.
+This pushes `registry.mfhost.de/notflix-backend` and `notflix-frontend`, both tagged `publish`, built for `linux/amd64`. To push only one of them, name it: `scripts/publish.sh backend`. AniScraper isn't needed on the server; the desktop app has its own. `scripts/publish-backend.sh` is the same as `scripts/publish.sh backend`. To change the registry, tag or platform, use `REGISTRY=…`, `TAG=…` and `PLATFORM=…`, or `-Registry`, `-Tag` and `-Platform` in PowerShell.
+
+**2. Set it up on the server.** Copy the two files from `deploy/` into a folder there (the rest of the repository isn't needed):
+
+```sh
+mkdir notflix && cd notflix
+# copy deploy/docker-compose.yml and deploy/.env.example here, then:
+cp .env.example .env
+nano .env                              # fill it in, see below
+docker login registry.mfhost.de
+docker compose pull
+docker compose up -d
+```
+
+In `.env`:
+
+- `API_KEY`, `SECRET_KEY`, `POSTGRES_PASSWORD`: long random values, e.g. from `openssl rand -base64 32`.
+- `FRONTEND_URL`: the address the web app is reached at from outside, e.g. `https://notflix.example.com`. Sign-ins come back there.
+- The sign-in apps (`MAL_*`, `ANILIST_*`). Register the redirect URLs `<FRONTEND_URL>/api/auth/callback` (MyAnimeList) and `<FRONTEND_URL>/api/auth/anilist/callback` (AniList), and enter the same in `MAL_REDIRECT_URI` and `ANILIST_REDIRECT_URI`.
+- `WEB_API_KEY`: set it to `API_KEY` to use NotFlix in a browser. Leave it empty if only the desktop app should get in: the app sends the key itself.
+- Any other backend setting from the repository's [`.env.example`](.env.example) can go in too. The compose file passes the whole `.env` to the backend.
+
+On start, the backend migrates the database (`alembic upgrade head`), then serves the API. The workers wait until it's healthy. `docker compose ps` should show every service up and the backend `healthy`. `docker compose logs -f backend` shows what it does.
+
+**3. HTTPS in front.** The web app listens on port 3000 (`WEB_PORT`), and it is the only way in: it passes `/api/*` on to the backend, which isn't published. Put a reverse proxy with HTTPS in front of it, because the API key travels in a header. With [Caddy](https://caddyserver.com), the whole configuration is:
+
+```
+notflix.example.com {
+    reverse_proxy localhost:3000
+}
+```
+
+With nginx, turn off buffering (`proxy_buffering off;`), or Watch Together's live updates (server-sent events) stall.
+
+**4. Connect the desktop app.** Choose **Another server**, enter `https://notflix.example.com/api` and the `API_KEY`. Keep **Find and play streams on this PC** ticked ([hybrid mode](#both-streams-on-this-pc-hybrid), on by default for a new server). Without it, the app has no streams, since the server doesn't look for any. This needs an app built with the built-in server (`npm run dist`, not `dist:client`).
+
+**Updating.** Publish again from your PC, then on the server run `docker compose pull && docker compose up -d`. New migrations run by themselves when the backend starts.
+
+**Backups.** The database is in the `pgdata` volume. To dump it, run `docker compose exec db pg_dump -U notflix notflix > notflix.sql`.
+
+**`FAILED: No 'script_location' key found in configuration`** (or, with new images, "/app has no alembic.ini") means a folder is mounted over the backend's code. That happens with the development compose file (`./backend:/app`) on a server without the source. Use `deploy/docker-compose.yml` instead.
 
 ## Desktop app
 
@@ -158,6 +205,7 @@ Nothing is looked for twice:
 
 - **Show data** (titles, episode counts, airing) comes from the server's catalogue (`/library/anime/{id}`, asked again after a day). So the PC needs no MyAnimeList keys.
 - **The shared library:** before the PC looks for a show's sources, it takes what the server's library already knows (`/library/sources/{id}`, at most every 15 minutes per show). It only looks for episodes nobody has checked, or that went stale (6 hours for airing shows, 7 days for finished ones). What it finds goes back to the server's library (`POST /library/sources`). The server's own scans, for the web app, go there too. So the first person to open a show finds its streams, and everyone after reuses them.
+- **German synopses** (from AniWorld and AnimeToast) are shared the same way. The PC asks the server first (`/library/synopses/{id}`, at most once an hour per show). When the server has none, the PC looks the synopsis up and sends it (`POST /library/synopses`). A synopsis the server has already stays.
 - Sources are shared per provider *and* the way it gets them (e.g. AniWorld through AniScraper or straight from the site): option ids mean nothing to another kind of provider. Direct links aren't shared, since they expire and can be bound to the IP that fetched them; hoster embed pages are. Local files (`/media`) never are.
 
 The library endpoints sit behind the server's API key like everything else. When the server can't be reached, streams found before still work, and the PC looks for new ones itself. If the built-in server doesn't start, the app uses the server's streams and says why under **Settings → Server**.

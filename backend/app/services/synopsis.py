@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Anime, AnimeSynopsis
 from app.providers import base as providers_base
 from app.providers.base import AnimeInfo
+from app.services import library
 
 log = logging.getLogger(__name__)
 
@@ -57,27 +58,12 @@ async def _lookup(anime: AnimeInfo, language: str) -> tuple[str | None, str | No
     return None, tried, failed
 
 
-async def localized(db: AsyncSession, anime: Anime, language: str) -> str | None:
-    """The synopsis in `language`: stored, else looked up now (concurrent callers share one
-    lookup). None when there is none."""
-    if not supported(language):
-        return None
-    row = await stored(db, anime.id, language)
-    if row is not None and (
-        row.synopsis or datetime.now(UTC) - row.fetched_at < RETRY_MISSING_AFTER
-    ):
-        return row.synopsis
-    key = (anime.id, language)
-    task = _lookups.get(key)
-    if task is None:
-        task = asyncio.create_task(_lookup(AnimeInfo.from_model(anime), language))
-        _lookups[key] = task
-        task.add_done_callback(lambda _: _lookups.pop(key, None))
-    text, source, failed = await asyncio.shield(task)
-    if text is None and failed:
-        return None  # asked again next time
+async def save(
+    db: AsyncSession, anime_id: int, language: str, text: str | None, source: str | None
+) -> None:
+    """Store a synopsis (None: none was found, looked for again after a while)."""
     stmt = insert(AnimeSynopsis).values(
-        anime_id=anime.id, language=language, synopsis=text, source=source,
+        anime_id=anime_id, language=language, synopsis=text, source=source,
         fetched_at=datetime.now(UTC),
     )  # fmt: skip
     await db.execute(
@@ -91,4 +77,35 @@ async def localized(db: AsyncSession, anime: Anime, language: str) -> str | None
         )  # fmt: skip
     )
     await db.commit()
+
+
+async def localized(db: AsyncSession, anime: Anime, language: str) -> str | None:
+    """The synopsis in `language`: stored, else looked up now (concurrent callers share one
+    lookup). None when there is none.
+
+    With an upstream server (hybrid mode, see library.py), its synopsis comes first; one found
+    here goes to it, so the server (which doesn't scrape) has it for everyone."""
+    if not supported(language):
+        return None
+    row = await stored(db, anime.id, language)
+    if row is not None and row.synopsis:
+        return row.synopsis
+    sharing = library.upstream() is not None
+    if sharing and (text := await library.shared_synopsis(anime.id, language)):
+        await save(db, anime.id, language, text, "library")
+        return text
+    if row is not None and datetime.now(UTC) - row.fetched_at < RETRY_MISSING_AFTER:
+        return None
+    key = (anime.id, language)
+    task = _lookups.get(key)
+    if task is None:
+        task = asyncio.create_task(_lookup(AnimeInfo.from_model(anime), language))
+        _lookups[key] = task
+        task.add_done_callback(lambda _: _lookups.pop(key, None))
+    text, source, failed = await asyncio.shield(task)
+    if text is None and failed:
+        return None  # asked again next time
+    await save(db, anime.id, language, text, source)
+    if text and sharing:
+        library.share_synopsis(anime.id, language, text, source)
     return text

@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -8,7 +9,7 @@ from test_scan import CountingProvider
 
 from app.core.config import get_settings
 from app.db.session import sync_session
-from app.models import Anime, EpisodeSource, SharedSource, SourceScan
+from app.models import Anime, AnimeSynopsis, EpisodeSource, SharedSource, SourceScan
 from app.providers import base as providers_base
 from app.services import library, source_scan
 
@@ -154,6 +155,8 @@ def upstream(monkeypatch):
     seen: list[httpx.Request] = []
     pushed: list[dict] = []
     shared: dict[int, list[dict]] = {}
+    synopses: dict[int, str] = {}  # its German synopses
+    synopses_sent: list[dict] = []
     old = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -173,6 +176,12 @@ def upstream(monkeypatch):
         if path == "/library/sources" and request.method == "POST":
             pushed.append(json.loads(request.content))
             return httpx.Response(204)
+        if path.startswith("/library/synopses/"):
+            text = synopses.get(int(path.rsplit("/", 1)[1]))
+            return httpx.Response(200, json={"language": "de", "synopsis": text})
+        if path == "/library/synopses" and request.method == "POST":
+            synopses_sent.append(json.loads(request.content))
+            return httpx.Response(204)
         return httpx.Response(500)
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
@@ -186,7 +195,7 @@ def upstream(monkeypatch):
             for ep in (1, 2, 3)
         ],
     }]  # fmt: skip
-    return seen, pushed
+    return SimpleNamespace(seen=seen, pushed=pushed, synopses=synopses, synopses_sent=synopses_sent)
 
 
 async def test_refreshing_needs_a_user_unless_users_sign_in_upstream(client, counting):
@@ -196,7 +205,7 @@ async def test_refreshing_needs_a_user_unless_users_sign_in_upstream(client, cou
 async def test_hybrid_mode_uses_the_online_servers_catalogue_and_library(
     client, counting, upstream
 ):
-    seen, pushed = upstream
+    seen, pushed = upstream.seen, upstream.pushed
     with sync_session() as db:
         db.execute(delete(Anime).where(Anime.id.in_([77, 78])))
         db.commit()
@@ -252,3 +261,74 @@ async def test_a_broken_upstream_never_breaks_looking_for_streams(client, counti
     await library.wait_idle()
     assert resp.status_code == 200
     assert counting.calls  # looked for itself
+
+
+class DescribingProvider(CountingProvider):
+    """AniWorld with a German synopsis for every show."""
+
+    name = "aniworld"
+
+    def __init__(self):
+        super().__init__()
+        self.described: list[int] = []
+
+    async def description(self, anime):
+        self.described.append(anime.id)
+        return f"Deutsche Beschreibung von {anime.title}."
+
+
+@pytest.fixture
+def aniworld(monkeypatch):
+    provider = DescribingProvider()
+    monkeypatch.setattr(providers_base, "enabled_providers", lambda: [provider])
+    return provider
+
+
+def _forget_synopses(*anime_ids: int) -> None:
+    with sync_session() as db:
+        db.execute(delete(AnimeSynopsis).where(AnimeSynopsis.anime_id.in_(anime_ids)))
+        db.commit()
+
+
+async def test_the_server_keeps_synopses_apps_share(client):
+    _forget_synopses(5)
+    with sync_session() as db:
+        db.merge(Anime(id=5, title="Mushishi", genres=[]))
+        db.commit()
+    assert (await client.get("/library/synopses/5?lang=de")).json() == {
+        "language": "de", "synopsis": None,
+    }  # fmt: skip
+    body = {"anime_id": 5, "language": "de", "synopsis": " Ein Wanderer. ", "source": "aniworld"}
+    assert (await client.post("/library/synopses", json=body)).status_code == 204
+    # It only fills a gap.
+    other = {**body, "synopsis": "Etwas anderes."}
+    assert (await client.post("/library/synopses", json=other)).status_code == 204
+    assert (await client.get("/library/synopses/5?lang=de")).json()["synopsis"] == "Ein Wanderer."
+    # Everyone gets it with the show (browsers too).
+    assert (await client.get("/anime/5?lang=de")).json()["synopsis"] == "Ein Wanderer."
+
+    unsupported = {**body, "language": "fr"}
+    assert (await client.post("/library/synopses", json=unsupported)).status_code == 422
+    unknown = {**body, "anime_id": 999999}
+    assert (await client.post("/library/synopses", json=unknown)).status_code == 404
+
+
+async def test_hybrid_mode_shares_the_german_synopses_it_finds(client, aniworld, upstream):
+    _forget_synopses(77)
+    resp = (await client.get("/anime/77/synopsis?lang=de")).json()
+    await library.wait_idle()
+    # The online server had none: found here, and sent there.
+    assert resp == {"language": "de", "synopsis": "Deutsche Beschreibung von Upstream Show."}
+    assert aniworld.described == [77]
+    assert upstream.synopses_sent == [{
+        "anime_id": 77, "language": "de", "source": "aniworld",
+        "synopsis": "Deutsche Beschreibung von Upstream Show.",
+    }]  # fmt: skip
+
+
+async def test_hybrid_mode_uses_the_online_servers_synopsis_first(client, aniworld, upstream):
+    _forget_synopses(77)
+    upstream.synopses[77] = "Vom Server."
+    resp = (await client.get("/anime/77/synopsis?lang=de")).json()
+    assert resp == {"language": "de", "synopsis": "Vom Server."}
+    assert aniworld.described == [] and upstream.synopses_sent == []

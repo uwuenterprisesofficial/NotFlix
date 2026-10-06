@@ -15,6 +15,8 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project --no-dev
 COPY . .
+COPY --chmod=755 docker-start.sh /usr/local/bin/notflix-start
 
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# Migrations, then the API (see docker-start.sh). The workers run `rq worker ...` instead.
+CMD ["notflix-start"]

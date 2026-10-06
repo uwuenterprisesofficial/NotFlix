@@ -1,0 +1,105 @@
+# NotFlix on a server, from the images scripts/publish.sh pushes (no source code needed here).
+#
+# The server doesn't look for streams itself: it keeps accounts, lists, friends, Watch Together
+# and the shared stream library. The desktop apps find and play streams on their PCs (hybrid
+# mode) and share what they find with the library here.
+#
+#   cp .env.example .env      then fill it in
+#   docker compose pull
+#   docker compose up -d
+#
+# See the README (Deploying on a server). Unlike the development setup in the repository's root,
+# nothing is mounted over the images' code.
+name: notflix
+
+x-backend: &backend
+  image: ${REGISTRY:-registry.mfhost.de}/notflix-backend:${TAG:-publish}
+  restart: unless-stopped
+  # Everything in .env (API_KEY, SECRET_KEY, sign-in apps, providers, ...); the lines below win.
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+psycopg://notflix:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/notflix
+    REDIS_URL: redis://redis:6379/0
+    MEDIA_DIR: /media
+    # No scraping on the server: every stream source is off (whatever .env says). Streams are
+    # found by the desktop apps, which share them through the library.
+    ANISCRAPER_URL: ""
+    ANIWORLD_URL: ""
+    ANIWORLD_API_URL: ""
+    ANIVEXA_URL: ""
+    REANIME_URL: ""
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: notflix
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: notflix
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notflix"]
+      interval: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  # The API. On start it migrates the database (alembic upgrade head), then serves on port 8000
+  # inside the network; it's reached through the web app's /api (see frontend below).
+  backend:
+    <<: *backend
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      # Every request needs the key, /health too.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, urllib.request as u; u.urlopen(u.Request('http://localhost:8000/health', headers={'x-api-key': os.environ['API_KEY']}), timeout=5)"
+      interval: 10s
+      timeout: 6s
+      start_period: 60s
+      retries: 5
+
+  # Background jobs: intro/outro analysis, and completing the catalogue. They start once the
+  # backend has migrated the database.
+  worker:
+    <<: *backend
+    command: rq worker analysis --url redis://redis:6379/0
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  catalog-worker:
+    <<: *backend
+    command: rq worker catalog --url redis://redis:6379/0
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # The web app, and the way in for everything: it passes /api/* on to the backend. Put an
+  # HTTPS reverse proxy in front of this port (the API key travels in a header).
+  frontend:
+    image: ${REGISTRY:-registry.mfhost.de}/notflix-frontend:${TAG:-publish}
+    restart: unless-stopped
+    environment:
+      API_INTERNAL_URL: http://backend:8000
+      # The key the web app adds for browsers. Empty: only clients that bring the key themselves
+      # (the desktop app) get through.
+      API_KEY: ${WEB_API_KEY:-}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  pgdata:

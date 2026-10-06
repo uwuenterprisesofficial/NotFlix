@@ -695,3 +695,10 @@ class ShowRecommendationsOut(BaseModel):
     friends: list[FriendForShowOut]
     # Friends who recommended this show to the viewer.
     received: list[FriendRecommendationOut]
+
+
+class SharedSynopsisIn(BaseModel):
+    anime_id: int = Field(gt=0)
+    language: str = Field(pattern=r"^[a-z]{2}$")
+    synopsis: str = Field(min_length=1, max_length=20_000)
+    source: str | None = Field(None, max_length=20)

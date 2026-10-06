@@ -1,3 +1,6 @@
+# For development: builds from the source and mounts it into the containers. On a server, use
+# deploy/docker-compose.yml with the published images (see the README, Deploying on a server).
+
 name: notflix
 
 x-backend: &backend
