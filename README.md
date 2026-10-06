@@ -74,6 +74,18 @@ The API answers only requests that carry its key (`API_KEY`, at least 16 charact
 - **Web app:** it adds `WEB_API_KEY` (in `docker compose`; `API_KEY` in its environment otherwise). Set it to the API key to use NotFlix in a browser; anyone who can open the web app then uses the API through it, so only expose it where that's fine. Left empty, the web app adds no key and only passes on requests that bring the right one themselves: the desktop app can then connect through the web app's `/api`, and browsers get nothing.
 - **Sign-in redirects** from MyAnimeList and AniList (`/auth/callback`, `/auth/anilist/callback`) are the only requests without the key: the provider sends the browser there. They only finish a sign-in that was started with the key (matched by its one-time `state`).
 
+### Publishing the backend image
+
+To build the backend's Docker image and push it to `registry.mfhost.de/notflix-backend:publish`, log in once and run the script:
+
+```sh
+docker login registry.mfhost.de
+scripts/publish-backend.sh             # Linux, macOS, Git Bash
+.\scripts\publish-backend.ps1          # Windows PowerShell
+```
+
+It builds for `linux/amd64` by default, also on an ARM Mac. To change the name, tag or platform, use `IMAGE=… TAG=… PLATFORM=… scripts/publish-backend.sh`, or `-Image`, `-Tag` and `-Platform` in PowerShell. When the container starts, it runs the database migrations (`alembic upgrade head`) and then the API on port 8000. It needs the same environment as in `docker-compose.yml`: `DATABASE_URL`, `REDIS_URL`, `API_KEY`, `SECRET_KEY`, and the sign-in and provider settings from `.env.example`.
+
 ## Desktop app
 
 `desktop/` is an Electron app for your PC. It works in one of two ways, chosen under **Settings → Server**:
