@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -244,7 +245,11 @@ class EpisodeSource(Base):
     """A cached source option for one episode, as found by a provider scan."""
 
     __tablename__ = "episode_sources"
-    __table_args__ = (UniqueConstraint("anime_id", "episode", "option_id"),)
+    __table_args__ = (
+        UniqueConstraint("anime_id", "episode", "option_id"),
+        # Shows with a dub ("de-dub", "en-dub"): the search's dub filter.
+        Index("ix_episode_sources_language_anime", "language", "anime_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     anime_id: Mapped[int] = mapped_column(Integer, index=True)

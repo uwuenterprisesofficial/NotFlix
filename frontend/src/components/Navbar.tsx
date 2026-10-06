@@ -37,7 +37,7 @@ export async function Navbar() {
             {t("nav.home")}
           </Link>
           {withList && (
-            <Link href="/#my-list" className="hover:text-white">
+            <Link href="/my-list" className="hover:text-white">
               {t("nav.myList")}
             </Link>
           )}

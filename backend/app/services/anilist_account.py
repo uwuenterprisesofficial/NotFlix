@@ -177,11 +177,12 @@ class AniListClient:
         progress: int | None = None,
         score: int | None = None,
     ) -> dict[str, Any]:
-        """Create or update a list entry. `status` is a MAL list status; `score` is 1-10."""
+        """Create or update a list entry. `status` is a MAL list status; `score` is 1-10 (0: no
+        score, None: left as it is)."""
         variables: dict[str, Any] = {"mediaId": media_id, "status": FROM_MAL[ListStatus(status)]}
         if progress is not None:
             variables["progress"] = progress
-        if score:
+        if score is not None:
             variables["scoreRaw"] = score * 10  # 0-100, whatever format the user displays
         data = await self.query(SAVE_MUTATION, variables)
         return data["SaveMediaListEntry"]

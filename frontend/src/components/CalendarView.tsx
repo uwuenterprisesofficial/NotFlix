@@ -74,6 +74,9 @@ export function CalendarView() {
     const key = dayKey(new Date(a.airing!.airing_at));
     byDay.set(key, [...(byDay.get(key) ?? []), a]);
   }
+  for (const entries of byDay.values()) {
+    entries.sort((a, b) => Date.parse(a.airing!.airing_at) - Date.parse(b.airing!.airing_at));
+  }
   const today = dayKey(new Date());
   const loading = data?.offset !== offset && !failed;
 
@@ -141,16 +144,52 @@ export function CalendarView() {
                 <p className="px-1 text-xs text-muted">{t("calendar.empty")}</p>
               )}
               <ul className="space-y-1.5">
-                {entries.map((a) => (
-                  <li key={`${a.id}-${a.airing!.episode}`}>
-                    <Entry anime={a} now={now} />
-                  </li>
-                ))}
+                {entries.map((a, i) => {
+                  // Today: the red "now" line between what has aired and what's still to come.
+                  const at = Date.parse(a.airing!.airing_at);
+                  const before = i > 0 ? Date.parse(entries[i - 1].airing!.airing_at) : -Infinity;
+                  const lineHere = isToday && now !== null && at > now && before <= now;
+                  return (
+                    <li key={`${a.id}-${a.airing!.episode}`}>
+                      {lineHere && <NowLine now={now} />}
+                      <Entry anime={a} now={now} />
+                    </li>
+                  );
+                })}
+                {isToday &&
+                  now !== null &&
+                  (entries.length === 0 ||
+                    Date.parse(entries[entries.length - 1].airing!.airing_at) <= now) && (
+                    <li>
+                      <NowLine now={now} />
+                    </li>
+                  )}
               </ul>
             </section>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/** Where today is now: a red line with the time, between the episodes that aired and the ones
+ * still to come. */
+function NowLine({ now }: { now: number }) {
+  const { t, lang } = useT();
+  const time = new Date(now).toLocaleTimeString(LOCALE[lang], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return (
+    <div
+      role="separator"
+      aria-label={t("calendar.now", { time })}
+      className="relative my-1.5 flex items-center gap-1.5"
+    >
+      <span aria-hidden className="size-2 shrink-0 rounded-full bg-brand" />
+      <span aria-hidden className="h-0.5 flex-1 bg-brand" />
+      <span className="text-[11px] font-semibold text-brand tabular-nums">{time}</span>
     </div>
   );
 }

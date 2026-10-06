@@ -148,3 +148,26 @@ async def test_worker_stores_and_completes_shows(client, catalogue, mal_calls, m
         german = {s.anime_id: s.synopsis for s in db.query(AnimeSynopsis)}
     assert german[30] == "Deutsch: One Piece Film"
     assert set(german) == {21, 30, 40}
+
+
+async def test_dubbed_shows_from_the_stream_cache(client):
+    from app.models import EpisodeSource
+
+    with sync_session() as db:
+        db.add_all([
+            Anime(id=1, title="Dubbed", genres=[], num_list_users=10),
+            Anime(id=2, title="Subbed only", genres=[], num_list_users=20),
+            Anime(id=3, title="Dubbed too", genres=[], num_list_users=30),
+        ])  # fmt: skip
+        for anime_id, language in ((1, "de-dub"), (1, "de-sub"), (2, "de-sub"), (3, "en-dub")):
+            db.add(EpisodeSource(
+                anime_id=anime_id, episode=1, provider="aniworld",
+                option_id=f"{anime_id}{language}", label="x", language=language,
+            ))  # fmt: skip
+        db.commit()
+    german = (await client.get("/search/dubbed", params={"language": "de-dub"})).json()
+    assert [(a["id"], a["dubs"]) for a in german["items"]] == [(1, ["de-dub"])]
+    english = (await client.get("/search/dubbed", params={"language": "en-dub"})).json()
+    assert [a["id"] for a in english["items"]] == [3]
+    found = (await client.get("/search", params={"q": "dubbed", "quick": "true"})).json()
+    assert {a["id"]: a["dubs"] for a in found["items"]} == {3: ["en-dub"], 1: ["de-dub"]}

@@ -10,6 +10,7 @@ import { useNow } from "@/lib/useNow";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HoverPreview, previewPosition } from "./HoverPreview";
 import { useT } from "./I18nProvider";
+import { LanguageFlag } from "./LanguageFlag";
 import { PredictionBadge } from "./PredictionBadge";
 
 const OPEN_DELAY_MS = 550;
@@ -104,6 +105,17 @@ export function AnimeCard({
           <div className="absolute top-1.5 left-1.5">
             <PredictionBadge prediction={anime.prediction} />
           </div>
+          {!!anime.dubs?.length && (
+            <span
+              title={t("card.dubs")}
+              className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded bg-black/80 px-1.5 py-0.5 text-[10px] font-bold tracking-wide shadow"
+            >
+              {anime.dubs.map((d) => (
+                <LanguageFlag key={d} language={d} />
+              ))}
+              DUB
+            </span>
+          )}
           {resume && (
             <span className="absolute right-1.5 bottom-1.5 rounded bg-black/80 px-1.5 py-0.5 text-[11px] font-semibold shadow">
               ▶ {t("airing.episode", { episode: resume.episode })}

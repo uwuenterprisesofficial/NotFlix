@@ -40,6 +40,11 @@ export function AnimeRow({ row, pairNames }: { row: Row; pairNames?: PairNames }
             {t("row.calendar")}
           </Link>
         )}
+        {(row.id === "my-list" || row.id === "continue") && (
+          <Link href="/my-list" className="text-sm text-muted hover:text-white">
+            {t("row.allOfMyList")}
+          </Link>
+        )}
       </div>
       <div
         ref={scroller}

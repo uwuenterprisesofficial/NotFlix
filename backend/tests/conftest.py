@@ -47,7 +47,7 @@ async def client(database):
     from app.core import cache
     from app.db.session import async_engine
     from app.main import app
-    from app.services import airing, list_writer, source_scan, stats_jobs, sync_jobs
+    from app.services import airing, list_writer, related, source_scan, stats_jobs, sync_jobs
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test", headers={"x-api-key": API_KEY}
@@ -56,6 +56,7 @@ async def client(database):
     await source_scan.wait_idle()
     await stats_jobs.wait_idle()
     await sync_jobs.wait_idle()
+    await related.wait_idle()
     await list_writer.wait_idle()
     await airing.wait_idle()
     app.dependency_overrides.clear()

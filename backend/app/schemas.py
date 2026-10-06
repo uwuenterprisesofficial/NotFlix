@@ -73,6 +73,8 @@ class AnimeCard(ORM):
     next_episode: int | None = None  # when airing: the next episode and its air time
     next_episode_at: datetime | None = None  # in the release calendar / New Episodes: this episode
     pair: "PairOut | None" = None  # Watch Together: both users' side of the show
+    # Dubs NotFlix has found streams of ("de-dub", "en-dub"; shows looked up before only).
+    dubs: list[str] = []
 
 
 class AnimeDetail(AnimeCard):
@@ -199,6 +201,14 @@ class Row(BaseModel):
     id: str
     title: str
     items: list[AnimeCard]
+
+
+class LibraryResponse(BaseModel):
+    """The My List page: the user's list in sections, and shows related to what they watched."""
+
+    sections: list[Row]
+    # Relations of some listed shows are still being fetched: ask again in a moment.
+    related_pending: bool = False
 
 
 class BrowseResponse(BaseModel):
@@ -386,6 +396,10 @@ class AnimeToastMappingIn(BaseModel):
 
 class ProgressUpdate(BaseModel):
     episodes_watched: int = Field(ge=0)
+
+
+class ScoreUpdate(BaseModel):
+    score: int = Field(ge=0, le=10)  # 0 removes the score
 
 
 class ListStatusUpdate(BaseModel):

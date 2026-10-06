@@ -32,6 +32,7 @@ from app.schemas import (
     ProgressUpdate,
     ReferenceOut,
     ResumeOut,
+    ScoreUpdate,
     SkipSegmentOut,
     SynopsisOut,
 )
@@ -173,6 +174,23 @@ async def set_list_status(anime_id: int, body: ListStatusUpdate, user: ListUser,
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Anime not found")
     try:
         saved = await list_status.save(db, user, anime_id, body.status)
+    except list_status.NotSaved as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+    return _progress(saved)
+
+
+@router.put("/anime/{anime_id}/score", response_model=Progress)
+async def set_score(anime_id: int, body: ScoreUpdate, user: ListUser, db: DB):
+    """Score a show (1-10; 0 removes the score) on every linked list. A show that isn't on
+    the list yet goes there as completed (scoring it says it was watched)."""
+    if await catalog.get_anime(db, anime_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Anime not found")
+    entry = await db.scalar(
+        select(ListEntry).where(ListEntry.user_id == user.id, ListEntry.anime_id == anime_id)
+    )
+    current = entry.status if entry is not None else ListStatus.completed
+    try:
+        saved = await list_status.save(db, user, anime_id, current, score=body.score)
     except list_status.NotSaved as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
     return _progress(saved)

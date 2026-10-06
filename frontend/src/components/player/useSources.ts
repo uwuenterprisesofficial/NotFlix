@@ -26,7 +26,7 @@ const SCAN_POLL_MS = 3000;
 // Links older than this may have expired early when they fail; younger ones are just broken.
 const STALE_LINKS_MS = 10 * 60_000;
 
-async function resolveOption(
+export async function resolveOption(
   animeId: number,
   episode: number,
   id: string,

@@ -41,6 +41,8 @@ export type AnimeCard = {
   next_episode_at: string | null;
   /** Watch Together: both users' side of the show. */
   pair?: { me: PairSide | null; partner: PairSide | null } | null;
+  /** Dubs NotFlix has found streams of (search results; shows looked up before only). */
+  dubs?: Language[];
 };
 
 /** One user's side of a show: their list status and score, else their predicted score. */

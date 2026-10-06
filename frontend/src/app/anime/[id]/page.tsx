@@ -8,6 +8,7 @@ import { AniWorldMapping } from "@/components/AniWorldMapping";
 import { EpisodeBrowser } from "@/components/EpisodeBrowser";
 import { LazyDetails } from "@/components/LazyDetails";
 import { PredictionPanel } from "@/components/PredictionPanel";
+import { ScoreEditor } from "@/components/ScoreEditor";
 import { WatchTogetherMenu } from "@/components/together/TogetherBar";
 import { apiOrNull } from "@/lib/api";
 import { Synopsis } from "@/components/Synopsis";
@@ -80,6 +81,11 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
                   </span>
                 ))}
           </div>
+          {me && !me.guest && (
+            <div className="mt-3">
+              <ScoreEditor animeId={anime.id} progress={anime.progress} />
+            </div>
+          )}
           {anime.prediction && <PredictionPanel prediction={anime.prediction} />}
           <Synopsis
             animeId={anime.id}

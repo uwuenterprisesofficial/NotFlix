@@ -15,6 +15,7 @@ import { FullscreenButton, useFrameFullscreen, usePlayerFrame } from "./PlayerFr
 import { StreamMenu } from "./StreamMenu";
 import { useAutoAnalysis } from "./useAutoAnalysis";
 import { useAutoSkip } from "./useAutoSkip";
+import { usePreloadNext } from "./usePreloadNext";
 import { useSources } from "./useSources";
 import { useStoredValue } from "./useStoredValue";
 
@@ -67,13 +68,31 @@ export function Player({
   const frame = usePlayerFrame();
   const fullscreen = useFrameFullscreen();
 
-  // The next episode starts with the same provider, source and server when it has them.
+  // Near the end, the next episode's stream is looked up and preloaded.
+  const preloadNext = usePreloadNext({
+    animeId,
+    episode,
+    enabled: hasNext && stream?.kind === "direct",
+    language: sources.language,
+    current: {
+      provider: sources.active?.provider ?? null,
+      label: sources.active?.label ?? null,
+      server: stream?.label ?? null,
+    },
+  });
+  // The next episode starts with the stream preloaded for it, else with the same provider,
+  // source and server as this one when it has them.
   const nextParams = new URLSearchParams();
-  if (sources.active) {
-    nextParams.set("via", sources.active.provider);
-    nextParams.set("option", sources.active.label);
+  const continueWith = preloadNext.ready ?? {
+    provider: sources.active?.provider ?? null,
+    label: sources.active?.label ?? null,
+    server: stream?.label ?? null,
+  };
+  if (continueWith.provider && continueWith.label) {
+    nextParams.set("via", continueWith.provider);
+    nextParams.set("option", continueWith.label);
   }
-  if (stream) nextParams.set("server", stream.label);
+  if (continueWith.server) nextParams.set("server", continueWith.server);
   if (party) nextParams.set("together", String(party.connectionId));
   const nextHref = `/watch/${animeId}/${episode + 1}${nextParams.size ? `?${nextParams}` : ""}`;
   const analysis = useAutoAnalysis(animeId, episode, signedIn);
@@ -186,7 +205,10 @@ export function Player({
                 }}
                 onFail={() => sources.failStream(stream.url)}
                 resumeFrom={() => position.current}
-                onPosition={(t) => (position.current = t)}
+                onPosition={(t, duration) => {
+                  position.current = t;
+                  preloadNext.onPosition(t, duration);
+                }}
                 resumedAt={resumeAt}
                 onSave={savePosition}
                 onPlayState={(p) => (playing.current = p)}

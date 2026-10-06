@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from app.api.deps import DB, OptionalUser
 from app.core.cache import get_json, redis, set_json
-from app.models import Anime, ListEntry
+from app.models import Anime, EpisodeSource, ListEntry
 from app.schemas import GenreOut, SearchResponse
 from app.services import catalog, catalog_jobs, jikan, mal
 from app.services.tags import KNOWN_TAGS, category
@@ -26,6 +26,23 @@ CATALOGUE_EXTRA = 12  # catalogue-only matches added to the first page of MAL's 
 CATEGORY_ORDER = {"genre": 0, "theme": 1, "demographic": 2, "explicit": 3}
 
 
+DUBS = ("de-dub", "en-dub")
+
+
+async def _dubs(db: DB, ids: list[int]) -> dict[int, list[str]]:
+    """The dubs NotFlix has found streams of, per show (shows whose streams were looked up)."""
+    found: dict[int, list[str]] = {}
+    if ids:
+        rows = await db.execute(
+            select(EpisodeSource.anime_id, EpisodeSource.language)
+            .where(EpisodeSource.anime_id.in_(ids), EpisodeSource.language.in_(DUBS))
+            .distinct()
+        )
+        for anime_id, language in rows:
+            found.setdefault(anime_id, []).append(language)
+    return {anime_id: sorted(langs) for anime_id, langs in found.items()}
+
+
 async def _cards(db: DB, user, animes: list[Anime]):
     predictor = await predictor_for(db, user)
     entries: dict[int, ListEntry] = {}
@@ -37,7 +54,11 @@ async def _cards(db: DB, user, animes: list[Anime]):
                 select(ListEntry).where(ListEntry.user_id == user.id, ListEntry.anime_id.in_(ids))
             )
         }
-    return [catalog.to_card(a, entries.get(a.id), predictor=predictor) for a in animes]
+    dubs = await _dubs(db, ids)
+    cards = [catalog.to_card(a, entries.get(a.id), predictor=predictor) for a in animes]
+    for card in cards:
+        card.dubs = dubs.get(card.id, [])
+    return cards
 
 
 async def _from_catalogue(db: DB, ids: list[int], rows: dict[int, dict]) -> list[Anime]:
@@ -137,6 +158,39 @@ _genres_refresh: asyncio.Task | None = None
 async def _refresh_genres() -> None:
     with contextlib.suppress(jikan.JikanError):
         await set_json("jikan:genres", await jikan.genres(), GENRES_TTL_SECONDS)
+
+
+@router.get("/search/dubbed", response_model=SearchResponse)
+async def search_dubbed(
+    user: OptionalUser,
+    db: DB,
+    language: Literal["de-dub", "en-dub"] = "de-dub",
+    page: int = Query(1, ge=1, le=200),
+    order: Literal["score", "popularity", "newest"] = "popularity",
+):
+    """Shows NotFlix has found dubbed streams of (in one language), from the shared stream
+    cache: every show someone opened adds to it."""
+    sort = {
+        "score": Anime.mean.desc().nulls_last(),
+        "popularity": Anime.num_list_users.desc().nulls_last(),
+        "newest": Anime.start_year.desc().nulls_last(),
+    }[order]
+    dubbed = select(EpisodeSource.anime_id).where(EpisodeSource.language == language)
+    ids = list(
+        await db.scalars(
+            select(Anime.id)
+            .where(Anime.id.in_(dubbed))
+            .order_by(sort, Anime.id)
+            .offset((page - 1) * PAGE_SIZE)
+            .limit(PAGE_SIZE + 1)
+        )
+    )
+    return SearchResponse(
+        items=await _cards(db, user, await _from_catalogue(db, ids[:PAGE_SIZE], {})),
+        page=page,
+        has_next=len(ids) > PAGE_SIZE,
+        source="local",
+    )
 
 
 @router.get("/genres", response_model=list[GenreOut])
