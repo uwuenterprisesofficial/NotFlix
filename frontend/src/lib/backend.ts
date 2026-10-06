@@ -35,9 +35,9 @@ export function localBackend(): { url: string; key: string } | null {
 }
 
 // What the local server answers in hybrid mode (paths without /api): looking for, resolving
-// and relaying streams.
+// and relaying streams, and looking up German synopses (both shared with the online server).
 const LOCAL_PATHS = [
-  /^\/anime\/\d+\/(streams|availability(\/refresh)?|preview|mappings(\/\w+)?)$/,
+  /^\/anime\/\d+\/(streams|availability(\/refresh)?|preview|mappings(\/\w+)?|synopsis)$/,
   /^\/anime\/\d+\/episodes\/\d+\/(sources|resolve|failures)$/,
   /^\/proxy(\/|$)/,
   /^\/providers$/,

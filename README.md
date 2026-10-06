@@ -81,7 +81,7 @@ The `docker-compose.yml` in the repository's root is for development: it builds 
 The server doesn't scrape. Every stream source is switched off there (AniScraper, AniWorld, Anivexa, ReAnime), whatever `.env` says. The server keeps accounts, lists, scores, friends, Watch Together and the [shared stream library](#both-streams-on-this-pc-hybrid). The desktop apps look for streams and play them on their PCs, in hybrid mode, and send what they find to the library. A show is then looked up once for everyone. As a consequence:
 
 - In a browser, the web app has the lists, friends and recommendations, but no streams to play. Watch in the desktop app.
-- German synopses come from AniWorld and AnimeToast, so the server shows MyAnimeList's English ones.
+- German synopses come from AniWorld and AnimeToast too. The desktop apps look them up and share them, so a show has its German synopsis on the server (in browsers as well) once someone opened it in the app with NotFlix in German. Until then it shows MyAnimeList's English one.
 
 **1. Build and push the images** (on your PC, from the repository):
 
@@ -205,6 +205,7 @@ Nothing is looked for twice:
 
 - **Show data** (titles, episode counts, airing) comes from the server's catalogue (`/library/anime/{id}`, asked again after a day). So the PC needs no MyAnimeList keys.
 - **The shared library:** before the PC looks for a show's sources, it takes what the server's library already knows (`/library/sources/{id}`, at most every 15 minutes per show). It only looks for episodes nobody has checked, or that went stale (6 hours for airing shows, 7 days for finished ones). What it finds goes back to the server's library (`POST /library/sources`). The server's own scans, for the web app, go there too. So the first person to open a show finds its streams, and everyone after reuses them.
+- **German synopses** (from AniWorld and AnimeToast) are shared the same way. The PC asks the server first (`/library/synopses/{id}`, at most once an hour per show). When the server has none, the PC looks the synopsis up and sends it (`POST /library/synopses`). A synopsis the server has already stays.
 - Sources are shared per provider *and* the way it gets them (e.g. AniWorld through AniScraper or straight from the site): option ids mean nothing to another kind of provider. Direct links aren't shared, since they expire and can be bound to the IP that fetched them; hoster embed pages are. Local files (`/media`) never are.
 
 The library endpoints sit behind the server's API key like everything else. When the server can't be reached, streams found before still work, and the PC looks for new ones itself. If the built-in server doesn't start, the app uses the server's streams and says why under **Settings → Server**.

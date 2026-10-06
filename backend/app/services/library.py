@@ -123,22 +123,22 @@ async def save(anime_id: int, source: str, episodes: dict[int, list[dict[str, An
         await db.commit()
 
 
-async def _push(anime_id: int, source: str, episodes: dict[int, list[dict[str, Any]]]) -> None:
+async def _post(path: str, body: dict[str, Any], what: str) -> None:
+    """Send something to the upstream's library; failures are only logged."""
     url, key = cast(tuple[str, str], upstream())
-    body = {
-        "anime_id": anime_id,
-        "source": source,
-        "episodes": [{"episode": ep, "options": o} for ep, o in sorted(episodes.items())],
-    }
     try:
-        resp = await _client().post(
-            f"{url}/library/sources", json=body, headers={API_KEY_HEADER: key}
-        )
+        resp = await _client().post(f"{url}{path}", json=body, headers={API_KEY_HEADER: key})
         resp.raise_for_status()
     except httpx.HTTPError as e:
-        log.info("Sharing %s of anime %s with %s failed: %s", source, anime_id, url, e)
+        log.info("Sharing %s with %s failed: %s", what, url, e)
     except Exception:
-        log.warning("Sharing %s of anime %s with %s failed", source, anime_id, url, exc_info=True)
+        log.warning("Sharing %s with %s failed", what, url, exc_info=True)
+
+
+def _send(path: str, body: dict[str, Any], what: str) -> None:
+    task = asyncio.create_task(_post(path, body, what))
+    _pushing.add(task)
+    task.add_done_callback(_pushing.discard)
 
 
 async def record(anime_id: int, provider: str, results: dict[int, list[SourceOption]]) -> None:
@@ -152,9 +152,41 @@ async def record(anime_id: int, provider: str, results: dict[int, list[SourceOpt
     if upstream() is None:
         await save(anime_id, source, episodes)
         return
-    task = asyncio.create_task(_push(anime_id, source, episodes))
-    _pushing.add(task)
-    task.add_done_callback(_pushing.discard)
+    body = {
+        "anime_id": anime_id,
+        "source": source,
+        "episodes": [{"episode": ep, "options": o} for ep, o in sorted(episodes.items())],
+    }
+    _send("/library/sources", body, f"{source} of anime {anime_id}")
+
+
+# --- Synopses in other languages (German: from AniWorld and AnimeToast, see synopsis.py) ---
+
+# The upstream is asked for a show's synopsis at most this often (it may get one meanwhile).
+SYNOPSIS_ASK_EVERY_S = 3600
+
+
+async def shared_synopsis(anime_id: int, language: str) -> str | None:
+    """The upstream's synopsis of a show in `language`; None when it has none (or was asked
+    within SYNOPSIS_ASK_EVERY_S, or can't be reached). Never raises."""
+    try:
+        asked = f"library:synopsis:{anime_id}:{language}"
+        if not await redis().set(asked, 1, ex=SYNOPSIS_ASK_EVERY_S, nx=True):
+            return None
+        resp = await _upstream_get(f"/library/synopses/{anime_id}?lang={language}")
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json().get("synopsis") or None
+    except Exception as e:
+        log.info("Synopsis of anime %s from the upstream failed: %s", anime_id, e)
+        return None
+
+
+def share_synopsis(anime_id: int, language: str, text: str, source: str | None) -> None:
+    """A synopsis found here: to the upstream (in the background)."""
+    body = {"anime_id": anime_id, "language": language, "synopsis": text, "source": source}
+    _send("/library/synopses", body, f"the {language} synopsis of anime {anime_id}")
 
 
 async def wait_idle() -> None:

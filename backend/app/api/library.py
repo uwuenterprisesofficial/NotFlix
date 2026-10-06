@@ -4,12 +4,18 @@ services/library.py."""
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.deps import DB
 from app.providers.base import ProviderError, resolved_from_json
-from app.schemas import SharedEpisodeOut, SharedSourceOut, SharedSourcesIn
-from app.services import catalog, library
+from app.schemas import (
+    SharedEpisodeOut,
+    SharedSourceOut,
+    SharedSourcesIn,
+    SharedSynopsisIn,
+    SynopsisOut,
+)
+from app.services import catalog, library, synopsis
 
 router = APIRouter(prefix="/library", tags=["library"])
 
@@ -73,3 +79,26 @@ async def share_sources(body: SharedSourcesIn) -> None:
             options.append(option)
         episodes[entry.episode] = options
     await library.save(body.anime_id, body.source, episodes)
+
+
+@router.get("/synopses/{anime_id}", response_model=SynopsisOut)
+async def library_synopsis(
+    anime_id: int, db: DB, lang: str = Query(pattern=r"^[a-z]{2}$")
+) -> SynopsisOut:
+    """A show's synopsis in `lang` as this server knows it (null: none yet). Never looks it up."""
+    row = await synopsis.stored(db, anime_id, lang)
+    return SynopsisOut(language=lang, synopsis=row.synopsis if row else None)
+
+
+@router.post("/synopses", status_code=status.HTTP_204_NO_CONTENT)
+async def share_synopsis(body: SharedSynopsisIn, db: DB) -> None:
+    """A synopsis an app found (e.g. German from AniWorld). It only fills a gap: one this server
+    has already stays."""
+    if not synopsis.supported(body.language):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unsupported language")
+    if await catalog.get_anime(db, body.anime_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown anime")
+    row = await synopsis.stored(db, body.anime_id, body.language)
+    if row is not None and row.synopsis:
+        return
+    await synopsis.save(db, body.anime_id, body.language, body.synopsis.strip(), body.source)
