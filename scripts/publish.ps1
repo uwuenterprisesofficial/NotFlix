@@ -10,7 +10,7 @@
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Images = @("backend", "frontend"),
-    [string]$Registry = "registry.mfhost.de",
+    [string]$Registry = "registry.uwuenterprises.de",
     [string]$Tag = "publish",
     [string]$Platform = "linux/amd64"
 )

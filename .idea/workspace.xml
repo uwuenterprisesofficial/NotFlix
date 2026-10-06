@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="2d2bb6b9-56e9-476b-8884-23fdbbf5c29b" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/deploy/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/deploy/.env.example" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/publish.ps1" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/publish.ps1" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;uwuenterprisesofficial&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;git@github.com:uwuenterprisesofficial/NotFlix.git&quot;,
+    &quot;accountId&quot;: &quot;b5fb046b-9ce8-4464-9a21-ddfc0552db7f&quot;
+  }
+}</component>
+  <component name="McpProjectServerCommands">
+    <commands />
+    <urls />
+  </component>
+  <component name="NextEditCompletionFeaturesState">
+    <decayedCancelled>
+      <entry key="MS100" value="1.0" />
+      <entry key="MS500" value="1.0000000000016145" />
+      <entry key="S2" value="1.0012981520882358" />
+      <entry key="S5" value="1.2391671278184606" />
+      <entry key="S10" value="3.1524216987001696" />
+      <entry key="S30" value="11.499296192357695" />
+      <entry key="S60" value="16.831897184874165" />
+      <entry key="M2" value="20.705234601564477" />
+      <entry key="M5" value="26.91443013223458" />
+      <entry key="M10" value="34.773586989719824" />
+      <entry key="M15" value="40.26984818995857" />
+      <entry key="M30" value="50.23514145257635" />
+      <entry key="H1" value="59.004660005218234" />
+      <entry key="H2" value="66.65330043562285" />
+      <entry key="H4" value="93.60841874610635" />
+      <entry key="D1" value="447.0819720553788" />
+      <entry key="W1" value="757.5851755728304" />
+    </decayedCancelled>
+    <decayedSelected>
+      <entry key="MS100" value="0.0" />
+      <entry key="MS500" value="0.0" />
+      <entry key="S2" value="0.0" />
+      <entry key="S5" value="0.0" />
+      <entry key="S10" value="0.0" />
+      <entry key="S30" value="0.0" />
+      <entry key="S60" value="7.943483432240103E-279" />
+      <entry key="M2" value="8.912622191162442E-140" />
+      <entry key="M5" value="2.3988450642361507E-56" />
+      <entry key="M10" value="1.5488205397127678E-28" />
+      <entry key="M15" value="2.8840363703724266E-19" />
+      <entry key="M30" value="5.370322495318521E-10" />
+      <entry key="H1" value="2.317395671476809E-5" />
+      <entry key="H2" value="0.004814595138175564" />
+      <entry key="H4" value="0.07019589351633672" />
+      <entry key="D1" value="0.9465514119294979" />
+      <entry key="W1" value="1.7826299916458874" />
+    </decayedSelected>
+    <decayedShown>
+      <entry key="MS100" value="0.055168937268165914" />
+      <entry key="MS500" value="0.5601946070986825" />
+      <entry key="S2" value="0.8664306611087873" />
+      <entry key="S5" value="1.182518074073507" />
+      <entry key="S10" value="3.1222266212407086" />
+      <entry key="S30" value="11.48693667216951" />
+      <entry key="S60" value="16.824986184530175" />
+      <entry key="M2" value="20.701436170719866" />
+      <entry key="M5" value="26.91238643625392" />
+      <entry key="M10" value="34.77215715134328" />
+      <entry key="M15" value="40.26867746436183" />
+      <entry key="M30" value="50.2343276666894" />
+      <entry key="H1" value="59.00416508263299" />
+      <entry key="H2" value="66.6578113710392" />
+      <entry key="H4" value="93.67841815703088" />
+      <entry key="D1" value="448.0283798189687" />
+      <entry key="W1" value="759.3677678969374" />
+    </decayedShown>
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 1,
+  &quot;fromUser&quot;: false
+}</component>
+  <component name="ProjectId" id="3Jm7dTE7dauCljmD6IjP0OCAY0i" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
+    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;claude/youthful-sagan-1hcala&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;javascript.preferred.runtime.type.id&quot;: &quot;node&quot;,
+    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;E:/DEV/NotFlix&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.jshint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.jshint&quot;: &quot;&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;python.packages.toolwindow.project.migrated.to.right.top.v2&quot;: &quot;true&quot;,
+    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;
+  }
+}</component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="E:\DEV\NotFlix" />
+      <recent name="E:\DEV\NotFlix\aniscraper" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="E:\DEV\NotFlix" />
+      <recent name="E:\DEV\NotFlix\aniscraper" />
+    </key>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-js-predefined-d6986cc7102b-4abd2a77f808-JavaScript-WS-262.10315.144" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="2d2bb6b9-56e9-476b-8884-23fdbbf5c29b" name="Changes" comment="" />
+      <created>1790254477203</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1790254477203</updated>
+      <workItem from="1790254478240" duration="14228000" />
+      <workItem from="1790278926461" duration="23068000" />
+      <workItem from="1790350244595" duration="14407000" />
+      <workItem from="1791220277924" duration="13557000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+</project>
