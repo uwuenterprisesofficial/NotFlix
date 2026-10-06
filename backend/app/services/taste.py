@@ -14,8 +14,9 @@ MAL's score is held back (a strong ridge penalty on its weight): the user's own 
 should explain their scores, not the community's. Two things the regression can't see are added
 when predicting:
 
-- the franchise: the user's scores of the show's prequels, sequels, side stories and films (a
-  sequel of something they loved is likely loved too), and
+- the franchise: the user's scores of the show's prequels, sequels, side stories and films
+  (also two steps away, e.g. season 1 for season 3): the prediction is pulled most of the way
+  towards them, since a sequel of something they loved is likely loved too, and
 - the shows they scored highly whose MyAnimeList community recommendations include it.
 
 Predictions are labelled by where they fall among the (cross-validated) predictions for the
@@ -54,11 +55,12 @@ FOLDS = 5
 MAX_STUDIOS = 2
 MODEL_VERSION = 3  # bump to refit stored models after a change to the features
 
-# The franchise and community recommendations (see Context): points per point the user's
-# score of the related show is above (or below) their average, and at most this many points.
-FRANCHISE_WEIGHT = 0.6
+# The franchise pulls the prediction this share of the way towards the user's scores of it.
+FRANCHISE_SHARE = 0.65
+# Community recommendations of loved shows: points per point the loved show's score is above
+# the user's average, at most RECOMMENDED_CAP.
 RECOMMENDED_WEIGHT = 0.3
-CONTEXT_CAP = 2.0
+RECOMMENDED_CAP = 2.0
 # A show recommended by one the user scored at least this far above their average.
 LOVED_ABOVE_MEAN = 1.0
 # GUILTY WATCH: MAL's score below this (and below the user's usual by GUILTY_MAL_MARGIN), yet
@@ -178,19 +180,34 @@ Related = list[tuple[str, int]]
 class Context:
     """What the regression can't see, for one user (see predictor_for)."""
 
+    # The user's scored shows: anime id -> (title, score)
+    scored: dict[int, tuple[str, int]] = field(default_factory=dict)
+
     # anime id -> the user's scored shows of the same franchise (prequel, sequel, ...)
     franchise: dict[int, Related] = field(default_factory=dict)
     # anime id -> the shows the user scored highly whose community recommendations include it
     recommended: dict[int, Related] = field(default_factory=dict)
 
 
-def _related_term(related: Related, mean: float, weight: float) -> tuple[str, float]:
-    """The strongest-felt related show's title, and the points: weight per point of the
-    average related score above the user's mean, capped."""
-    average = sum(score for _, score in related) / len(related)
-    title = max(related, key=lambda r: abs(r[1] - mean))[0]
-    points = max(-CONTEXT_CAP, min(CONTEXT_CAP, weight * (average - mean)))
-    return title, points
+def _strongest(related: Related, mean: float) -> str:
+    """How the related show felt most strongly is named: "Season 1 (★10)"."""
+    title, score = max(related, key=lambda r: abs(r[1] - mean))
+    return f"{title} (★{score})"
+
+
+def _average(related: Related) -> float:
+    return sum(score for _, score in related) / len(related)
+
+
+def link_franchise(context: Context, anime_id: int, relations: list[dict[str, Any]]) -> None:
+    """A show's own relations (see related.py): the ones the user scored count for it."""
+    found = context.franchise.setdefault(anime_id, [])
+    for entry in relations:
+        other = context.scored.get(entry["row"]["id"])
+        if other is not None and other not in found:
+            found.append(other)
+    if not found:
+        del context.franchise[anime_id]
 
 
 class Predictor:
@@ -209,32 +226,39 @@ class Predictor:
         mal = (show.mean - d["mal_center"]) if show.mean is not None else 0.0
         terms.append(("mal", d["mal_coef"] * mal))
         pop = _popularity(show)
-        if pop is not None:
-            terms.append(("popularity", d["pop_coef"] * (pop - d["pop_center"])))
+        if pop is not None and pop > d["pop_center"]:
+            # Being very popular can help a show; being little known never counts against it.
+            terms.append(("popularity", max(0.0, d["pop_coef"] * (pop - d["pop_center"]))))
         for key in features(show):
             if key in self.weights:
                 terms.append((key, self.weights[key]))
         mean = d.get("user_mean", 7.0)
-        for kind, related, weight in (
-            ("franchise", self.context.franchise.get(show.id), FRANCHISE_WEIGHT),
-            ("recommended", self.context.recommended.get(show.id), RECOMMENDED_WEIGHT),
-        ):
-            if related:
-                title, points = _related_term(related, mean, weight)
-                self.names[f"{kind}:{show.id}"] = title
-                terms.append((f"{kind}:{show.id}", points))
+        if recommended := self.context.recommended.get(show.id):
+            points = RECOMMENDED_WEIGHT * (_average(recommended) - mean)
+            self.names[f"recommended:{show.id}"] = _strongest(recommended, mean)
+            terms.append(
+                (f"recommended:{show.id}", max(-RECOMMENDED_CAP, min(RECOMMENDED_CAP, points)))
+            )
+        if franchise := self.context.franchise.get(show.id):
+            # Towards the user's own scores of the franchise, from what the rest predicts.
+            base = d["intercept"] + sum(v for _, v in terms)
+            self.names[f"franchise:{show.id}"] = _strongest(franchise, mean)
+            terms.append((f"franchise:{show.id}", FRANCHISE_SHARE * (_average(franchise) - base)))
         return d["intercept"] + sum(v for _, v in terms), terms
 
     def name(self, key: str) -> str:
         return {"mal": "MAL score", "popularity": "Popularity"}.get(key) or self.names[key]
+
+    def guilty_limit(self) -> float:
+        """Below this MAL score a show can be a guilty pleasure."""
+        return min(GUILTY_MAL_MAX, self.data["mal_center"] - GUILTY_MAL_MARGIN)
 
     def guilty(self, show: Show, terms: list[tuple[str, float]]) -> bool:
         """The community rates it low, yet it's in the categories the user watches most and
         their taste (everything but MAL's score and popularity) likes it."""
         if show.mean is None or not self.top_tags:
             return False
-        limit = min(GUILTY_MAL_MAX, self.data["mal_center"] - GUILTY_MAL_MARGIN)
-        if show.mean >= limit:
+        if show.mean >= self.guilty_limit():
             return False
         matches = sum(1 for key in features(show) if key in self.top_tags)
         taste = sum(v for key, v in terms if key not in ("mal", "popularity"))
@@ -252,7 +276,10 @@ class Predictor:
     def predict(self, show: Show, reasons: int = 0) -> Prediction:
         raw, terms = self._terms(show)
         score = round(min(10.0, max(1.0, raw)), 2)
-        strongest = sorted(terms, key=lambda t: abs(t[1]), reverse=True)
+        # The franchise first whenever it counts (the user scored it themselves).
+        strongest = sorted(
+            terms, key=lambda t: (t[0].startswith("franchise:"), abs(t[1])), reverse=True
+        )
         return Prediction(
             score=score,
             tier=self.tier(score),
@@ -422,12 +449,27 @@ async def load_context(db: AsyncSession, user_id: int, mean: float) -> Context:
         .where(ListEntry.user_id == user_id, ListEntry.score > 0)
     )
     scored = {anime_id: (title_en or title, score) for anime_id, score, title, title_en in rows}
-    context = Context()
+    context = Context(scored=scored)
     relations = await related.cached(list(scored))
-    related.ensure(user_id, [i for i in scored if i not in relations])
+    # One step further too (season 1 counts for season 3): the relations of the related shows.
+    near = {e["row"]["id"]: e for found in relations.values() for e in found}
+    further = await related.cached([i for i in near if i not in scored])
+    related.ensure(
+        user_id,
+        [i for i in scored if i not in relations]
+        + [i for i in near if i not in scored and i not in further],
+    )
     for anime_id, found in relations.items():
         for entry in found:
-            context.franchise.setdefault(entry["row"]["id"], []).append(scored[anime_id])
+            link = entry["row"]["id"]
+            if scored[anime_id] not in context.franchise.setdefault(link, []):
+                context.franchise[link].append(scored[anime_id])
+            for second in further.get(link, []):
+                target = second["row"]["id"]
+                if target != anime_id and target not in scored:
+                    franchise = context.franchise.setdefault(target, [])
+                    if scored[anime_id] not in franchise:
+                        franchise.append(scored[anime_id])
     loved = [i for i, (_, score) in scored.items() if score >= mean + LOVED_ABOVE_MEAN]
     if loved:
         recs = await db.scalars(

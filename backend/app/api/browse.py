@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter
-from sqlalchemy import select
+from sqlalchemy import select, true
 
 from app.api import friends
 from app.api.calendar import cards as calendar_cards
@@ -9,7 +9,7 @@ from app.api.deps import DB, OptionalUser
 from app.models import Anime, ListEntry, ListStatus, Recommendation
 from app.schemas import AnimeDetail, BrowseResponse, ResumeOut, Row
 from app.services import airing, anilist_account, catalog, mal, positions, sync_jobs
-from app.services.taste import predictor_for
+from app.services.taste import Predictor, Show, predictor_for
 
 router = APIRouter(tags=["browse"])
 
@@ -38,6 +38,27 @@ async def _new_episodes(db, user, entries: dict[int, ListEntry]):
     mine = {i for i, e in entries.items() if e.status != "dropped"}
     ordered.sort(key=lambda e: e.anime_id not in mine)
     return await calendar_cards(db, user, ordered[:NEW_EPISODES_MAX])
+
+
+GUILTY_CANDIDATES = 600
+GUILTY_ROW = 20
+
+
+async def _guilty_pleasures(db: DB, predictor: Predictor | None, on_list: set[int]) -> list[Anime]:
+    """Catalogue shows the community rates low that the user's taste likes anyway (GUILTY
+    WATCH, see services/taste.py), the best predicted first. Not ones on their list."""
+    if predictor is None:
+        return []
+    candidates = await db.scalars(
+        select(Anime)
+        .where(Anime.mean.is_not(None), Anime.mean < predictor.guilty_limit())
+        .where(Anime.id.not_in(on_list) if on_list else true())
+        .order_by(Anime.num_list_users.desc().nulls_last())
+        .limit(GUILTY_CANDIDATES)
+    )
+    found = [(a, p.score) for a in candidates if (p := predictor.predict(Show.of(a))).guilty]
+    found.sort(key=lambda f: f[1], reverse=True)
+    return [a for a, _ in found[:GUILTY_ROW]]
 
 
 @router.get("/browse", response_model=BrowseResponse)
@@ -93,6 +114,11 @@ async def browse(user: OptionalUser, db: DB):
                 id="recommended",
                 title="Recommended for You",
                 items=[card(a, r.reason) for r, a in recs],
+            ),
+            Row(
+                id="guilty",
+                title="Guilty Pleasures",
+                items=[card(a) for a in await _guilty_pleasures(db, predictor, set(entries))],
             ),
             Row(
                 id="my-list",

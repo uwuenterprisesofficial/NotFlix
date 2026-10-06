@@ -6,6 +6,8 @@ import { useShowPredictedScore, useShowTierLabels } from "@/lib/preferences";
 import type { Prediction } from "@/lib/types";
 import { useT } from "./I18nProvider";
 
+const GUILTY_CLASS = "bg-fuchsia-700 text-white";
+
 /** The viewer's predicted verdict on a show, as set up in Settings. */
 export function PredictionBadge({
   prediction,
@@ -22,29 +24,20 @@ export function PredictionBadge({
   const [score] = useShowPredictedScore();
   if (!prediction || (labels === "off" && !force && score === "off")) return null;
   const showLabel = labels === "on" || force;
-  const badge = (
+  // A guilty pleasure is labelled as such instead of its tier.
+  const guilty = !!prediction.guilty;
+  const tierInfo = guilty ? t("prediction.guiltyInfo") : t(`tierInfo.${prediction.tier}`);
+  return (
     <span
-      title={`${t(`tierInfo.${prediction.tier}`)} · ${t("prediction.predicted", { score: formatNumber(lang, prediction.score, 1) })}`}
-      className={`inline-flex items-center gap-1 rounded font-bold tracking-wide uppercase shadow ${TIER_CLASS[prediction.tier]} ${size === "sm" ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-1 text-xs"}`}
+      title={`${tierInfo} · ${t("prediction.predicted", { score: formatNumber(lang, prediction.score, 1) })}`}
+      className={`inline-flex items-center gap-1 rounded font-bold tracking-wide uppercase shadow ${guilty ? GUILTY_CLASS : TIER_CLASS[prediction.tier]} ${size === "sm" ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-1 text-xs"}`}
     >
-      {showLabel && t(`tier.${prediction.tier}`)}
+      {showLabel && (guilty ? t("prediction.guilty") : t(`tier.${prediction.tier}`))}
       {score === "on" && (
         <span className={showLabel ? "border-l border-current/40 pl-1" : ""}>
           {formatNumber(lang, prediction.score, 1)}
         </span>
       )}
-    </span>
-  );
-  if (!prediction.guilty || !showLabel) return badge;
-  return (
-    <span className="inline-flex flex-wrap items-center gap-1">
-      {badge}
-      <span
-        title={t("prediction.guiltyInfo")}
-        className={`inline-flex items-center rounded bg-fuchsia-700 font-bold tracking-wide text-white uppercase shadow ${size === "sm" ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-1 text-xs"}`}
-      >
-        {t("prediction.guilty")}
-      </span>
     </span>
   );
 }

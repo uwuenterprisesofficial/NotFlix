@@ -1,11 +1,11 @@
 """Looking for the streams of the shows on the pages before anyone opens them.
 
 The pages hand over the shows they show (POST /prefetch: the home page's rows, the calendar,
-My List, search results), newest first. While nobody needs anything (no show opened, no episode
-played or resolved, no preview lingered on for activity.IDLE_AFTER_S, and no scan someone waits
-for), they're scanned one show at a time, as background scans: only by providers that never
-looked at the show, and holding before every request as soon as anything else goes on (see
-source_scan). A show that's opened meanwhile is scanned at full speed.
+My List, search results), newest first. Whenever a scan worker is free (see
+source_scan.SCAN_WORKERS: shows someone waits for come first), the next show is scanned with
+background scans: only by providers that never looked at the show, and holding before each
+request while the shows someone waits for need every worker. A show that's opened meanwhile is
+scanned at full speed.
 """
 
 import asyncio
@@ -21,11 +21,12 @@ log = logging.getLogger(__name__)
 MAX_QUEUED = 400
 # A show prefetched is left alone for this long (its scans' results last longer than that).
 DONE_TTL_S = 6 * 3600
-WAIT_POLL_S = 1.0
+WAIT_POLL_S = 0.5
 
 # anime id -> the episode to scan around; the next one to scan first.
 _queue: OrderedDict[int, int] = OrderedDict()
 _runner: asyncio.Task | None = None
+_active: set[asyncio.Task] = set()  # the background shows being scanned
 
 
 def enqueue(shows: list[tuple[int, int]]) -> int:
@@ -53,26 +54,31 @@ def _start() -> None:
         _runner = asyncio.create_task(_run())
 
 
-async def _wait_quiet() -> None:
-    while not source_scan.quiet():
-        await asyncio.sleep(WAIT_POLL_S)
+async def _scan(anime_id: int, episode: int) -> None:
+    from app.api.streams import scan_in_background  # (the API's scan logic)
+
+    try:
+        if not await redis().set(f"prefetch:done:{anime_id}", 1, ex=DONE_TTL_S, nx=True):
+            return
+        await scan_in_background(anime_id, episode)
+        await source_scan.wait_show(anime_id)
+    except Exception:
+        log.warning("Prefetching anime %s failed", anime_id, exc_info=True)
 
 
 async def _run() -> None:
-    from app.api.streams import scan_in_background  # (the API's scan logic)
-
-    while _queue:
-        await _wait_quiet()
-        if not _queue:
-            break
-        anime_id, episode = _queue.popitem(last=False)
-        if not await redis().set(f"prefetch:done:{anime_id}", 1, ex=DONE_TTL_S, nx=True):
+    """Start the next queued show whenever a worker is free."""
+    while _queue or _active:
+        if _queue and source_scan.free_workers(len(_active)) > 0:
+            anime_id, episode = _queue.popitem(last=False)
+            task = asyncio.create_task(_scan(anime_id, episode))
+            _active.add(task)
+            task.add_done_callback(_active.discard)
             continue
-        try:
-            await scan_in_background(anime_id, episode)
-            await source_scan.wait_show(anime_id)
-        except Exception:
-            log.warning("Prefetching anime %s failed", anime_id, exc_info=True)
+        if _active:
+            await asyncio.wait(_active, timeout=WAIT_POLL_S)
+        else:
+            await asyncio.sleep(WAIT_POLL_S)
 
 
 async def wait_idle() -> None:
@@ -85,6 +91,8 @@ def clear() -> None:
     """Forget the queue (tests)."""
     global _runner
     _queue.clear()
-    if _runner is not None:
-        _runner.cancel()
+    for task in [_runner, *_active]:
+        if task is not None:
+            task.cancel()
+    _active.clear()
     _runner = None

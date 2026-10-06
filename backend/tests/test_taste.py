@@ -1,4 +1,5 @@
 import random
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -342,26 +343,52 @@ def test_personal_taste_outweighs_mals_score():
 
 
 def test_franchise_and_community_recommendations_move_the_prediction():
-    from app.services.taste import FRANCHISE_WEIGHT, RECOMMENDED_WEIGHT, Context
+    from app.services.taste import FRANCHISE_SHARE, RECOMMENDED_WEIGHT, Context
 
     model = fit(_list())
     mean = model["user_mean"]
     rng = random.Random(9)
     sequel = _show(rng, 500, tags=[(1, "Action"), (4, "Comedy"), (27, "Shounen")])
     plain = Predictor(model).predict(sequel, reasons=10)
-    context = Context(
-        franchise={500: [("Season 1", 10)]},
-        recommended={500: [("A favourite", 10), ("Another", 9)]},
+    recommended = Predictor(
+        model, Context(recommended={500: [("A favourite", 10), ("Another", 9)]})
+    ).predict(sequel, reasons=10)
+    assert recommended.score == pytest.approx(
+        plain.score + RECOMMENDED_WEIGHT * (9.5 - mean), abs=0.02
     )
-    boosted = Predictor(model, context).predict(sequel, reasons=10)
-    expected = FRANCHISE_WEIGHT * (10 - mean) + RECOMMENDED_WEIGHT * (9.5 - mean)
-    assert boosted.score == pytest.approx(min(10, plain.score + expected), abs=0.02)
-    reasons = {key: name for key, name, _ in boosted.reasons}
-    assert reasons["franchise"] == "Season 1"
-    assert reasons["recommended"] == "A favourite"
-    # A franchise the user disliked pulls it down.
+    both = Predictor(
+        model,
+        Context(
+            franchise={500: [("Season 1", 10)]},
+            recommended={500: [("A favourite", 10), ("Another", 9)]},
+        ),
+    ).predict(sequel, reasons=1)
+    # Most of the way to the user's own score of season 1.
+    expected = recommended.score + FRANCHISE_SHARE * (10 - recommended.score)
+    assert both.score == pytest.approx(min(10, expected), abs=0.02)
+    # The franchise is always among the reasons, first, with the user's score.
+    assert both.reasons[0][:2] == ("franchise", "Season 1 (★10)")
+    reasons = {key: name for key, name, _ in recommended.reasons}
+    assert reasons["recommended"] == "A favourite (★10)"
+    # A franchise the user disliked pulls it down just as much.
     disliked = Predictor(model, Context(franchise={500: [("Season 1", 3)]})).predict(sequel)
-    assert disliked.score < plain.score
+    assert disliked.score < plain.score - 2
+
+
+def test_popularity_only_ever_helps():
+    model = fit(_list())
+    model["pop_coef"] = 0.5
+    rng = random.Random(11)
+    tags = [(1, "Action"), (4, "Comedy")]
+    middle = _show(rng, 510, tags=tags, mean=7.5, members=int(10 ** model["pop_center"]))
+    obscure = replace(middle, members=500)
+    famous = replace(middle, members=3_000_000)
+    predictor = Predictor(model)
+    assert predictor.score(obscure) == pytest.approx(predictor.score(middle), abs=0.02)
+    assert predictor.score(famous) > predictor.score(middle)
+    # A taste for little-known shows doesn't count against famous ones either.
+    model["pop_coef"] = -0.5
+    assert Predictor(model).score(famous) == pytest.approx(Predictor(model).score(middle), abs=0.02)
 
 
 def test_guilty_watch_low_mal_score_in_the_users_favourite_categories():
@@ -409,10 +436,115 @@ async def test_the_context_comes_from_relations_and_community_recommendations(da
         "related:701", json.dumps([{"relation": "SEQUEL", "row": {"id": 703, "title": "S2"}}])
     )
     await redis().set("related:702", json.dumps([]))
+    # Two steps away: season 3 (704) is season 2's sequel.
+    await redis().set(
+        "related:703", json.dumps([{"relation": "SEQUEL", "row": {"id": 704, "title": "S3"}},
+                                   {"relation": "PREQUEL", "row": {"id": 701, "title": "S1"}}])
+    )  # fmt: skip
     async with AsyncSessionLocal() as db:
         context = await load_context(db, user.id, mean=8.0)
-    assert context.franchise == {703: [("Loved S1", 10)]}
+    assert context.franchise == {703: [("Loved S1", 10)], 704: [("Loved S1", 10)]}
     # Only what fans of the loved show recommend.
     assert context.recommended == {800: [("Loved S1", 10)]}
     await async_engine.dispose()
     await close()
+
+
+async def test_a_shows_page_counts_the_prequel_the_user_scored(client, user, monkeypatch):
+    import json
+
+    from sqlalchemy import delete, update
+
+    from app.core.cache import redis
+    from app.db.session import sync_session
+    from app.models import Anime, ListEntry, TasteModel, User
+    from app.services import related
+
+    async def no_fetch(ids, http=None):
+        return None
+
+    monkeypatch.setattr(related, "fetch", no_fetch)
+    with sync_session() as db:
+        db.execute(delete(ListEntry))
+        db.execute(delete(TasteModel))
+        db.execute(delete(Anime).where(Anime.id.between(900, 999)))
+        action = [{"id": 1, "name": "Action"}]
+        for i in range(20):
+            tags = action if i % 2 else [{"id": 4, "name": "Comedy"}]
+            db.add(Anime(id=900 + i, title=f"S{i}", genres=[], genre_tags=tags, mean=7.5))
+            db.add(ListEntry(user_id=user.id, anime_id=900 + i, status="completed",
+                             score=6 + i % 3))  # fmt: skip
+        db.add(Anime(id=990, title="Season 1", genres=[], genre_tags=action, mean=7.5))
+        db.add(ListEntry(user_id=user.id, anime_id=990, status="completed", score=10))
+        db.add(Anime(id=991, title="Season 2", genres=[], genre_tags=action, mean=7.5,
+                     status="finished_airing"))  # fmt: skip
+        db.execute(update(User).where(User.id == user.id).values(last_synced_at=datetime.now(UTC)))
+        db.commit()
+    user.last_synced_at = datetime.now(UTC)
+    await redis().delete("related:990")  # season 1's relations aren't known...
+    await redis().set(  # ...but season 2's are: its prequel is what the user scored 10
+        "related:991", json.dumps([{"relation": "PREQUEL", "row": {"id": 990, "title": "S1"}}])
+    )
+    prediction = (await client.get("/anime/991")).json()["prediction"]
+    assert prediction["reasons"][0]["key"] == "franchise"
+    assert prediction["reasons"][0]["name"] == "Season 1 (★10)"
+    assert prediction["score"] > 9
+    await redis().delete("related:991")
+    _forget_shows()
+
+
+async def test_guilty_pleasures_on_the_home_page(client, user):
+    from sqlalchemy import delete, update
+
+    from app.db.session import sync_session
+    from app.models import Anime, ListEntry, Recommendation, TasteModel, User
+
+    action, drama, comedy = (
+        {"id": 1, "name": "Action"},
+        {"id": 8, "name": "Drama"},
+        {"id": 4, "name": "Comedy"},
+    )
+    with sync_session() as db:
+        db.execute(delete(Recommendation))
+        db.execute(delete(ListEntry))
+        db.execute(delete(TasteModel))
+        db.execute(delete(Anime).where(Anime.id.between(900, 999)))
+        for i in range(24):
+            loved = i % 2 == 0  # loves action dramas, not comedies
+            tags = [action, drama] if loved else [comedy, drama]
+            db.add(Anime(id=900 + i, title=f"S{i}", genres=[], genre_tags=tags,
+                         mean=7.6 + (i % 3) * 0.2, num_list_users=100_000))  # fmt: skip
+            db.add(ListEntry(user_id=user.id, anime_id=900 + i, status="completed",
+                             score=9 if loved else 6))  # fmt: skip
+        db.add_all([
+            # Low-rated action drama: a guilty pleasure.
+            Anime(id=990, title="Trashy Action", genres=[], genre_tags=[action, drama],
+                  mean=5.8, num_list_users=50_000),
+            # Low-rated comedy: just not good (for this user either).
+            Anime(id=991, title="Bad Comedy", genres=[], genre_tags=[comedy, drama],
+                  mean=5.8, num_list_users=50_000),
+            # Well-rated action drama: a plain recommendation, not guilty.
+            Anime(id=992, title="Great Action", genres=[], genre_tags=[action, drama],
+                  mean=8.6, num_list_users=50_000),
+        ])  # fmt: skip
+        db.execute(update(User).where(User.id == user.id).values(last_synced_at=datetime.now(UTC)))
+        db.commit()
+    user.last_synced_at = datetime.now(UTC)
+    rows = {r["id"]: r["items"] for r in (await client.get("/browse")).json()["rows"]}
+    assert [a["id"] for a in rows["guilty"]] == [990]
+    assert rows["guilty"][0]["prediction"]["guilty"] is True
+    _forget_shows()
+
+
+def _forget_shows() -> None:
+    """The shows these tests added (others pick from the catalogue)."""
+    from sqlalchemy import delete
+
+    from app.db.session import sync_session
+    from app.models import Anime, ListEntry, TasteModel
+
+    with sync_session() as db:
+        db.execute(delete(ListEntry))
+        db.execute(delete(TasteModel))
+        db.execute(delete(Anime).where(Anime.id.between(900, 999)))
+        db.commit()

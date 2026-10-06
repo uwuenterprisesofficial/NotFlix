@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import { displayTitle, nextEpisode, relativeTime, seasonText } from "@/lib/format";
 import { formatNumber, genreName, mediaTypeName } from "@/lib/i18n";
 import { allowedImage } from "@/lib/images";
+import { otherPreviewPlaying } from "@/lib/previewFocus";
 import type { AnimeCard, Preview, Progress } from "@/lib/types";
 import { useNow } from "@/lib/useNow";
 import { useStoredValue } from "./player/useStoredValue";
@@ -19,7 +20,7 @@ import { PredictionBadge } from "./PredictionBadge";
 // episode 1's sources when nobody has yet (the card was lingered on).
 const previews = new Map<string, Promise<Preview | null>>();
 // Lingering this long on an open card without a preview looks for one right away.
-const LINGER_SCAN_MS = 1200;
+const LINGER_SCAN_MS = 200;
 
 function loadPreview(animeId: number, lang: string, scan = false): Promise<Preview | null> {
   const key = `${animeId}:${lang}:${scan}`;
@@ -77,6 +78,13 @@ export function HoverPreview({
     const frame = requestAnimationFrame(() => setShown(true));
     return () => cancelAnimationFrame(frame);
   }, []);
+
+  // While this card's preview plays, the featured show's pauses.
+  useEffect(() => {
+    if (!playing) return;
+    otherPreviewPlaying(true);
+    return () => otherPreviewPlaying(false);
+  }, [playing]);
 
   const upcoming = anime.status === "not_yet_aired";
   useEffect(() => {

@@ -45,8 +45,8 @@ from app.schemas import (
     StreamOut,
     SubtitleOut,
 )
-from app.services import activity, catalog, library, prefetch, source_scan
 from app.services import airing as airing_info
+from app.services import catalog, library, prefetch, source_scan
 from app.services.mappings import delete_mapping, save_mapping
 from app.services.proxy import TOKEN_MAX_AGE_S, proxy_url
 
@@ -130,11 +130,8 @@ async def _start_scan(
     force: bool = False,
     background: bool = False,
 ) -> AnimeInfo:
-    """Kick off scans for the episodes near where the user is. Someone waiting for them
-    counts as activity (background prefetching holds meanwhile); `background` scans are the
-    prefetching itself."""
-    if not background:
-        activity.touch()
+    """Kick off scans for the episodes near where the user is; `background` scans are the
+    prefetching (see services/prefetch.py)."""
     anime = await catalog.get_anime(db, anime_id)
     info = AnimeInfo.from_model(anime) if anime else AnimeInfo(id=anime_id, title="")
     if around is None:
@@ -342,7 +339,6 @@ async def refresh_availability(
 async def resolve_source(anime_id: int, episode: int, option: str, db: DB, fresh: bool = False):
     """The option's playable streams: stored ones while they're valid (unless `fresh`, e.g.
     because they stopped working), otherwise asked from the provider and stored."""
-    activity.touch()
     if await _not_aired(db, anime_id, episode):
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Episode {episode} hasn't aired yet")
     if not fresh:
@@ -432,7 +428,6 @@ async def _cached_options(anime_id: int, episode: int) -> list[SourceOption]:
 async def _scan_for_preview(anime: Anime, episode: int) -> None:
     """Someone lingers on the card of a show nobody looked at: its episode's sources now
     (ahead of background prefetching), waiting a moment for them."""
-    activity.touch()
     airing = anime.num_episodes is None or anime.status == "currently_airing"
     await source_scan.ensure_scan(AnimeInfo.from_model(anime), [episode], airing)
     running = [

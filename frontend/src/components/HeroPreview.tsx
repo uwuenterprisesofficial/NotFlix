@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { OTHER_PREVIEW_EVENT, otherPreviewsPlaying } from "@/lib/previewFocus";
 import { useAudioPreference, useHeroPreview, usePreviewStart } from "@/lib/preferences";
 import { languageOrder } from "@/lib/streamLanguage";
 import type { Episode, SourceOption, Stream } from "@/lib/types";
@@ -132,15 +133,17 @@ function Clip({
 }) {
   useStream(videoRef, clip.stream.url, clip.stream.format === "hls", fail);
 
-  // Only while it can be seen: paused when scrolled away or in a background tab.
+  // Only while it can be seen and nothing else previews: paused when scrolled away, in a
+  // background tab, or while a hover card's preview plays.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     let inView = true;
     const update = () => {
       if (!playing) return;
-      if (inView && document.visibilityState === "visible") void video.play().catch(() => {});
-      else video.pause();
+      if (inView && document.visibilityState === "visible" && !otherPreviewsPlaying()) {
+        void video.play().catch(() => {});
+      } else video.pause();
     };
     const observer = new IntersectionObserver(([entry]) => {
       inView = entry.isIntersecting;
@@ -148,9 +151,11 @@ function Clip({
     });
     observer.observe(video);
     document.addEventListener("visibilitychange", update);
+    window.addEventListener(OTHER_PREVIEW_EVENT, update);
     return () => {
       observer.disconnect();
       document.removeEventListener("visibilitychange", update);
+      window.removeEventListener(OTHER_PREVIEW_EVENT, update);
     };
   }, [videoRef, playing]);
 

@@ -3,6 +3,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 
@@ -36,8 +37,8 @@ from app.schemas import (
     SkipSegmentOut,
     SynopsisOut,
 )
-from app.services import airing, aniskip, catalog, list_status, positions, synopsis
-from app.services.taste import predictor_for
+from app.services import airing, aniskip, catalog, list_status, positions, related, synopsis
+from app.services.taste import Predictor, link_franchise, predictor_for
 from app.worker.queue import analysis_queue, stop_job, timeout_message, timeout_seconds
 
 log = logging.getLogger(__name__)
@@ -47,6 +48,23 @@ TIMEOUT_GRACE = timedelta(minutes=1)
 ANISKIP_CONFIDENCE = 0.5  # crowd-sourced, for another release of the episode
 # An episode analysed without finding its opening is tried again at most this often.
 RETRY_ANALYSIS_S = 24 * 3600
+
+
+# How long a show's page waits for its relations (AniList) when they aren't cached.
+RELATIONS_WAIT_S = 4
+
+
+async def _own_franchise(predictor: Predictor, anime_id: int) -> None:
+    """The show's own relations (a moment's wait when they aren't cached): its prequels and
+    sequels the user scored count for its prediction, even when their relations aren't known."""
+    relations = (await related.cached([anime_id])).get(anime_id)
+    if relations is None:
+        try:
+            await asyncio.wait_for(related.fetch([anime_id]), RELATIONS_WAIT_S)
+        except (TimeoutError, httpx.HTTPError, ValueError) as e:
+            log.info("Relations of anime %s: %s", anime_id, e)
+        relations = (await related.cached([anime_id])).get(anime_id)
+    link_franchise(predictor.context, anime_id, relations or [])
 
 
 @router.get("/anime/{anime_id}", response_model=AnimeDetail)
@@ -61,7 +79,10 @@ async def anime_detail(anime_id: int, user: OptionalUser, db: DB, lang: str = "e
         entry = await db.scalar(
             select(ListEntry).where(ListEntry.user_id == user.id, ListEntry.anime_id == anime_id)
         )
-    detail = catalog.to_detail(anime, entry, predictor=await predictor_for(db, user))
+    predictor = await predictor_for(db, user)
+    if predictor is not None and catalog.predicts(entry):
+        await _own_franchise(predictor, anime_id)
+    detail = catalog.to_detail(anime, entry, predictor=predictor)
     if user is not None and (position := await positions.get(db, user.id, anime_id)):
         detail.resume = ResumeOut.model_validate(position)
     detail.aired_episodes = await airing.aired_episodes(db, anime)

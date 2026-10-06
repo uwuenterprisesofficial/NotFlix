@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -12,6 +13,8 @@ from app.models import Anime, CommunityRecommendation, ListEntry, Recommendation
 from app.services import anilist_account, catalog_jobs, list_writer, mal, taste
 from app.services.recommender import Candidate, ListItem, rank, seed_shows
 from app.services.sync_tokens import mal_token
+
+log = logging.getLogger(__name__)
 
 MAX_CANDIDATE_LOOKUPS = 40
 MAL_CONCURRENCY = 4
@@ -150,6 +153,7 @@ async def sync_user(db: AsyncSession, user: User) -> dict[str, int]:
     await db.flush()
     user.last_synced_at = datetime.now(UTC)
     predictor = await taste.refit(db, user)
+    await _cache_relations([i.anime_id for i in items if i.score > 0])
     candidates: list[Candidate] = []
     client = _anime_client(token)
     if client is not None:
@@ -174,6 +178,24 @@ async def sync_user(db: AsyncSession, user: User) -> dict[str, int]:
         "adding_to_anilist": len(to_anilist),
         "skipped": skipped,
     }
+
+
+# How long a sync waits for the relations of the user's scored shows (their franchises count
+# for the predictions; see taste.load_context).
+RELATIONS_WAIT_S = 30
+
+
+async def _cache_relations(scored: list[int]) -> None:
+    """Fetch the relations (AniList) of the scored shows that aren't cached."""
+    from app.services import related
+
+    missing = [i for i in scored if i not in await related.cached(scored)]
+    if not missing:
+        return
+    try:
+        await asyncio.wait_for(related.fetch(missing), RELATIONS_WAIT_S)
+    except Exception as e:  # predictions fetch them in the background too
+        log.info("Relations of %d scored shows: %s", len(missing), e)
 
 
 async def _store_community_recommendations(

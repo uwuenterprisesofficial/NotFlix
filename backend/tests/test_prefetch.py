@@ -8,7 +8,7 @@ from app.db.session import sync_session
 from app.models import Anime, SourceScan
 from app.providers import base as providers_base
 from app.providers.base import Resolved, SourceOption, Stream
-from app.services import activity, prefetch, source_scan
+from app.services import prefetch, source_scan
 
 pytestmark = pytest.mark.anyio
 
@@ -23,10 +23,11 @@ class SlowProvider:
 
     def __init__(self):
         self.calls: list[tuple[int, int]] = []
+        self.delays: dict[int, float] = {}  # per show
 
     async def options(self, anime, episode):
         self.calls.append((anime.id, episode))
-        await asyncio.sleep(self.delay)
+        await asyncio.sleep(self.delays.get(anime.id, self.delay))
         return [
             SourceOption(id=f"slow:{episode}", provider=self.name, label="S", language="de-sub")
         ]
@@ -46,9 +47,8 @@ def slow(database, monkeypatch):
     monkeypatch.setattr(providers_base, "_down_until", {})
     monkeypatch.setattr(source_scan, "BACKGROUND_POLL_S", 0.02)
     monkeypatch.setattr(prefetch, "WAIT_POLL_S", 0.02)
-    # Quiet means 0.3 s without activity here.
-    monkeypatch.setattr(activity, "IDLE_AFTER_S", 0.3)
-    activity.reset()
+    # One worker: anything someone waits for takes it.
+    monkeypatch.setattr(source_scan, "SCAN_WORKERS", 1)
     prefetch.clear()
     with sync_session() as db:
         db.execute(delete(Anime).where(Anime.id.in_(SHOWS)))
@@ -75,7 +75,7 @@ async def _until(condition, timeout=5.0):
         await asyncio.sleep(0.02)
 
 
-async def test_shows_on_the_pages_are_scanned_while_idle(client, slow):
+async def test_shows_on_the_pages_are_scanned_by_free_workers(client, slow):
     resp = await client.post(
         "/prefetch", json={"shows": [{"id": 41, "episode": 1}, {"id": 42, "episode": 3}]}
     )
@@ -101,35 +101,43 @@ async def test_shows_on_the_pages_are_scanned_while_idle(client, slow):
     assert slow.calls == []
 
 
-async def test_background_scans_hold_while_something_else_goes_on(client, slow):
-    activity.touch()  # someone is busy: nothing happens
+async def test_background_scans_hold_while_someone_waits_for_every_worker(client, slow):
+    slow.delay = 0.1
+    slow.delays[42] = 0.6  # the show someone opens takes a while
     await client.post("/prefetch", json={"shows": [{"id": 41}]})
-    await asyncio.sleep(0.15)
-    assert slow.calls == []
-
-    # Quiet: the background scan starts...
+    # A free worker: it starts right away.
     await _until(lambda: len(slow.calls) >= 1)
-    # ...and holds as soon as something else happens (a stream is resolved).
-    await client.get("/anime/42/episodes/1/resolve", params={"option": "slow:1"})
-    await asyncio.sleep(0.1)
-    held = len(slow.episodes_of(41))
+    # Someone opens another show: its scan takes the (only) worker, the background one holds.
+    await client.get("/anime/42/availability")
     await asyncio.sleep(0.15)
+    held = len(slow.episodes_of(41))
+    await asyncio.sleep(0.2)
     assert len(slow.episodes_of(41)) == held < 6
-    # Once it's quiet again, it carries on.
+    assert len(slow.episodes_of(42)) > 1
+    # Once that's done, it carries on.
     await _until(lambda: len(slow.episodes_of(41)) == 6)
     await source_scan.wait_idle()
+
+
+async def test_free_workers_take_several_shows_at_once(client, slow, monkeypatch):
+    monkeypatch.setattr(source_scan, "SCAN_WORKERS", 2)
+    slow.delay = 0.1
+    await client.post("/prefetch", json={"shows": [{"id": 41}, {"id": 42}, {"id": 43}]})
+    await _until(lambda: slow.episodes_of(41) and slow.episodes_of(42))
+    assert not slow.episodes_of(43)  # two workers: the third show waits its turn
+    await prefetch.wait_idle()
+    await source_scan.wait_idle()
+    assert len(slow.episodes_of(43)) == 6
 
 
 async def test_opening_a_show_promotes_its_background_scan(client, slow):
     slow.delay = 0.1
     await client.post("/prefetch", json={"shows": [{"id": 41}]})
     await _until(lambda: len(slow.calls) >= 1)
-    # Opening the show is activity, but its own scan now runs at full speed.
+    # Opening the show: its own scan now runs at full speed, whatever else needs workers.
     body = (await client.get("/anime/41/availability")).json()
     assert body["scanning"] is True
-    for _ in range(10):  # the user keeps busy
-        activity.touch()
-        await asyncio.sleep(0.05)
+    await client.get("/anime/42/availability")  # and something else needs the worker
     await _until(lambda: len(slow.episodes_of(41)) == 6, timeout=2)
     await source_scan.wait_idle()
     scans = await source_scan.provider_scans(41)
@@ -141,7 +149,6 @@ async def test_lingering_on_a_card_scans_for_its_preview(client, slow):
     assert (await client.get("/anime/43/preview")).status_code == 404
     assert slow.calls == []
     # Lingering does: episode 1 only, right away, and the preview plays.
-    activity.touch()
     resp = await client.get("/anime/43/preview", params={"scan": "true"})
     assert resp.status_code == 200
     assert resp.json()["url"] == "https://cdn.example/43/1.mp4"

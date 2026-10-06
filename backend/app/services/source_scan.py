@@ -5,8 +5,9 @@ process for each provider whose cached data is missing, stale or doesn't cover t
 user is near. Reads always come from the cache first; scans only refresh it.
 
 Scans someone waits for (a show opened, a preview lingered on) run right away. Background scans
-(prefetch.py: shows on the pages, while nobody needs anything) wait before each request while
-anything else goes on, and become ordinary scans when the show is opened meanwhile.
+(prefetch.py: the shows on the pages) use the scan workers nobody else needs: SCAN_WORKERS shows
+are scanned at a time, and while shows someone waits for take them all, background scans hold
+before their next request. A background scan becomes an ordinary one when its show is opened.
 
 Results are stored as they come in (a few episodes at a time, the ones nearest to the user
 first), not when a provider is done, so a long show's first episodes are there in seconds.
@@ -38,7 +39,6 @@ from app.providers.base import (
     resolved_from_json,
     resolved_to_json,
 )
-from app.services import activity
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +50,8 @@ SCAN_TIMEOUT_S = 300
 # A background scan may be held for long (it waits while anything else goes on).
 BACKGROUND_SCAN_TIMEOUT_S = 3600
 BACKGROUND_POLL_S = 0.5
+# Shows scanned at a time: background scans only take the workers nobody waits for.
+SCAN_WORKERS = 2
 # Resolved streams: hosters' direct links carry expiring tokens, embed pages stay put.
 RESOLVED_DIRECT_TTL = timedelta(hours=3)
 RESOLVED_EMBED_TTL = timedelta(days=7)
@@ -235,19 +237,20 @@ class _Writer:
             self.last = time.monotonic()
 
 
-def foreground_busy() -> bool:
-    """A scan someone waits for is running."""
-    return any(not s.background for s in _running.values())
+def foreground_shows() -> set[int]:
+    """The shows whose scans someone waits for."""
+    return {key[0] for key, s in _running.items() if not s.background}
 
 
-def quiet() -> bool:
-    """Nothing goes on that background work would get in the way of."""
-    return activity.idle() and not foreground_busy()
+def free_workers(background_shows: int = 0) -> int:
+    """Scan workers neither someone waiting nor `background_shows` background shows take."""
+    return SCAN_WORKERS - len(foreground_shows()) - background_shows
 
 
 async def _hold(scan: _Scan) -> None:
-    """A background scan's gate: wait while it's in the way (or until it's promoted)."""
-    while scan.background and not quiet():
+    """A background scan's gate: wait while the shows someone waits for take every worker
+    (or until it's promoted)."""
+    while scan.background and len(foreground_shows()) >= SCAN_WORKERS:
         await asyncio.sleep(BACKGROUND_POLL_S)
 
 

@@ -63,5 +63,6 @@ export const friends = {
       v.count === 1 ? "1 neue Empfehlung" : `${v.count} neue Empfehlungen`,
   },
   "reason.fromFriend": { en: "{name} recommends it", de: "{name} empfiehlt es" },
+  "row.guilty": { en: "Guilty Pleasures", de: "Guilty Pleasures" },
   "row.from-friends": { en: "From Your Friends", de: "Von deinen Freunden" },
 } satisfies Messages;

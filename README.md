@@ -286,8 +286,10 @@ VALUES (21, 1, 'my-site', 'embed', 'https://example.com/embed/one-piece-1', 'de-
 Streams are looked for in three priorities. What you want now always comes first:
 
 1. **Opening a show** (its page, the player): its scans run right away. A background scan of that show already running carries on at full speed.
-2. **Lingering on a card** (about 1.2 s after the enlarged card opens, when nothing is known about the show yet): its episode 1 is looked for right away, and the card's preview plays as soon as a stream is found (`/preview?scan=true`).
-3. **In the background:** the home page, My List, the calendar and search results hand their shows to the backend (`POST /api/prefetch`, newest page first). It looks for their streams one show at a time, around your next episode, but only for shows a provider has never looked at. It does this only while you're idle: nothing opened, played, resolved or lingered on for 20 seconds. As soon as you do something, a running background scan holds before its next request, and it carries on when you're idle again. A show is prefetched at most once every 6 hours.
+2. **Lingering on a card** (0.2 s after the enlarged card opens, when nothing is known about the show yet): its episode 1 is looked for right away, and the card's preview plays as soon as a stream is found (`/preview?scan=true`).
+3. **In the background:** the home page, My List, the calendar and search results hand their shows to the backend (`POST /api/prefetch`, newest page first). It looks for their streams around your next episode, but only for shows a provider has never looked at. Two shows are scanned at a time (`SCAN_WORKERS`). Whenever a worker isn't busy with a show you're waiting for, it takes the next queued show. While the shows you're waiting for need every worker, background scans hold before their next request. A show is prefetched at most once every 6 hours.
+
+While a card's preview plays, the featured show's preview at the top of the home page pauses, and it carries on when the card closes.
 
 In hybrid mode this all happens on your PC, and what it finds goes to the shared library. A server that doesn't scrape ignores prefetching.
 
@@ -442,12 +444,12 @@ So they adapt to how generously you score. The statistics page shows the thresho
 
 **What goes into a prediction.** The regression learns your taste from your scores: genres, themes, demographics, studios, source, type and era. MyAnimeList's score is held back, so your own preferences carry more weight. Two more things are added on top:
 
-- **The franchise:** your scores of a show's prequels, sequels, side stories and films (AniList relations), at 0.6 points per point above or below your average. A sequel of something you loved moves up.
+- **The franchise:** your scores of a show's prequels, sequels, side stories and films (AniList relations), including two steps away (season 1 counts for season 3). The prediction moves 65% of the way from what the rest predicts towards your score, and the first reason on the show's page names it: "You rated Season 1 (★10)". Relations are fetched when you sync, and a show's page looks up its own when they aren't cached.
 - **Fans' recommendations:** the shows you scored at least a point above your average whose MyAnimeList community recommendations include it, at 0.3 points per point. These recommendations are stored when you sync.
 
-Both are capped at 2 points and show up among the reasons on the show's page ("Same franchise as …", "Recommended by fans of …").
+Fans' recommendations are capped at 2 points and show up among the reasons ("Recommended by fans of …"). Popularity can only help: a very popular show can get a boost, and a little-known one isn't marked down for it.
 
-**Guilty Watch.** A show the community rates low gets this extra label when it's in at least two of the six categories you watch most and your taste likes it anyway. "Low" means a MAL score under 7, and half a point under what you usually watch.
+**Guilty Pleasure.** A show the community rates low gets this label, instead of its usual one, when it's in at least two of the six categories you watch most and your taste likes it anyway. "Low" means a MAL score under 7, and half a point under what you usually watch. The home page has a **Guilty Pleasures** row: catalogue shows like that which aren't on your list, best predicted first.
 
 ## Development
 
