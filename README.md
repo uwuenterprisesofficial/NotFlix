@@ -74,17 +74,59 @@ The API answers only requests that carry its key (`API_KEY`, at least 16 charact
 - **Web app:** it adds `WEB_API_KEY` (in `docker compose`; `API_KEY` in its environment otherwise). Set it to the API key to use NotFlix in a browser; anyone who can open the web app then uses the API through it, so only expose it where that's fine. Left empty, the web app adds no key and only passes on requests that bring the right one themselves: the desktop app can then connect through the web app's `/api`, and browsers get nothing.
 - **Sign-in redirects** from MyAnimeList and AniList (`/auth/callback`, `/auth/anilist/callback`) are the only requests without the key: the provider sends the browser there. They only finish a sign-in that was started with the key (matched by its one-time `state`).
 
-### Publishing the backend image
+### Deploying on a server
 
-To build the backend's Docker image and push it to `registry.mfhost.de/notflix-backend:publish`, log in once and run the script:
+The `docker-compose.yml` in the repository's root is for development: it builds from the source and mounts it into the containers. On a server, use the images from the registry and [`deploy/docker-compose.yml`](deploy/docker-compose.yml) instead. That compose file runs everything NotFlix needs: the API with its two workers, the web app, AniScraper, PostgreSQL and Redis. Nothing is mounted over the images' code.
+
+**1. Build and push the images** (on your PC, from the repository):
 
 ```sh
 docker login registry.mfhost.de
-scripts/publish-backend.sh             # Linux, macOS, Git Bash
-.\scripts\publish-backend.ps1          # Windows PowerShell
+scripts/publish.sh                     # Linux, macOS, Git Bash
+.\scripts\publish.ps1                  # Windows PowerShell
 ```
 
-It builds for `linux/amd64` by default, also on an ARM Mac. To change the name, tag or platform, use `IMAGE=… TAG=… PLATFORM=… scripts/publish-backend.sh`, or `-Image`, `-Tag` and `-Platform` in PowerShell. When the container starts, it runs the database migrations (`alembic upgrade head`) and then the API on port 8000. It needs the same environment as in `docker-compose.yml`: `DATABASE_URL`, `REDIS_URL`, `API_KEY`, `SECRET_KEY`, and the sign-in and provider settings from `.env.example`.
+This pushes `registry.mfhost.de/notflix-backend`, `notflix-frontend` and `notflix-aniscraper`, all tagged `publish`, built for `linux/amd64`. To push only some of them, name them: `scripts/publish.sh backend`. `scripts/publish-backend.sh` is the same as `scripts/publish.sh backend`. To change the registry, tag or platform, use `REGISTRY=…`, `TAG=…` and `PLATFORM=…`, or `-Registry`, `-Tag` and `-Platform` in PowerShell.
+
+**2. Set it up on the server.** Copy the two files from `deploy/` into a folder there (the rest of the repository isn't needed):
+
+```sh
+mkdir notflix && cd notflix
+# copy deploy/docker-compose.yml and deploy/.env.example here, then:
+cp .env.example .env
+nano .env                              # fill it in, see below
+docker login registry.mfhost.de
+docker compose pull
+docker compose up -d
+```
+
+In `.env`:
+
+- `API_KEY`, `SECRET_KEY`, `POSTGRES_PASSWORD`: long random values, e.g. from `openssl rand -base64 32`.
+- `FRONTEND_URL`: the address the web app is reached at from outside, e.g. `https://notflix.example.com`. Sign-ins come back there.
+- The sign-in apps (`MAL_*`, `ANILIST_*`). Register the redirect URLs `<FRONTEND_URL>/api/auth/callback` (MyAnimeList) and `<FRONTEND_URL>/api/auth/anilist/callback` (AniList), and enter the same in `MAL_REDIRECT_URI` and `ANILIST_REDIRECT_URI`.
+- `WEB_API_KEY`: set it to `API_KEY` to use NotFlix in a browser. Leave it empty if only the desktop app should get in: the app sends the key itself.
+- Any other backend setting from the repository's [`.env.example`](.env.example) can go in too. The compose file passes the whole `.env` to the backend.
+
+On start, the backend migrates the database (`alembic upgrade head`), then serves the API. The workers wait until it's healthy. `docker compose ps` should show every service up and the backend `healthy`. `docker compose logs -f backend` shows what it does.
+
+**3. HTTPS in front.** The web app listens on port 3000 (`WEB_PORT`), and it is the only way in: it passes `/api/*` on to the backend, which isn't published. Put a reverse proxy with HTTPS in front of it, because the API key travels in a header. With [Caddy](https://caddyserver.com), the whole configuration is:
+
+```
+notflix.example.com {
+    reverse_proxy localhost:3000
+}
+```
+
+With nginx, turn off buffering (`proxy_buffering off;`), or Watch Together's live updates (server-sent events) stall.
+
+**4. Connect the desktop app.** Choose **Another server**, enter `https://notflix.example.com/api` and the `API_KEY`. Tick **Find and play streams on this PC** for [hybrid mode](#both-streams-on-this-pc-hybrid).
+
+**Updating.** Publish again from your PC, then on the server run `docker compose pull && docker compose up -d`. New migrations run by themselves when the backend starts.
+
+**Backups.** The database is in the `pgdata` volume. To dump it, run `docker compose exec db pg_dump -U notflix notflix > notflix.sql`.
+
+**`FAILED: No 'script_location' key found in configuration`** (or, with new images, "/app has no alembic.ini") means a folder is mounted over the backend's code. That happens with the development compose file (`./backend:/app`) on a server without the source. Use `deploy/docker-compose.yml` instead.
 
 ## Desktop app
 
