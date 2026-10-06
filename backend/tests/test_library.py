@@ -11,8 +11,15 @@ from app.models import Anime, ListEntry
 pytestmark = pytest.mark.anyio
 
 
-def _row(mal_id: int, title: str, media_type: str = "tv") -> dict:
-    return {"id": mal_id, "title": title, "media_type": media_type, "genres": []}
+def _row(
+    mal_id: int,
+    title: str,
+    media_type: str = "tv",
+    status: str = "finished_airing",
+    mean: float | None = None,
+) -> dict:
+    return {"id": mal_id, "title": title, "media_type": media_type, "genres": [],
+            "status": status, "mean": mean}  # fmt: skip
 
 
 @pytest.fixture
@@ -24,8 +31,9 @@ def listed(user):
         db.add_all([
             Anime(id=1, title="Airing show", genres=[], status="currently_airing"),
             Anime(id=2, title="Finished show", genres=[], status="finished_airing"),
-            Anime(id=3, title="Planned show", genres=[], status="finished_airing"),
-            Anime(id=4, title="Planned and airing", genres=[], status="currently_airing"),
+            Anime(id=3, title="Planned show", genres=[], status="finished_airing", mean=6.5),
+            Anime(id=4, title="Planned and airing", genres=[], status="currently_airing",
+                  mean=8.1),
         ])  # fmt: skip
         statuses = ((1, "watching"), (2, "completed"), (3, "plan_to_watch"), (4, "plan_to_watch"))
         for ago, (anime_id, status) in enumerate(statuses, start=1):
@@ -49,8 +57,9 @@ async def test_my_list_sections(client, listed, monkeypatch):
     # "Finished show" has a film and a sequel; its prequel is the planned show (not offered:
     # it's in Plan to watch) and the airing one is being watched.
     await redis().set("related:2", json.dumps([
-        {"relation": "SIDE_STORY", "row": _row(50, "The Film", "movie")},
-        {"relation": "SEQUEL", "row": _row(51, "Season 2")},
+        {"relation": "SIDE_STORY", "row": _row(50, "The Film", "movie", mean=7.0)},
+        {"relation": "SEQUEL", "row": _row(51, "Season 2", mean=8.5)},
+        {"relation": "SEQUEL", "row": _row(52, "Season 3", status="not_yet_aired")},
         {"relation": "PREQUEL", "row": _row(3, "Planned show")},
         {"relation": "SEQUEL", "row": _row(1, "Airing show")},
     ]))  # fmt: skip
@@ -58,10 +67,15 @@ async def test_my_list_sections(client, listed, monkeypatch):
 
     body = (await client.get("/me/library")).json()
     sections = {s["id"]: [a["id"] for a in s["items"]] for s in body["sections"]}
-    assert sections == {"continue": [1], "season": [1, 4], "planned": [3, 4], "related": [50, 51]}
+    # Each section by how much the user should like it (here MAL's score: no predictions), and
+    # what's related split into what has aired and what's still to come.
+    assert sections == {
+        "continue": [1], "season": [4, 1], "planned": [4, 3], "related": [51, 50],
+        "related_upcoming": [52],
+    }  # fmt: skip
     related_cards = next(s for s in body["sections"] if s["id"] == "related")["items"]
-    assert related_cards[0]["reason"] == "related:SIDE_STORY:Finished show"
-    assert related_cards[0]["media_type"] == "movie"
+    assert related_cards[1]["reason"] == "related:SIDE_STORY:Finished show"
+    assert related_cards[1]["media_type"] == "movie"
     # The airing show's relations weren't cached: fetched in the background.
     assert body["related_pending"] is True or fetched == [[1]]
     await related.wait_idle()

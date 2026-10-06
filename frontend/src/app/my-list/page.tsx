@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { AnimeCard } from "@/components/AnimeCard";
+import { LibrarySection } from "@/components/LibrarySection";
 import { FriendRecommendationList } from "@/components/friends/FriendRecommendationList";
 import { Prefetch } from "@/components/Prefetch";
 import { RefreshWhilePending } from "@/components/RefreshWhilePending";
@@ -23,6 +23,7 @@ const SECTIONS: Record<string, { title: MessageKey; empty: MessageKey }> = {
   season: { title: "library.season", empty: "library.seasonEmpty" },
   planned: { title: "library.planned", empty: "library.plannedEmpty" },
   related: { title: "library.related", empty: "library.relatedEmpty" },
+  related_upcoming: { title: "library.relatedUpcoming", empty: "library.relatedUpcomingEmpty" },
 };
 
 /** The user's list as a page: what they're watching, what of it airs this season, what they
@@ -59,36 +60,16 @@ export default async function MyListPage() {
       {library.sections.map((section) => {
         const labels = SECTIONS[section.id];
         if (!labels) return null;
-        const pending = section.id === "related" && library.related_pending;
         return (
-          <section key={section.id} id={section.id} className="mt-10">
-            <h2 className="flex items-center gap-3 text-xl font-bold">
-              {t(labels.title)}
-              {section.items.length > 0 && (
-                <span className="text-sm font-normal text-muted">{section.items.length}</span>
-              )}
-              {pending && (
-                <span role="status" className="flex items-center gap-2 text-sm font-normal text-muted">
-                  <span
-                    aria-hidden
-                    className="size-4 animate-spin rounded-full border-2 border-white/25 border-t-white"
-                  />
-                  {t("library.relatedLoading")}
-                </span>
-              )}
-            </h2>
-            {section.items.length === 0 ? (
-              !pending && <p className="mt-3 text-sm text-muted">{t(labels.empty)}</p>
-            ) : (
-              <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-x-3 gap-y-6 md:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]">
-                {section.items.map((anime) => (
-                  <div key={anime.id}>
-                    <AnimeCard anime={anime} fluid />
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+          <LibrarySection
+            key={section.id}
+            id={section.id}
+            title={t(labels.title)}
+            empty={t(labels.empty)}
+            items={section.items}
+            pending={section.id.startsWith("related") && library.related_pending}
+            pendingLabel={t("library.relatedLoading")}
+          />
         );
       })}
       <p className="mt-12 text-sm text-muted">

@@ -205,6 +205,19 @@ export const common = {
     en: "Nothing missing: you've seen everything related to what you watched.",
     de: "Nichts offen: du kennst alles, was zu deinen Serien gehört.",
   },
+  "library.relatedUpcoming": {
+    en: "Coming up: new seasons and films of what you watched",
+    de: "Demnächst: neue Staffeln und Filme zu deinen Serien",
+  },
+  "library.relatedUpcomingEmpty": {
+    en: "Nothing announced for what you watched.",
+    de: "Zu deinen Serien ist nichts angekündigt.",
+  },
+  "library.showAll": {
+    en: (v: { count: number }) => `Show all ${v.count}`,
+    de: (v: { count: number }) => `Alle ${v.count} anzeigen`,
+  },
+  "library.showLess": { en: "Show less", de: "Weniger anzeigen" },
   "library.relatedLoading": {
     en: "Looking up related shows…",
     de: "Suche zugehörige Serien…",

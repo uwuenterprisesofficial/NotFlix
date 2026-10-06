@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
@@ -8,6 +10,7 @@ from app.api.search import _from_catalogue
 from app.models import Anime, ListEntry, ListStatus
 from app.schemas import (
     AccountOut,
+    AnimeCard,
     LibraryResponse,
     Me,
     ResumeOut,
@@ -68,6 +71,20 @@ RELATED_MAX = 60
 ON_LIST_SEEN = {ListStatus.completed, ListStatus.watching, ListStatus.on_hold, ListStatus.dropped}
 
 
+def _appeal(card: AnimeCard) -> float:
+    """How much the user should like a show: their own score, else the predicted one, else
+    MAL's."""
+    if card.progress is not None and card.progress.score:
+        return float(card.progress.score)
+    if card.prediction is not None:
+        return card.prediction.score
+    return card.mean or 0.0
+
+
+def _by_appeal(cards: Iterable[AnimeCard]) -> list[AnimeCard]:
+    return sorted(cards, key=_appeal, reverse=True)
+
+
 @router.get("/library", response_model=LibraryResponse)
 async def library(user: ListUser, db: DB):
     """The My List page: what the user is watching (most recent first), what of their list airs
@@ -113,9 +130,12 @@ async def library(user: ListUser, db: DB):
             if other is not None and other.status == ListStatus.plan_to_watch:
                 continue  # in "Plan to watch" already
             offered[row["id"]] = (found["relation"], anime.title_en or anime.title, row)
-    ids = list(offered)[:RELATED_MAX]
+    ids = list(offered)[: RELATED_MAX * 2]
     shows = await _from_catalogue(db, ids, {i: offered[i][2] for i in ids})
     related_cards = [card(a, f"related:{offered[a.id][0]}:{offered[a.id][1]}") for a in shows]
+    # What can be watched now, and what's still to come.
+    upcoming = [c for c in related_cards if c.status == "not_yet_aired"]
+    aired = [c for c in related_cards if c.status != "not_yet_aired"]
 
     continue_cards = [card(a) for a in watching]
     saved = await positions.for_shows(db, user.id, [a.id for a in watching])
@@ -125,10 +145,19 @@ async def library(user: ListUser, db: DB):
 
     return LibraryResponse(
         sections=[
-            Row(id="continue", title="Continue Watching", items=continue_cards),
-            Row(id="season", title="Airing This Season", items=[card(a) for a in season]),
-            Row(id="planned", title="Plan to Watch", items=[card(a) for a in planned]),
-            Row(id="related", title="Related to What You Watched", items=related_cards),
+            Row(id="continue", title="Continue Watching", items=_by_appeal(continue_cards)),
+            Row(id="season", title="Airing This Season", items=_by_appeal(card(a) for a in season)),
+            Row(id="planned", title="Plan to Watch", items=_by_appeal(card(a) for a in planned)),
+            Row(
+                id="related",
+                title="Related to What You Watched",
+                items=_by_appeal(aired)[:RELATED_MAX],
+            ),
+            Row(
+                id="related_upcoming",
+                title="Coming Up, Related to What You Watched",
+                items=_by_appeal(upcoming)[:RELATED_MAX],
+            ),
         ],
         related_pending=related.loading(user.id),
     )
