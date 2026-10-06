@@ -1,4 +1,5 @@
 import pytest
+from conftest import API_KEY
 
 from app.core.api_key import check_configured
 
@@ -41,3 +42,16 @@ def test_the_api_needs_a_key(key, says):
     with pytest.raises(RuntimeError, match=says):
         check_configured(key)
     check_configured("x" * 16)
+
+
+@pytest.mark.anyio
+async def test_the_web_apps_api_prefix_works_on_the_backend_too(anonymous):
+    """A redirect URL registered with /api (the web app's address) works when the backend is
+    reached directly; so does a client set up with /api."""
+    keyed = await anonymous.get("/api/health", headers={"x-api-key": API_KEY})
+    assert keyed.json() == {"status": "ok"}
+    for path in ("/api/auth/callback", "/api/auth/anilist/callback"):
+        res = await anonymous.get(path, params={"code": "c", "state": "made-up"})
+        assert res.status_code == 307 and res.headers["location"].endswith("&reason=expired")
+    assert (await anonymous.get("/api/health")).status_code == 401
+    assert (await anonymous.get("/apiary")).status_code == 401  # not the prefix

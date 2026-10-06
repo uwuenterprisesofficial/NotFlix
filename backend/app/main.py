@@ -17,6 +17,7 @@ from app.api import (
 )
 from app.core.api_key import ApiKeyMiddleware, check_configured
 from app.core.config import get_settings
+from app.core.prefix import StripApiPrefix
 
 settings = get_settings()
 check_configured(settings.api_key)
@@ -32,6 +33,8 @@ app.add_middleware(
 )
 # Added last, so it runs first: without the key nothing else happens (not even a session).
 app.add_middleware(ApiKeyMiddleware, key=settings.api_key)
+# Outermost: /api/... is served as /... (also the sign-in redirects that need no key).
+app.add_middleware(StripApiPrefix)
 
 app.include_router(auth.router)
 app.include_router(me.router)
