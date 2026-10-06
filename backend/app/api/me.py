@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
+from app.api import friends
 from app.api.admin import is_admin
 from app.api.deps import DB, CurrentUser, ListUser
 from app.api.search import _from_catalogue
@@ -31,7 +32,7 @@ router = APIRouter(prefix="/me", tags=["me"])
 
 
 @router.get("", response_model=Me)
-async def me(user: CurrentUser):
+async def me(user: CurrentUser, db: DB):
     return Me(
         id=user.id,
         name=user.name,
@@ -43,6 +44,7 @@ async def me(user: CurrentUser):
         anilist=AccountOut(name=user.anilist_name) if user.has_anilist else None,
         writing=list_writer.progress(user.id),
         syncing=sync_jobs.running(user.id),
+        recommendations_unseen=await friends.unseen(db, user.id),
     )
 
 

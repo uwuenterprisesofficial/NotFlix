@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AnimeCard } from "@/components/AnimeCard";
+import { FriendRecommendationList } from "@/components/friends/FriendRecommendationList";
 import { RefreshWhilePending } from "@/components/RefreshWhilePending";
-import { ApiError, api } from "@/lib/api";
+import { ApiError, api, apiOrNull } from "@/lib/api";
 import type { MessageKey } from "@/lib/i18n";
 import { getT } from "@/lib/i18n/server";
-import type { Row } from "@/lib/types";
+import type { FriendRecommendations, Row } from "@/lib/types";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getT();
@@ -27,8 +28,12 @@ const SECTIONS: Record<string, { title: MessageKey; empty: MessageKey }> = {
 export default async function MyListPage() {
   const { t } = await getT();
   let library: Library;
+  let fromFriends: FriendRecommendations | null;
   try {
-    library = await api<Library>("/me/library");
+    [library, fromFriends] = await Promise.all([
+      api<Library>("/me/library"),
+      apiOrNull<FriendRecommendations>("/friends/recommendations").catch(() => null),
+    ]);
   } catch (e) {
     // Not signed in (or a guest without a list).
     if (e instanceof ApiError && (e.status === 401 || e.status === 403)) redirect("/login");
@@ -39,6 +44,10 @@ export default async function MyListPage() {
     <div className="px-4 pt-24 pb-16 md:px-12">
       <h1 className="text-3xl font-black">{t("nav.myList")}</h1>
       {library.related_pending && <RefreshWhilePending />}
+      {/* Friends' recommendations first; only sent ones after the list. */}
+      {fromFriends && fromFriends.received.length > 0 && (
+        <FriendRecommendationList data={fromFriends} />
+      )}
       {library.sections.map((section) => {
         const labels = SECTIONS[section.id];
         if (!labels) return null;
@@ -80,6 +89,9 @@ export default async function MyListPage() {
           {t("nav.search")}
         </Link>
       </p>
+      {fromFriends && fromFriends.received.length === 0 && (
+        <FriendRecommendationList data={fromFriends} />
+      )}
     </div>
   );
 }

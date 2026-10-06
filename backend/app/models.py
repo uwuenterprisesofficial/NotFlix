@@ -203,6 +203,26 @@ class Connection(Base):
         return self.user_b_id if user_id == self.user_a_id else self.user_a_id
 
 
+class FriendRecommendation(Base):
+    """A show one user recommends to a friend (someone they're connected with), with an optional
+    note. Recommending the same show to the same friend again only updates it."""
+
+    __tablename__ = "friend_recommendations"
+    __table_args__ = (UniqueConstraint("from_user_id", "to_user_id", "anime_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    from_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    to_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    anime_id: Mapped[int] = mapped_column(ForeignKey("anime.id", ondelete="CASCADE"))
+    message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The friend put it aside ("not for me"); the sender still sees it, marked as such.
+    dismissed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+
 class ConnectionInvite(Base):
     """A link one user sends another to connect (Watch Together). Used once."""
 

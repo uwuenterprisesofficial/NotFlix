@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter
 from sqlalchemy import select
 
+from app.api import friends
 from app.api.calendar import cards as calendar_cards
 from app.api.deps import DB, OptionalUser
 from app.models import Anime, ListEntry, ListStatus, Recommendation
@@ -82,6 +83,11 @@ async def browse(user: OptionalUser, db: DB):
                 id="continue",
                 title="Continue Watching",
                 items=[card(a) for a in watching],
+            ),
+            Row(
+                id="from-friends",
+                title="From Your Friends",
+                items=[card(a, reason) for a, reason in await friends.for_home(db, user)],
             ),
             Row(
                 id="recommended",

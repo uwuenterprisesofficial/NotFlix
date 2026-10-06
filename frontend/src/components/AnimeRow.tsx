@@ -10,6 +10,7 @@ import { useT } from "./I18nProvider";
 // Row ids the backend sends, with their translated titles.
 const ROW_TITLES = new Set([
   "row.continue",
+  "row.from-friends",
   "row.recommended",
   "row.my-list",
   "row.watch-again",

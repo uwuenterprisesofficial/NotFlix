@@ -275,6 +275,13 @@ Connect with someone, get recommendations for both of you, and watch with a sync
 
 Each card shows both sides: a score (★9) or a predicted one (~8.4). The **taste match** combines how alike you score the shows you both watched (correlation) with how alike your genre tastes are. The result is cached until either of you syncs your list.
 
+**Recommending a show to a friend.** On a show's page, **Recommend** lists the people you're connected with (anyone can be recommended to, guests included). Each name shows where that friend already is with the show (on their list: status, episodes, score) and whether you recommended it before. Tick one or more, add a note if you like (up to 300 characters), and **Send**. Recommending the same show to the same friend again replaces the note and counts as new for them.
+
+- **The friend** gets a badge on **My List** in the menu (**Together** for a guest) until they open it. Their recommendations are at the top of My List under **From your friends**, with your note, and in a **From Your Friends** row on the home page. That row leaves out shows they finished or dropped. The show's page says who recommended it, with the note. **Not for me** puts one aside.
+- **You** see what you recommended at the end of My List, under **You recommended**, with where each friend is with it (or that they put it aside). **Take back** removes it.
+- Only recommendations between people who are still connected are shown. A guest who signs in keeps theirs.
+- API: `POST /api/friends/recommendations` (`anime_id`, `connection_ids`, `message`), `GET /api/friends/recommendations` (received, sent, unseen), `POST /api/friends/recommendations/seen`, `DELETE /api/friends/recommendations/{id}`, `GET /api/friends/recommendations/anime/{id}`.
+
 **The synced player.** **Watch together** on a show's page or under the player opens it in your room with that person (`?together=<id>` on the watch page). Each connection has one room, kept in Redis: which episode, the position at a server time, and whether it's playing. Both players follow it through server-sent events (`GET /api/together/{id}/room/events`, proxied by Next like the rest of the API) and send their own play, pause and seeks (`POST /api/together/{id}/room`), last change wins.
 
 - Either of you can pause, play or seek; the other player does the same. A player that drifts is brought back in step by playing up to 15% faster or slower; only more than 4 s off does it jump (which means buffering). It's never corrected while it's buffering or right after a jump, so a slow stream isn't made to jump over and over. Clocks are compared with the server's.

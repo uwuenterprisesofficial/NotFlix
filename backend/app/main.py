@@ -7,6 +7,7 @@ from app.api import (
     auth,
     browse,
     calendar,
+    friends,
     library,
     me,
     proxy,
@@ -44,6 +45,7 @@ app.include_router(proxy.router)
 app.include_router(together.router)
 app.include_router(admin.router)
 app.include_router(library.router)
+app.include_router(friends.router)
 
 
 @app.get("/health", tags=["meta"])

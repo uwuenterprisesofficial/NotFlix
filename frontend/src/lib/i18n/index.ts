@@ -4,6 +4,7 @@ import { analysis } from "./messages/analysis";
 import { common } from "./messages/common";
 import { desktop } from "./messages/desktop";
 import { detail } from "./messages/detail";
+import { friends } from "./messages/friends";
 import { player } from "./messages/player";
 import { search } from "./messages/search";
 import { stats } from "./messages/stats";
@@ -22,6 +23,7 @@ const messages = {
   ...together,
   ...admin,
   ...desktop,
+  ...friends,
 } satisfies Messages;
 
 export type MessageKey = keyof typeof messages;
