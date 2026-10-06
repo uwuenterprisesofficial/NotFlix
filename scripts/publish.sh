@@ -2,8 +2,8 @@
 # Build NotFlix's server images and push them to the registry, for deploy/docker-compose.yml.
 #
 #   docker login registry.mfhost.de      (once)
-#   scripts/publish.sh                   all three: backend, frontend, aniscraper
-#   scripts/publish.sh backend           only some of them
+#   scripts/publish.sh                   the server's images: backend and frontend
+#   scripts/publish.sh backend           only some of them (aniscraper too, if you want it)
 #
 # Pushes registry.mfhost.de/notflix-<name>:publish. Override with REGISTRY=..., TAG=... and the
 # target platform with PLATFORM=... (default linux/amd64, also when building on an ARM Mac).
@@ -14,7 +14,7 @@ TAG="${TAG:-publish}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-[ $# -gt 0 ] || set -- backend frontend aniscraper
+[ $# -gt 0 ] || set -- backend frontend
 for name in "$@"; do
     case "$name" in
         backend | aniscraper) target="" ;;

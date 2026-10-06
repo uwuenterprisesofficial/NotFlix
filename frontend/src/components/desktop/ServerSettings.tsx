@@ -93,7 +93,8 @@ function RemoteForm({
   const [url, setUrl] = useState(saved.url ?? "");
   const [key, setKey] = useState("");
   const builtIn = saved.builtIn;
-  const [hybrid, setHybrid] = useState(saved.hybrid);
+  // On by default for a new server: a server may not look for streams itself.
+  const [hybrid, setHybrid] = useState(saved.url ? saved.hybrid : !!builtIn);
   const [aniworldVia, setAniworldVia] = useState(builtIn?.settings.aniworldVia ?? "aniscraper");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<BackendError | null>(null);

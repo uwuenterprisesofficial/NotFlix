@@ -1,5 +1,9 @@
 # NotFlix on a server, from the images scripts/publish.sh pushes (no source code needed here).
 #
+# The server doesn't look for streams itself: it keeps accounts, lists, friends, Watch Together
+# and the shared stream library. The desktop apps find and play streams on their PCs (hybrid
+# mode) and share what they find with the library here.
+#
 #   cp .env.example .env      then fill it in
 #   docker compose pull
 #   docker compose up -d
@@ -16,12 +20,14 @@ x-backend: &backend
   environment:
     DATABASE_URL: postgresql+psycopg://notflix:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/notflix
     REDIS_URL: redis://redis:6379/0
-    # AniWorld and AnimeToast through the AniScraper container; empty in .env to turn it off.
-    ANISCRAPER_URL: ${ANISCRAPER_URL-http://aniscraper:8000}
     MEDIA_DIR: /media
-  # Services on the server itself (e.g. Anivexa) at http://host.docker.internal:<port>.
-  extra_hosts:
-    - "host.docker.internal:host-gateway"
+    # No scraping on the server: every stream source is off (whatever .env says). Streams are
+    # found by the desktop apps, which share them through the library.
+    ANISCRAPER_URL: ""
+    ANIWORLD_URL: ""
+    ANIWORLD_API_URL: ""
+    ANIVEXA_URL: ""
+    REANIME_URL: ""
 
 services:
   db:
@@ -42,10 +48,6 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
 
-  aniscraper:
-    image: ${REGISTRY:-registry.mfhost.de}/notflix-aniscraper:${TAG:-publish}
-    restart: unless-stopped
-
   # The API. On start it migrates the database (alembic upgrade head), then serves on port 8000
   # inside the network; it's reached through the web app's /api (see frontend below).
   backend:
@@ -54,8 +56,6 @@ services:
       db:
         condition: service_healthy
       redis:
-        condition: service_started
-      aniscraper:
         condition: service_started
     healthcheck:
       # Every request needs the key, /health too.

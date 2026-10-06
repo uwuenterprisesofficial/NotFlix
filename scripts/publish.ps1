@@ -2,14 +2,14 @@
 # (Windows PowerShell).
 #
 #   docker login registry.mfhost.de      (once)
-#   .\scripts\publish.ps1                all three: backend, frontend, aniscraper
-#   .\scripts\publish.ps1 backend        only some of them
+#   .\scripts\publish.ps1                the server's images: backend and frontend
+#   .\scripts\publish.ps1 backend        only some of them (aniscraper too, if you want it)
 #
 # Pushes registry.mfhost.de/notflix-<name>:publish. Override with -Registry, -Tag and -Platform
 # (default linux/amd64).
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$Images = @("backend", "frontend", "aniscraper"),
+    [string[]]$Images = @("backend", "frontend"),
     [string]$Registry = "registry.mfhost.de",
     [string]$Tag = "publish",
     [string]$Platform = "linux/amd64"

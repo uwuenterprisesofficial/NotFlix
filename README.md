@@ -76,7 +76,12 @@ The API answers only requests that carry its key (`API_KEY`, at least 16 charact
 
 ### Deploying on a server
 
-The `docker-compose.yml` in the repository's root is for development: it builds from the source and mounts it into the containers. On a server, use the images from the registry and [`deploy/docker-compose.yml`](deploy/docker-compose.yml) instead. That compose file runs everything NotFlix needs: the API with its two workers, the web app, AniScraper, PostgreSQL and Redis. Nothing is mounted over the images' code.
+The `docker-compose.yml` in the repository's root is for development: it builds from the source and mounts it into the containers. On a server, use the images from the registry and [`deploy/docker-compose.yml`](deploy/docker-compose.yml) instead. That compose file runs the API with its two workers, the web app, PostgreSQL and Redis. Nothing is mounted over the images' code.
+
+The server doesn't scrape. Every stream source is switched off there (AniScraper, AniWorld, Anivexa, ReAnime), whatever `.env` says. The server keeps accounts, lists, scores, friends, Watch Together and the [shared stream library](#both-streams-on-this-pc-hybrid). The desktop apps look for streams and play them on their PCs, in hybrid mode, and send what they find to the library. A show is then looked up once for everyone. As a consequence:
+
+- In a browser, the web app has the lists, friends and recommendations, but no streams to play. Watch in the desktop app.
+- German synopses come from AniWorld and AnimeToast, so the server shows MyAnimeList's English ones.
 
 **1. Build and push the images** (on your PC, from the repository):
 
@@ -86,7 +91,7 @@ scripts/publish.sh                     # Linux, macOS, Git Bash
 .\scripts\publish.ps1                  # Windows PowerShell
 ```
 
-This pushes `registry.mfhost.de/notflix-backend`, `notflix-frontend` and `notflix-aniscraper`, all tagged `publish`, built for `linux/amd64`. To push only some of them, name them: `scripts/publish.sh backend`. `scripts/publish-backend.sh` is the same as `scripts/publish.sh backend`. To change the registry, tag or platform, use `REGISTRY=…`, `TAG=…` and `PLATFORM=…`, or `-Registry`, `-Tag` and `-Platform` in PowerShell.
+This pushes `registry.mfhost.de/notflix-backend` and `notflix-frontend`, both tagged `publish`, built for `linux/amd64`. To push only one of them, name it: `scripts/publish.sh backend`. AniScraper isn't needed on the server; the desktop app has its own. `scripts/publish-backend.sh` is the same as `scripts/publish.sh backend`. To change the registry, tag or platform, use `REGISTRY=…`, `TAG=…` and `PLATFORM=…`, or `-Registry`, `-Tag` and `-Platform` in PowerShell.
 
 **2. Set it up on the server.** Copy the two files from `deploy/` into a folder there (the rest of the repository isn't needed):
 
@@ -120,7 +125,7 @@ notflix.example.com {
 
 With nginx, turn off buffering (`proxy_buffering off;`), or Watch Together's live updates (server-sent events) stall.
 
-**4. Connect the desktop app.** Choose **Another server**, enter `https://notflix.example.com/api` and the `API_KEY`. Tick **Find and play streams on this PC** for [hybrid mode](#both-streams-on-this-pc-hybrid).
+**4. Connect the desktop app.** Choose **Another server**, enter `https://notflix.example.com/api` and the `API_KEY`. Keep **Find and play streams on this PC** ticked ([hybrid mode](#both-streams-on-this-pc-hybrid), on by default for a new server). Without it, the app has no streams, since the server doesn't look for any. This needs an app built with the built-in server (`npm run dist`, not `dist:client`).
 
 **Updating.** Publish again from your PC, then on the server run `docker compose pull && docker compose up -d`. New migrations run by themselves when the backend starts.
 
