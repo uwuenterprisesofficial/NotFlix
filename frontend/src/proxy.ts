@@ -1,5 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { API_KEY_HEADER, apiKey, backendUrl, isDesktop } from "@/lib/backend";
+import {
+  API_KEY_HEADER,
+  answeredLocally,
+  apiKey,
+  backendUrl,
+  isDesktop,
+  localBackend,
+} from "@/lib/backend";
 
 // Tells the backend which origin the browser uses, so a sign-in started in the desktop app
 // returns there (the backend only accepts loopback origins for this).
@@ -13,8 +20,15 @@ const ORIGIN_HEADER = "x-notflix-origin";
  */
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
-  const target = new URL(`${backendUrl()}${pathname.slice("/api".length)}${search}`);
+  const path = pathname.slice("/api".length);
   const headers = new Headers(request.headers);
+  // Hybrid mode: streams are found and played on this PC.
+  const local = localBackend();
+  if (local && answeredLocally(path)) {
+    headers.set(API_KEY_HEADER, local.key);
+    return NextResponse.rewrite(new URL(`${local.url}${path}${search}`), { request: { headers } });
+  }
+  const target = new URL(`${backendUrl()}${path}${search}`);
   // The Host the browser used (nextUrl says "localhost" for 127.0.0.1, which has other cookies).
   // Elsewhere the header passes through: the desktop app may reach the backend through the web
   // app's /api.

@@ -32,7 +32,14 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import get_json, redis, set_json
-from app.models import Anime, Connection, ListStatus, Recommendation, User
+from app.models import (
+    Anime,
+    Connection,
+    FriendRecommendation,
+    ListStatus,
+    Recommendation,
+    User,
+)
 from app.services import recommender
 from app.services.tags import EXPLICIT_GENRE_IDS
 from app.services.taste import Predictor, Rated, Show, load_rated, predictor_for
@@ -383,5 +390,28 @@ async def absorb_guest(db: AsyncSession, guest: User, user: User) -> None:
             await db.delete(conn)
         else:
             conn.user_a_id, conn.user_b_id = a, b
+    # Shows recommended to or by the guest move along (unless the user has the same already).
+    recs = await db.scalars(
+        select(FriendRecommendation).where(
+            or_(
+                FriendRecommendation.from_user_id == guest.id,
+                FriendRecommendation.to_user_id == guest.id,
+            )
+        )
+    )
+    for rec in list(recs):
+        sender = user.id if rec.from_user_id == guest.id else rec.from_user_id
+        receiver = user.id if rec.to_user_id == guest.id else rec.to_user_id
+        taken = sender == receiver or await db.scalar(
+            select(FriendRecommendation.id).where(
+                FriendRecommendation.from_user_id == sender,
+                FriendRecommendation.to_user_id == receiver,
+                FriendRecommendation.anime_id == rec.anime_id,
+            )
+        )
+        if taken:
+            await db.delete(rec)
+        else:
+            rec.from_user_id, rec.to_user_id = sender, receiver
     await db.flush()
     await db.delete(guest)

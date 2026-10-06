@@ -26,15 +26,23 @@ class Saved:
 
 
 async def save(
-    db: AsyncSession, user: User, anime_id: int, status: str, episodes: int | None = None
+    db: AsyncSession,
+    user: User,
+    anime_id: int,
+    status: str,
+    episodes: int | None = None,
+    score: int | None = None,
 ) -> Saved:
-    """Set the status (and, when given, the watched episodes) everywhere. Fails only when no
-    linked list could be written; MAL's answer counts when there is one."""
+    """Set the status (and, when given, the watched episodes and the score: 1-10, 0 removes it)
+    everywhere. Fails only when no linked list could be written; MAL's answer counts when
+    there is one."""
 
     async def to_mal() -> dict:
         fields: dict = {"status": status}
         if episodes is not None:
             fields["num_watched_episodes"] = episodes
+        if score is not None:
+            fields["score"] = score
         async with mal.MalClient(await mal_token(db, user)) as client:
             return await client.update_my_list_status(anime_id, **fields)
 
@@ -43,7 +51,7 @@ async def save(
         if media_id is None:
             raise anilist_account.AniListError("This show isn't on AniList")
         async with anilist_account.AniListClient(user.anilist_token) as client:
-            saved = await client.save_entry(media_id, status, episodes)
+            saved = await client.save_entry(media_id, status, episodes, score)
         progress = saved.get("progress")
         return {"num_episodes_watched": progress} if progress is not None else {}
 
@@ -68,6 +76,6 @@ async def save(
     entry.status = result.get("status", status)
     if episodes is not None or "num_episodes_watched" in result:
         entry.episodes_watched = result.get("num_episodes_watched", episodes)
-    entry.score = result.get("score", entry.score or 0)
+    entry.score = result.get("score", score if score is not None else entry.score or 0)
     await db.commit()
     return Saved(entry, failed)

@@ -167,6 +167,37 @@ async def test_progress_is_written_to_both_lists(client, user, clean, monkeypatc
     assert FakeAniList.saved == [(1005, "watching", 3, None)]
 
 
+async def test_scores_are_written_to_both_lists(client, user, clean, monkeypatch):
+    from app.services import anilist
+
+    _set_user(user, anilist_user_id=77, anilist_token="al", anilist_name="al-user")
+    with sync_session() as db:
+        db.add(Anime(id=5, title="Five", num_episodes=12, genres=[]))
+        db.commit()
+    FakeAniList.saved = []
+    monkeypatch.setattr(anilist_account, "AniListClient", FakeAniList)
+    mal_writes = []
+
+    async def anilist_id(mal_id):
+        return mal_id + 1000
+
+    async def update(self, anime_id, **fields):
+        mal_writes.append((anime_id, fields))
+        return {"status": fields["status"], "score": fields["score"], "num_episodes_watched": 0}
+
+    monkeypatch.setattr(anilist, "anilist_id", anilist_id)
+    monkeypatch.setattr(mal.MalClient, "update_my_list_status", update)
+    # Not on the list yet: scoring it puts it there as completed.
+    body = (await client.put("/anime/5/score", json={"score": 8})).json()
+    assert (body["status"], body["score"], body["failed"]) == ("completed", 8, [])
+    assert mal_writes == [(5, {"status": "completed", "score": 8})]
+    assert FakeAniList.saved == [(1005, "completed", None, 8)]
+    # Removing the score keeps the status.
+    body = (await client.put("/anime/5/score", json={"score": 0})).json()
+    assert (body["status"], body["score"]) == ("completed", 0)
+    assert (await client.put("/anime/5/score", json={"score": 11})).status_code == 422
+
+
 @pytest.fixture
 def providers(monkeypatch, clean):
     """Both sign-ins configured, with MAL and AniList's OAuth and profile calls faked."""

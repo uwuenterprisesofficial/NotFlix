@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -202,6 +203,26 @@ class Connection(Base):
         return self.user_b_id if user_id == self.user_a_id else self.user_a_id
 
 
+class FriendRecommendation(Base):
+    """A show one user recommends to a friend (someone they're connected with), with an optional
+    note. Recommending the same show to the same friend again only updates it."""
+
+    __tablename__ = "friend_recommendations"
+    __table_args__ = (UniqueConstraint("from_user_id", "to_user_id", "anime_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    from_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    to_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    anime_id: Mapped[int] = mapped_column(ForeignKey("anime.id", ondelete="CASCADE"))
+    message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The friend put it aside ("not for me"); the sender still sees it, marked as such.
+    dismissed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+
 class ConnectionInvite(Base):
     """A link one user sends another to connect (Watch Together). Used once."""
 
@@ -244,7 +265,11 @@ class EpisodeSource(Base):
     """A cached source option for one episode, as found by a provider scan."""
 
     __tablename__ = "episode_sources"
-    __table_args__ = (UniqueConstraint("anime_id", "episode", "option_id"),)
+    __table_args__ = (
+        UniqueConstraint("anime_id", "episode", "option_id"),
+        # Shows with a dub ("de-dub", "en-dub"): the search's dub filter.
+        Index("ix_episode_sources_language_anime", "language", "anime_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     anime_id: Mapped[int] = mapped_column(Integer, index=True)
@@ -302,6 +327,21 @@ class SourceScan(Base):
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SharedSource(Base):
+    """The shared library: one episode's sources as a provider found them (on this server or in
+    a desktop app that finds streams itself and shares them), for every app to reuse instead of
+    looking again. `source` is the provider with the way it gets them (e.g.
+    "aniworld/AniScraperProvider"): only the same kind of provider can use its option ids."""
+
+    __tablename__ = "shared_sources"
+
+    anime_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(80), primary_key=True)
+    episode: Mapped[int] = mapped_column(Integer, primary_key=True)
+    options: Mapped[list[dict]] = mapped_column(JSON, default=list)  # [] = checked, none found
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ProviderMapping(Base):

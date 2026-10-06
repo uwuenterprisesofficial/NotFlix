@@ -41,12 +41,13 @@ type State = {
 
 function Results({ query, genres }: { query: SearchQuery; genres: Genre[] }) {
   const { t, lang } = useT();
-  const { q, genre: genreId, order, page } = query;
+  const { q, genre: genreId, order, page, dub } = query;
+  const dubLanguage = lang === "de" ? "de-dub" : "en-dub";
   const genre = genres.find((g) => g.id === genreId) ?? null;
   const [state, setState] = useState<State>({ quick: null, full: null, failed: false });
 
   useEffect(() => {
-    if (!q && !genreId) return;
+    if (!q && !genreId && !dub) return;
     const abort = new AbortController();
     if (q) {
       const params = (quick: boolean) =>
@@ -55,6 +56,15 @@ function Results({ query, genres }: { query: SearchQuery; genres: Genre[] }) {
         .then((quick) => setState((s) => ({ ...s, quick })))
         .catch(() => {});
       load(`/api/search?${params(false)}`, abort.signal)
+        .then((full) => setState((s) => ({ ...s, full })))
+        .catch(() => !abort.signal.aborted && setState((s) => ({ ...s, failed: true })));
+    } else if (!genreId) {
+      // Only "with dub": the shows NotFlix has found dubbed streams of.
+      const apiOrder = order === "for_you" || order === "score" ? "popularity" : order;
+      load(
+        `/api/search/dubbed?${new URLSearchParams({ language: dubLanguage, order: apiOrder, page: String(page) })}`,
+        abort.signal,
+      )
         .then((full) => setState((s) => ({ ...s, full })))
         .catch(() => !abort.signal.aborted && setState((s) => ({ ...s, failed: true })));
     } else {
@@ -67,22 +77,26 @@ function Results({ query, genres }: { query: SearchQuery; genres: Genre[] }) {
         .catch(() => !abort.signal.aborted && setState((s) => ({ ...s, failed: true })));
     }
     return () => abort.abort();
-  }, [q, genreId, order, page]);
+  }, [q, genreId, order, page, dub, dubLanguage]);
 
-  if (!q && !genreId) return <p className="mt-10 text-muted">{t("search.intro")}</p>;
+  if (!q && !genreId && !dub) return <p className="mt-10 text-muted">{t("search.intro")}</p>;
 
   const shown = state.full ?? state.quick;
   const busy = !state.full && !state.failed;
   let items = shown?.items ?? [];
   // MAL's search can't filter by genre: this page is narrowed down to it here.
   if (q && genre) items = items.filter((a) => a.genres.includes(genre.name));
+  // The dub filter on a title or genre search: what NotFlix knows to have the dub.
+  if (dub && (q || genre)) items = items.filter((a) => a.dubs?.includes(dubLanguage));
   if (order === "for_you") {
     items = [...items].sort((a, b) => (b.prediction?.score ?? 0) - (a.prediction?.score ?? 0));
   }
   const genreLabel = genre ? tagName(lang, genre.id, genre.name) : null;
-  const heading = q
-    ? t("search.resultsFor", { q }) + (genreLabel ? t("search.inGenre", { genre: genreLabel }) : "")
-    : (genreLabel ?? "");
+  const heading =
+    (q
+      ? t("search.resultsFor", { q }) +
+        (genreLabel ? t("search.inGenre", { genre: genreLabel }) : "")
+      : (genreLabel ?? t("search.dubbedShows"))) + (dub ? t("search.withDub") : "");
 
   const goTo = (p: number) => {
     window.history.pushState(null, "", searchHref({ ...query, page: p }));
@@ -99,6 +113,7 @@ function Results({ query, genres }: { query: SearchQuery; genres: Genre[] }) {
         {busy && <Searching label={shown ? t("search.searchingMore") : t("search.searching")} />}
         {state.failed && !state.full && <span className="text-red-400">{t("search.failed")}</span>}
       </div>
+      {dub && <p className="mt-1 text-xs text-muted">{t("search.dubInfo")}</p>}
       {busy && <ProgressBar />}
       {!shown && busy ? (
         <Skeleton />

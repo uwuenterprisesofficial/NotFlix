@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { FriendRecommendationList } from "@/components/friends/FriendRecommendationList";
 import { Avatar } from "@/components/together/Avatar";
 import { InviteLink } from "@/components/together/TogetherActions";
 import { api, apiOrNull } from "@/lib/api";
 import { getT } from "@/lib/i18n/server";
 import { watchHref } from "@/lib/together";
-import type { Connection, Me } from "@/lib/types";
+import type { Connection, FriendRecommendations, Me } from "@/lib/types";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getT();
@@ -26,7 +27,13 @@ export default async function TogetherPage() {
       </div>
     );
   }
-  const connections = await api<Connection[]>("/together");
+  const [connections, fromFriends] = await Promise.all([
+    api<Connection[]>("/together"),
+    // A guest has no My List page: friends' recommendations are here.
+    me.guest
+      ? apiOrNull<FriendRecommendations>("/friends/recommendations").catch(() => null)
+      : null,
+  ]);
 
   return (
     <div className="mx-auto max-w-3xl px-4 pt-24 pb-16">
@@ -97,6 +104,7 @@ export default async function TogetherPage() {
           ))}
         </ul>
       )}
+      {fromFriends && <FriendRecommendationList data={fromFriends} />}
     </div>
   );
 }

@@ -18,6 +18,17 @@ export async function Navbar() {
   const [me, { t }] = await Promise.all([currentUser(), getT()]);
   // A guest (Watch Together without a list) has no list or statistics.
   const withList = me !== null && !me.guest;
+  // Friends' recommendations not looked at yet: on My List (a guest's are on Watch Together).
+  const unseen = me?.recommendations_unseen ?? 0;
+  const badge = unseen > 0 && (
+    <span
+      title={t("friends.unseen", { count: unseen })}
+      aria-label={t("friends.unseen", { count: unseen })}
+      className="ml-1 inline-grid min-w-4 place-items-center rounded-full bg-brand px-1 text-[10px] leading-4 font-bold text-white"
+    >
+      {unseen}
+    </span>
+  );
 
   return (
     <header className="fixed inset-x-0 top-0 z-50 bg-gradient-to-b from-black/90 to-transparent">
@@ -37,8 +48,9 @@ export async function Navbar() {
             {t("nav.home")}
           </Link>
           {withList && (
-            <Link href="/#my-list" className="hover:text-white">
+            <Link href="/my-list" className="hover:text-white">
               {t("nav.myList")}
+              {badge}
             </Link>
           )}
           <Link href="/calendar" className="hover:text-white">
@@ -52,6 +64,7 @@ export async function Navbar() {
           {me && (
             <Link href="/together" className="hover:text-white">
               {t("nav.together")}
+              {!withList && badge}
             </Link>
           )}
         </div>

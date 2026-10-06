@@ -103,7 +103,7 @@ def needs_scan(
     return scan.finished_at is None or now - scan.finished_at > ttl
 
 
-async def _scans(anime_id: int) -> dict[str, SourceScan]:
+async def provider_scans(anime_id: int) -> dict[str, SourceScan]:
     async with AsyncSessionLocal() as db:
         rows = await db.scalars(select(SourceScan).where(SourceScan.anime_id == anime_id))
         return {s.provider: s for s in rows}
@@ -149,9 +149,11 @@ async def _store(
     provider: str,
     results: dict[int, list[SourceOption]],
     running: _Scan | None = None,
+    share: bool = True,
 ) -> list[int]:
     """Replace the cached options of these episodes; returns the scan's new episode coverage.
-    A running scan counts them as stored as soon as they're in the database."""
+    A running scan counts them as stored as soon as they're in the database. What was found
+    here (`share`, not what came from the library) goes into the shared library."""
     episodes = list(results)
     async with AsyncSessionLocal() as db:
         await db.execute(
@@ -187,6 +189,13 @@ async def _store(
     if running is not None:
         running.stored |= set(episodes)
     await _note_changes(anime_id, episodes)
+    if share:
+        from app.services import library
+
+        try:
+            await library.record(anime_id, provider, results)
+        except Exception:
+            log.warning("Sharing %s of anime %s failed", provider, anime_id, exc_info=True)
     return covered
 
 
@@ -267,7 +276,7 @@ async def ensure_scan(
     is in the order to scan (nearest to the user first); providers that list a whole show get
     `whole` (every aired episode) when it's known."""
     ttl = scan_ttl(airing)
-    scans = await _scans(anime.id)
+    scans = await provider_scans(anime.id)
     now = datetime.now(UTC)
     for p in providers_base.enabled_providers():
         key = (anime.id, p.name)
@@ -320,6 +329,10 @@ def progress(anime_id: int) -> tuple[int, int] | None:
     return sum(len(s.stored) for s in scans), sum(len(s.episodes) for s in scans)
 
 
+def scanning_provider(anime_id: int, provider: str) -> bool:
+    return (anime_id, provider) in _running
+
+
 def scanning(anime_id: int) -> bool:
     return any(key[0] == anime_id for key in _running)
 
@@ -332,7 +345,7 @@ async def wait_idle() -> None:
 
 async def cached_options(anime_id: int, episode: int, provider: str) -> list[SourceOption] | None:
     """Cached options, or None when this provider hasn't checked this episode yet."""
-    scan = (await _scans(anime_id)).get(provider)
+    scan = (await provider_scans(anime_id)).get(provider)
     if scan is None or episode not in scan.episodes:
         return None
     async with AsyncSessionLocal() as db:
@@ -362,7 +375,7 @@ async def store_episode(
 ) -> None:
     """Cache a live lookup of one episode (e.g. the player opened it before the scan got there)."""
     covered = await _store(anime_id, provider, {episode: options})
-    scans = await _scans(anime_id)
+    scans = await provider_scans(anime_id)
     if provider in scans:
         await _upsert_scan(anime_id, provider, episodes=covered)
     else:
@@ -370,6 +383,25 @@ async def store_episode(
         await _upsert_scan(
             anime_id, provider, status="done", episodes=covered, started_at=now, finished_at=now
         )
+
+
+async def import_shared(
+    anime_id: int,
+    provider: str,
+    results: dict[int, list[SourceOption]],
+    finished_at: datetime | None,
+) -> None:
+    """Cache sources from the shared library (see library.py). With `finished_at` (the
+    library's copy is newer than the last scan) the provider counts as scanned then; without,
+    the episodes only extend what it covers."""
+    covered = await _store(anime_id, provider, results, share=False)
+    if finished_at is not None:
+        await _upsert_scan(
+            anime_id, provider, status="done", error=None, episodes=covered,
+            started_at=finished_at, finished_at=finished_at,
+        )  # fmt: skip
+    else:
+        await _upsert_scan(anime_id, provider, episodes=covered)
 
 
 async def forget(anime_id: int, provider: str) -> None:
@@ -404,7 +436,7 @@ class Availability:
 
 async def availability(anime_id: int) -> Availability:
     enabled = [p.name for p in providers_base.enabled_providers()]
-    scans = await _scans(anime_id)
+    scans = await provider_scans(anime_id)
     async with AsyncSessionLocal() as db:
         rows = await db.execute(
             select(EpisodeSource.episode, EpisodeSource.language)
@@ -434,7 +466,7 @@ async def cached_sources(
 ) -> tuple[dict[str, SourceScan], dict[int, list[SourceOption]]]:
     """Every cached option of a show (or of these episodes), per episode, in provider order:
     what the player needs."""
-    scans = await _scans(anime_id)
+    scans = await provider_scans(anime_id)
     query = select(EpisodeSource).where(
         EpisodeSource.anime_id == anime_id, EpisodeSource.provider.in_(providers)
     )

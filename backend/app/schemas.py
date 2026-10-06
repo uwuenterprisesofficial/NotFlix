@@ -73,6 +73,8 @@ class AnimeCard(ORM):
     next_episode: int | None = None  # when airing: the next episode and its air time
     next_episode_at: datetime | None = None  # in the release calendar / New Episodes: this episode
     pair: "PairOut | None" = None  # Watch Together: both users' side of the show
+    # Dubs NotFlix has found streams of ("de-dub", "en-dub"; shows looked up before only).
+    dubs: list[str] = []
 
 
 class AnimeDetail(AnimeCard):
@@ -201,6 +203,14 @@ class Row(BaseModel):
     items: list[AnimeCard]
 
 
+class LibraryResponse(BaseModel):
+    """The My List page: the user's list in sections, and shows related to what they watched."""
+
+    sections: list[Row]
+    # Relations of some listed shows are still being fetched: ask again in a moment.
+    related_pending: bool = False
+
+
 class BrowseResponse(BaseModel):
     hero: AnimeDetail | None
     rows: list[Row]
@@ -234,6 +244,8 @@ class Me(ORM):
     writing: dict[str, ListWriteOut] | None = None
     # The list is being synced in the background (e.g. right after the first sign-in).
     syncing: bool = False
+    # Shows friends recommended that the user hasn't looked at yet.
+    recommendations_unseen: int = 0
 
 
 class SyncResult(BaseModel):
@@ -386,6 +398,10 @@ class AnimeToastMappingIn(BaseModel):
 
 class ProgressUpdate(BaseModel):
     episodes_watched: int = Field(ge=0)
+
+
+class ScoreUpdate(BaseModel):
+    score: int = Field(ge=0, le=10)  # 0 removes the score
 
 
 class ListStatusUpdate(BaseModel):
@@ -601,3 +617,81 @@ class TogetherOut(BaseModel):
 # AnimeCard.pair refers to PairOut, defined after it.
 AnimeCard.model_rebuild()
 AnimeDetail.model_rebuild()
+
+
+# The shared stream library (see services/library.py)
+LIBRARY_SOURCE = r"^[a-z0-9_-]{1,30}/[A-Za-z0-9_]{1,48}$"
+
+
+class SharedOptionIn(BaseModel):
+    id: str = Field(max_length=500)
+    label: str = Field(max_length=200)
+    language: Literal["de-dub", "de-sub", "en-dub", "en-sub", "unknown"]
+    resolved: dict | None = None
+
+
+class SharedEpisodeIn(BaseModel):
+    episode: int = Field(ge=0, le=10_000)
+    options: list[SharedOptionIn] = Field(max_length=100)
+
+
+class SharedSourcesIn(BaseModel):
+    anime_id: int = Field(gt=0)
+    source: str = Field(pattern=LIBRARY_SOURCE)
+    episodes: list[SharedEpisodeIn] = Field(max_length=3000)
+
+
+class SharedEpisodeOut(BaseModel):
+    episode: int
+    options: list[dict]
+    updated_at: datetime
+
+
+class SharedSourceOut(BaseModel):
+    source: str
+    episodes: list[SharedEpisodeOut]
+
+
+# Recommending shows to friends (see api/friends.py)
+
+
+class FriendRecommendationIn(BaseModel):
+    anime_id: int = Field(gt=0)
+    # The friends' connections (see /together) it goes to.
+    connection_ids: list[int] = Field(min_length=1, max_length=50)
+    message: str | None = Field(None, max_length=300)
+
+
+class FriendRecommendationOut(BaseModel):
+    id: int
+    # Who recommended it (received) or who it went to (sent).
+    person: PersonOut
+    anime: AnimeCard
+    message: str | None
+    created_at: datetime
+    seen: bool
+    dismissed: bool = False
+    # Sent: where the friend is with it on their list (None: not on it).
+    their_progress: Progress | None = None
+
+
+class FriendRecommendationsOut(BaseModel):
+    received: list[FriendRecommendationOut]
+    sent: list[FriendRecommendationOut]
+    unseen: int
+
+
+class FriendForShowOut(BaseModel):
+    """A friend, as the recommend dialog of a show lists them."""
+
+    connection_id: int
+    person: PersonOut
+    # Already recommended to them (when), and where they are with the show on their list.
+    recommended_at: datetime | None = None
+    their_progress: Progress | None = None
+
+
+class ShowRecommendationsOut(BaseModel):
+    friends: list[FriendForShowOut]
+    # Friends who recommended this show to the viewer.
+    received: list[FriendRecommendationOut]

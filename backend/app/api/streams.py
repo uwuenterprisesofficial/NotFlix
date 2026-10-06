@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
-from app.api.deps import DB, CurrentUser, OptionalUser
+from app.api.deps import DB, OptionalUser, SignedInHere
 from app.core.cache import redis
 from app.models import ListEntry, ProviderMapping, SkipSegment, User
 from app.providers import base as providers_base
@@ -43,7 +43,7 @@ from app.schemas import (
     SubtitleOut,
 )
 from app.services import airing as airing_info
-from app.services import catalog, source_scan
+from app.services import catalog, library, source_scan
 from app.services.mappings import delete_mapping, save_mapping
 from app.services.proxy import TOKEN_MAX_AGE_S, proxy_url
 
@@ -135,6 +135,8 @@ async def _start_scan(
         window = [ep for ep in window if ep <= aired]
     # Nearest to the user first: those are stored (and shown) first.
     window = source_scan.by_distance(window, around)
+    # What others already found (the shared library) first: only the rest is looked for.
+    await library.pull(anime_id)
     whole = source_scan.by_distance(list(range(1, known + 1)), around) if known else None
     await source_scan.ensure_scan(info, window, airing, force, whole=whole)
     return info
@@ -296,15 +298,18 @@ def _progress(anime_id: int) -> ScanProgressOut | None:
 
 
 @router.get("/availability", response_model=AvailabilityOut)
-async def availability(anime_id: int, db: DB, user: OptionalUser):
-    """Cached per-episode languages; starts a background scan when the cache needs refreshing."""
-    await _start_scan(db, anime_id, user)
+async def availability(anime_id: int, db: DB, user: OptionalUser, episode: int | None = None):
+    """Cached per-episode languages; starts a background scan when the cache needs refreshing,
+    around `episode` (default: the user's next one)."""
+    await _start_scan(db, anime_id, user, around=episode)
     return await _availability(anime_id)
 
 
 @router.post("/availability/refresh", response_model=AvailabilityOut)
-async def refresh_availability(anime_id: int, db: DB, user: CurrentUser):
-    await _start_scan(db, anime_id, user, force=True)
+async def refresh_availability(
+    anime_id: int, db: DB, user: SignedInHere, episode: int | None = None
+):
+    await _start_scan(db, anime_id, user, around=episode, force=True)
     return await _availability(anime_id)
 
 
@@ -344,7 +349,7 @@ async def mappings(anime_id: int, db: DB):
 
 
 @router.put("/mappings/aniworld", status_code=status.HTTP_204_NO_CONTENT)
-async def set_aniworld_mapping(anime_id: int, body: AniWorldMappingIn, user: CurrentUser):
+async def set_aniworld_mapping(anime_id: int, body: AniWorldMappingIn, user: SignedInHere):
     await save_mapping(
         anime_id, "aniworld", body.slug, body.season, body.episode_offset, manual=True
     )
@@ -352,21 +357,21 @@ async def set_aniworld_mapping(anime_id: int, body: AniWorldMappingIn, user: Cur
 
 
 @router.delete("/mappings/aniworld", status_code=status.HTTP_204_NO_CONTENT)
-async def reset_aniworld_mapping(anime_id: int, user: CurrentUser):
+async def reset_aniworld_mapping(anime_id: int, user: SignedInHere):
     """Forget the mapping so it is detected again on the next request."""
     await delete_mapping(anime_id, "aniworld")
     await source_scan.forget(anime_id, "aniworld")
 
 
 @router.put("/mappings/animetoast", status_code=status.HTTP_204_NO_CONTENT)
-async def set_animetoast_mapping(anime_id: int, body: AnimeToastMappingIn, user: CurrentUser):
+async def set_animetoast_mapping(anime_id: int, body: AnimeToastMappingIn, user: SignedInHere):
     slugs = ",".join(dict.fromkeys(body.slugs))
     await save_mapping(anime_id, "animetoast", slugs, None, body.episode_offset, manual=True)
     await source_scan.forget(anime_id, "animetoast")
 
 
 @router.delete("/mappings/animetoast", status_code=status.HTTP_204_NO_CONTENT)
-async def reset_animetoast_mapping(anime_id: int, user: CurrentUser):
+async def reset_animetoast_mapping(anime_id: int, user: SignedInHere):
     """Forget the mapping so the pages are searched again on the next request."""
     await delete_mapping(anime_id, "animetoast")
     await source_scan.forget(anime_id, "animetoast")
@@ -396,6 +401,7 @@ async def preview(anime_id: int, db: DB, lang: Literal["de", "en"] = "en"):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Nothing has aired")
     episode = PREVIEW_EPISODE
     order = LANGUAGE_ORDER[lang]
+    await library.pull(anime_id)
     names = [p.name for p in providers_base.enabled_providers()]
     options = [
         o

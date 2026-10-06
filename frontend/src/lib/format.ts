@@ -22,12 +22,23 @@ export function nextEpisode(anime: {
 }
 
 const LIKED = "Because you liked ";
+const FRIEND = "friend:";
 
 /** A recommendation's reason (the backend stores it in English) in the UI's language. */
+const RELATIONS = ["PREQUEL", "SEQUEL", "PARENT", "SIDE_STORY", "SPIN_OFF", "ALTERNATIVE"];
+
 export function reasonText(t: T, reason: string): string {
-  return reason.startsWith(LIKED)
-    ? t("reason.becauseYouLiked", { title: reason.slice(LIKED.length) })
-    : reason;
+  if (reason.startsWith(LIKED)) {
+    return t("reason.becauseYouLiked", { title: reason.slice(LIKED.length) });
+  }
+  // "friend:<name>": a friend recommended it.
+  if (reason.startsWith(FRIEND)) return t("reason.fromFriend", { name: reason.slice(FRIEND.length) });
+  // "related:SEQUEL:<title>": the My List page's shows related to what was watched.
+  const related = /^related:([A-Z_]+):(.*)$/.exec(reason);
+  if (related && RELATIONS.includes(related[1])) {
+    return t(`reason.related.${related[1]}` as "reason.related.SEQUEL", { title: related[2] });
+  }
+  return reason;
 }
 
 /** MAL's "spring 2009" in the UI's language. */

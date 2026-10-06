@@ -42,6 +42,18 @@ export const desktop = {
     en: "Saved (leave empty to keep it)",
     de: "Gespeichert (leer lassen, um ihn zu behalten)",
   },
+  "server.hybrid": {
+    en: "Find and play streams on this PC",
+    de: "Streams auf diesem PC suchen und abspielen",
+  },
+  "server.hybridInfo": {
+    en: "Sign-in, lists, friends and Watch Together stay on the server. Streams are looked up and played from this PC (its own connection), and what it finds is shared with the server's library, so nobody has to look again.",
+    de: "Anmeldung, Listen, Freunde und Gemeinsam schauen bleiben auf dem Server. Streams werden von diesem PC aus gesucht und abgespielt (über seine eigene Verbindung), und was er findet, landet in der Bibliothek des Servers, damit niemand erneut suchen muss.",
+  },
+  "server.hybridError": {
+    en: "Streams can't be found on this PC right now (the server's are used): {error}",
+    de: "Streams können gerade nicht auf diesem PC gesucht werden (die des Servers werden genutzt): {error}",
+  },
   "server.connect": { en: "Connect", de: "Verbinden" },
   "server.checking": { en: "Connecting…", de: "Verbinde…" },
   "server.missing": {

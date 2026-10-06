@@ -6,15 +6,17 @@ import { AnalyzePanel } from "@/components/AnalyzePanel";
 import { AnimeToastMapping } from "@/components/AnimeToastMapping";
 import { AniWorldMapping } from "@/components/AniWorldMapping";
 import { EpisodeBrowser } from "@/components/EpisodeBrowser";
+import { RecommendedBy, RecommendToFriend } from "@/components/friends/RecommendToFriend";
 import { LazyDetails } from "@/components/LazyDetails";
 import { PredictionPanel } from "@/components/PredictionPanel";
+import { ScoreEditor } from "@/components/ScoreEditor";
 import { WatchTogetherMenu } from "@/components/together/TogetherBar";
 import { apiOrNull } from "@/lib/api";
 import { Synopsis } from "@/components/Synopsis";
 import { displayTitle, formatTime, mediaType, playableEpisode, seasonText } from "@/lib/format";
 import { type T, formatNumber, genreName, tagName } from "@/lib/i18n";
 import { getT } from "@/lib/i18n/server";
-import type { AnimeDetail, Me } from "@/lib/types";
+import type { AnimeDetail, Me, ShowRecommendations } from "@/lib/types";
 import { allowedImage } from "@/lib/images";
 
 export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
@@ -26,6 +28,10 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
     apiOrNull<Me>("/me"),
   ]);
   if (!anime) notFound();
+  // Friends: who recommended it, and whom it can be recommended to.
+  const shared = me
+    ? await apiOrNull<ShowRecommendations>(`/friends/recommendations/anime/${id}`).catch(() => null)
+    : null;
 
   const watched = anime.progress?.episodes_watched ?? 0;
   const title = displayTitle(anime);
@@ -80,6 +86,20 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
                   </span>
                 ))}
           </div>
+          {shared && <RecommendedBy received={shared.received} />}
+          {me && (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              {!me.guest && <ScoreEditor animeId={anime.id} progress={anime.progress} />}
+              {shared && (
+                <RecommendToFriend
+                  animeId={anime.id}
+                  title={title}
+                  episodes={anime.num_episodes}
+                  initial={shared}
+                />
+              )}
+            </div>
+          )}
           {anime.prediction && <PredictionPanel prediction={anime.prediction} />}
           <Synopsis
             animeId={anime.id}

@@ -33,6 +33,13 @@ export const search = {
   },
   "search.nothing": { en: "Nothing found.", de: "Nichts gefunden." },
   "search.searching": { en: "Searching…", de: "Suche…" },
+  "search.dub": { en: "With dub", de: "Mit Synchro" },
+  "search.dubInfo": {
+    en: "Shows NotFlix has already found dubbed streams of (in your language): every show anyone opened adds to this.",
+    de: "Serien, für die NotFlix schon Streams mit Synchro gefunden hat (in deiner Sprache): jede Serie, die jemand öffnet, kommt dazu.",
+  },
+  "search.dubbedShows": { en: "Dubbed shows", de: "Serien mit Synchro" },
+  "search.withDub": { en: " · with dub", de: " · mit Synchro" },
   "search.searchingMore": {
     en: "Searching MyAnimeList for more…",
     de: "Suche auf MyAnimeList nach mehr…",

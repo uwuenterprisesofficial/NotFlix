@@ -9,7 +9,7 @@ import type { Party } from "../together/WatchParty";
 import { usePartySync } from "../together/usePartySync";
 import { FullscreenButton, useFrameFullscreen } from "./PlayerFrame";
 
-function useStream(
+export function useStream(
   ref: React.RefObject<HTMLVideoElement | null>,
   url: string,
   isHls: boolean,
@@ -99,7 +99,8 @@ export function DirectVideo({
   onFail?: () => void;
   /** Where to start, e.g. the position of a stream that failed mid-episode. */
   resumeFrom?: () => number;
-  onPosition?: (seconds: number) => void;
+  /** The position (and the video's length, once known) as it plays. */
+  onPosition?: (seconds: number, duration: number) => void;
   /** Where this episode was stopped last time (resume watching): shows "Start over". */
   resumedAt?: number | null;
   /** Remember the position: every little while, on pause, and when the tab goes away
@@ -187,7 +188,7 @@ export function DirectVideo({
     if (!video) return;
     const t = video.currentTime;
     setTime(t);
-    onPosition?.(t);
+    onPosition?.(t, video.duration || 0);
     // Auto-skip the intro once; seeking back into it afterwards plays it normally.
     if (opening && autoSkip && !autoSkipped.current && t >= opening.start_s && t < opening.end_s) {
       autoSkipped.current = true;

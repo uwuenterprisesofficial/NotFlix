@@ -4,6 +4,7 @@ import { displayTitle, formatTime, nextEpisode, reasonText, seasonText } from "@
 import { formatNumber, genreName } from "@/lib/i18n";
 import { getT } from "@/lib/i18n/server";
 import type { AnimeDetail } from "@/lib/types";
+import { HeroPreview } from "./HeroPreview";
 import { PredictionBadge } from "./PredictionBadge";
 import { Synopsis } from "./Synopsis";
 import { allowedImage } from "@/lib/images";
@@ -25,6 +26,8 @@ export async function Hero({ anime }: { anime: AnimeDetail }) {
           className="scale-110 object-cover opacity-50 blur-2xl"
         />
       )}
+      {/* Shows (over the poster) once its episode plays. Nothing to play before it airs. */}
+      {anime.aired_episodes !== 0 && <HeroPreview animeId={anime.id} episode={episode} />}
       <div className="absolute inset-0 bg-gradient-to-r from-surface via-surface/70 to-transparent" />
       <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-surface to-transparent" />
 

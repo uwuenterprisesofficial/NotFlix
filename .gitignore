@@ -8,3 +8,6 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
+
+# Redis snapshots of a local redis-server
+dump.rdb

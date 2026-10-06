@@ -10,6 +10,7 @@ import { useT } from "./I18nProvider";
 // Row ids the backend sends, with their translated titles.
 const ROW_TITLES = new Set([
   "row.continue",
+  "row.from-friends",
   "row.recommended",
   "row.my-list",
   "row.watch-again",
@@ -38,6 +39,11 @@ export function AnimeRow({ row, pairNames }: { row: Row; pairNames?: PairNames }
         {row.id === "new-episodes" && (
           <Link href="/calendar" className="text-sm text-muted hover:text-white">
             {t("row.calendar")}
+          </Link>
+        )}
+        {(row.id === "my-list" || row.id === "continue") && (
+          <Link href="/my-list" className="text-sm text-muted hover:text-white">
+            {t("row.allOfMyList")}
           </Link>
         )}
       </div>

@@ -30,7 +30,7 @@ const TYPING_PAUSE_MS = 350;
 export function SearchControls({ genres }: { genres: Genre[] }) {
   const { t, lang } = useT();
   const params = useSearchParams();
-  const { q, genre: genreId, order } = readQuery(params);
+  const { q, genre: genreId, order, dub } = readQuery(params);
   const [text, setText] = useState(q);
   // The URL changed by itself (back/forward): show its query.
   const [shown, setShown] = useState(q);
@@ -40,12 +40,16 @@ export function SearchControls({ genres }: { genres: Genre[] }) {
   }
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  function go(next: { q?: string; genre?: number | null; order?: Order }, replace = false) {
+  function go(
+    next: { q?: string; genre?: number | null; order?: Order; dub?: boolean },
+    replace = false,
+  ) {
     clearTimeout(timer.current);
     const href = searchHref({
       q: (next.q ?? text).trim(),
       genre: next.genre === undefined ? genreId : next.genre,
       order: next.order ?? order,
+      dub: next.dub ?? dub,
     });
     if (href === `/search${params.size ? `?${params}` : ""}`) return;
     if (replace) window.history.replaceState(null, "", href);
@@ -119,6 +123,18 @@ export function SearchControls({ genres }: { genres: Genre[] }) {
           </option>
         ))}
       </select>
+      <label
+        className="flex items-center gap-2 rounded border border-white/20 bg-surface-raised px-3 py-2 text-sm"
+        title={t("search.dubInfo")}
+      >
+        <input
+          type="checkbox"
+          checked={dub}
+          onChange={(e) => go({ dub: e.target.checked })}
+          className="accent-brand"
+        />
+        {t("search.dub")}
+      </label>
       <button className="rounded bg-brand px-5 py-2 font-semibold hover:bg-brand-dark">
         {t("search.submit")}
       </button>

@@ -41,6 +41,8 @@ export type AnimeCard = {
   next_episode_at: string | null;
   /** Watch Together: both users' side of the show. */
   pair?: { me: PairSide | null; partner: PairSide | null } | null;
+  /** Dubs NotFlix has found streams of (search results; shows looked up before only). */
+  dubs?: Language[];
 };
 
 /** One user's side of a show: their list status and score, else their predicted score. */
@@ -180,6 +182,8 @@ export type Me = {
   anilist: { name: string | null } | null;
   /** Entries being added to the other list after a sync. */
   writing: Record<ListProvider, { done: number; total: number; failed: number }> | null;
+  /** Shows friends recommended that haven't been looked at yet. */
+  recommendations_unseen?: number;
 };
 
 export type SkipSegment = {
@@ -355,4 +359,36 @@ export type Together = {
   /** Whose lists the recommendations use (a guest, or an empty list, has none). */
   me_list: boolean;
   partner_list: boolean;
+};
+
+/** A show recommended to or by a friend (see backend/app/api/friends.py). */
+export type FriendRecommendation = {
+  id: number;
+  /** Who recommended it (received) or who it went to (sent). */
+  person: Person;
+  anime: AnimeCard;
+  message: string | null;
+  created_at: string;
+  seen: boolean;
+  /** The friend put it aside. */
+  dismissed: boolean;
+  /** Sent: where the friend is with it on their list. */
+  their_progress: Progress | null;
+};
+
+export type FriendRecommendations = {
+  received: FriendRecommendation[];
+  sent: FriendRecommendation[];
+  unseen: number;
+};
+
+/** For a show's page: the friends it can be recommended to, and who recommended it. */
+export type ShowRecommendations = {
+  friends: {
+    connection_id: number;
+    person: Person;
+    recommended_at: string | null;
+    their_progress: Progress | null;
+  }[];
+  received: FriendRecommendation[];
 };

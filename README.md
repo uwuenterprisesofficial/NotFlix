@@ -4,13 +4,16 @@ A Netflix-style front end for anime, backed by your MyAnimeList account:
 
 - **Hover previews**: hovering a poster (with a mouse) opens a bigger card, like Netflix: a muted preview of episode 1 from its opening when that's known, Play, **+** (add to Plan to watch on your linked lists), more info, MAL score and your predicted score/label, episode count, type, year, airing state with the next episode, and genres. See **Streams** for where the preview comes from.
 - **Release calendar**: a **New Episodes** row on the home page and a week calendar (**Calendar** in the top bar) of what airs when (see below).
-- **Browse**: hero banner plus rows for Continue Watching, Recommended for You, My List, Watch Again, and MAL's Top Airing / Most Popular / Coming Soon.
+- **Browse**: hero banner plus rows for Continue Watching, Recommended for You, My List, Watch Again, and MAL's Top Airing / Most Popular / Coming Soon. The banner's show plays a muted preview once its episode has loaded, from the episode's beginning or from its opening when that's known (**Settings**; it can be turned off).
+- **My List** (`/my-list`): what you're watching (most recent first), what of your list airs this season, what you plan to watch, and prequels, sequels, films and side stories of what you watched that aren't on your list yet. The relations come from AniList (50 shows per request), cached for a week.
+- **Your scores**: set or change your score (1–10) on a show's page; it's saved to every linked list (a show not on your list yet goes there as completed).
 - **Sync with MyAnimeList and/or AniList**: sign in with either or both (see **Lists** below); more can be linked in Settings. With MyAnimeList: sign in with MAL OAuth. "Sync MAL" imports your list and watch progress. Finishing an episode writes your progress back to MAL. Clicking **✓ Watched** again unwatches it: MAL only stores a count, so progress goes back to the episode before.
 - **Recommendations**: MAL community recommendations of your best-rated shows, ranked by your predicted score (see below), community votes and MAL's score.
 - **Statistics** (`/stats`): your list compared with MAL: score distribution next to MAL's for the same shows, favourite and disliked genres/themes, a sortable breakdown by genre, theme, demographic, studio, source, type and decade, hot takes (shows you rate far above or below MAL, acclaimed shows you dropped, hidden gems, genres you judge differently), and what drives your scores.
 - **Predicted scores and labels**: every show you haven't scored gets a predicted score and a label: **MUST WATCH**, **RECOMMENDED**, **MAYBE**, **PROBABLY SKIP** or **AVOID**. Labels show on posters, the banner and the detail page (with what moved the prediction). In **Settings** (gear icon) you can turn the poster labels off or show the predicted score next to them.
-- **Search** (magnifier icon): MyAnimeList title search, and a genre/theme/demographic dropdown to browse top rated, most popular, newest or "best for you".
-- **Player**: plays a direct stream (mp4/HLS) or embeds a third-party player in an `<iframe>`. The iframe isn't sandboxed because hosters refuse to play in one, so use your browser's popup/ad blocker against their ads.
+- **Search** (magnifier icon): MyAnimeList title search, and a genre/theme/demographic dropdown to browse top rated, most popular, newest or "best for you". **With dub** keeps (or lists) shows NotFlix has found dubbed streams of in your language; cards show a DUB badge. That comes from streams NotFlix has already looked up (none of the list APIs know about dubs), so it grows as shows are opened, and every user of a server shares it.
+- **Dub or sub**: **Settings** choose whether dubs or subtitles (in your language first) are picked when a show has both; a show's own choice in its episode list still wins.
+- **Player**: plays a direct stream (mp4/HLS) or embeds a third-party player in an `<iframe>`. In an episode's last five minutes, the next one's stream is looked up, checked and its beginning loaded in the background, so Next Episode starts at once (with a stream known to work). The iframe isn't sandboxed because hosters refuse to play in one, so use your browser's popup/ad blocker against their ads.
 - **Intro/outro detection**: compares audio fingerprints of two or more episodes to find the shared opening and ending. Results are stored in Postgres, so each episode is only analysed once, and they drive the "Skip Intro" / auto-skip controls.
 
 ## Stack
@@ -70,6 +73,18 @@ The API answers only requests that carry its key (`API_KEY`, at least 16 charact
 - **Desktop app:** you enter the key next to the server's address. It stays in the app (encrypted with the system's key store where there is one).
 - **Web app:** it adds `WEB_API_KEY` (in `docker compose`; `API_KEY` in its environment otherwise). Set it to the API key to use NotFlix in a browser; anyone who can open the web app then uses the API through it, so only expose it where that's fine. Left empty, the web app adds no key and only passes on requests that bring the right one themselves: the desktop app can then connect through the web app's `/api`, and browsers get nothing.
 - **Sign-in redirects** from MyAnimeList and AniList (`/auth/callback`, `/auth/anilist/callback`) are the only requests without the key: the provider sends the browser there. They only finish a sign-in that was started with the key (matched by its one-time `state`).
+
+### Publishing the backend image
+
+To build the backend's Docker image and push it to `registry.mfhost.de/notflix-backend:publish`, log in once and run the script:
+
+```sh
+docker login registry.mfhost.de
+scripts/publish-backend.sh             # Linux, macOS, Git Bash
+.\scripts\publish-backend.ps1          # Windows PowerShell
+```
+
+It builds for `linux/amd64` by default, also on an ARM Mac. To change the name, tag or platform, use `IMAGE=… TAG=… PLATFORM=… scripts/publish-backend.sh`, or `-Image`, `-Tag` and `-Platform` in PowerShell. When the container starts, it runs the database migrations (`alembic upgrade head`) and then the API on port 8000. It needs the same environment as in `docker-compose.yml`: `DATABASE_URL`, `REDIS_URL`, `API_KEY`, `SECRET_KEY`, and the sign-in and provider settings from `.env.example`.
 
 ## Desktop app
 
@@ -134,6 +149,18 @@ The key can be left empty later to keep the saved one. The box also shows on any
 **Signing in** needs nothing new at MyAnimeList or AniList: the redirect URLs stay the server's (`MAL_REDIRECT_URI`, `ANILIST_REDIRECT_URI`, `FRONTEND_URL` in the server's `.env`). The provider's page opens in the app's window and returns to the server's web app. That web app hands the sign-in back to the desktop app with a one-time token, valid for 2 minutes; only `localhost`/`127.0.0.1` addresses are accepted as targets. So `FRONTEND_URL` must be an address the PC can open.
 
 The server must run this version too: the backend for the sign-in hand-over, and the web app if the desktop app connects through its `/api`.
+
+### Both: streams on this PC (hybrid)
+
+With **Another server**, tick **Find and play streams on this PC** (only in apps built with the built-in server). The server then keeps everything about you: sign-in, lists, scores, friends, Watch Together, recommendations. The built-in server starts too, without sign-in settings, and does everything about streams: it looks for an episode's sources, resolves them and relays the video, all over this PC's own connection. The server's bandwidth isn't used for video, and sites that block the server's IP still work.
+
+Nothing is looked for twice:
+
+- **Show data** (titles, episode counts, airing) comes from the server's catalogue (`/library/anime/{id}`, asked again after a day). So the PC needs no MyAnimeList keys.
+- **The shared library:** before the PC looks for a show's sources, it takes what the server's library already knows (`/library/sources/{id}`, at most every 15 minutes per show). It only looks for episodes nobody has checked, or that went stale (6 hours for airing shows, 7 days for finished ones). What it finds goes back to the server's library (`POST /library/sources`). The server's own scans, for the web app, go there too. So the first person to open a show finds its streams, and everyone after reuses them.
+- Sources are shared per provider *and* the way it gets them (e.g. AniWorld through AniScraper or straight from the site): option ids mean nothing to another kind of provider. Direct links aren't shared, since they expire and can be bound to the IP that fetched them; hoster embed pages are. Local files (`/media`) never are.
+
+The library endpoints sit behind the server's API key like everything else. When the server can't be reached, streams found before still work, and the PC looks for new ones itself. If the built-in server doesn't start, the app uses the server's streams and says why under **Settings → Server**.
 
 ### Good to know
 
@@ -259,6 +286,13 @@ Connect with someone, get recommendations for both of you, and watch with a sync
 - **You both loved** and **Where you disagree** (shows you both scored at least 3 points apart).
 
 Each card shows both sides: a score (★9) or a predicted one (~8.4). The **taste match** combines how alike you score the shows you both watched (correlation) with how alike your genre tastes are. The result is cached until either of you syncs your list.
+
+**Recommending a show to a friend.** On a show's page, **Recommend** lists the people you're connected with (anyone can be recommended to, guests included). Each name shows where that friend already is with the show (on their list: status, episodes, score) and whether you recommended it before. Tick one or more, add a note if you like (up to 300 characters), and **Send**. Recommending the same show to the same friend again replaces the note and counts as new for them.
+
+- **The friend** gets a badge on **My List** in the menu (**Together** for a guest) until they open it. Their recommendations are at the top of My List under **From your friends**, with your note, and in a **From Your Friends** row on the home page. That row leaves out shows they finished or dropped. The show's page says who recommended it, with the note. **Not for me** puts one aside.
+- **You** see what you recommended at the end of My List, under **You recommended**, with where each friend is with it (or that they put it aside). **Take back** removes it.
+- Only recommendations between people who are still connected are shown. A guest who signs in keeps theirs.
+- API: `POST /api/friends/recommendations` (`anime_id`, `connection_ids`, `message`), `GET /api/friends/recommendations` (received, sent, unseen), `POST /api/friends/recommendations/seen`, `DELETE /api/friends/recommendations/{id}`, `GET /api/friends/recommendations/anime/{id}`.
 
 **The synced player.** **Watch together** on a show's page or under the player opens it in your room with that person (`?together=<id>` on the watch page). Each connection has one room, kept in Redis: which episode, the position at a server time, and whether it's playing. Both players follow it through server-sent events (`GET /api/together/{id}/room/events`, proxied by Next like the rest of the API) and send their own play, pause and seeks (`POST /api/together/{id}/room`), last change wins.
 

@@ -5,7 +5,13 @@ import { useTransition } from "react";
 import { DESIGNS, type Design, saveDesign } from "@/lib/design";
 import { type Lang, saveLang } from "@/lib/i18n";
 import { TIER_CLASS } from "@/lib/prediction";
-import { useShowPredictedScore, useShowTierLabels } from "@/lib/preferences";
+import {
+  useAudioPreference,
+  useHeroPreview,
+  usePreviewStart,
+  useShowPredictedScore,
+  useShowTierLabels,
+} from "@/lib/preferences";
 import type { Tier } from "@/lib/types";
 import { useT } from "./I18nProvider";
 import { LanguageFlag } from "./LanguageFlag";
@@ -62,6 +68,11 @@ export function SettingsForm({ design }: { design: Design }) {
   const [switching, startTransition] = useTransition();
   const [labels, setLabels] = useShowTierLabels();
   const [score, setScore] = useShowPredictedScore();
+  const [audio, setAudio] = useAudioPreference();
+  const [heroPreview, setHeroPreview] = useHeroPreview();
+  const [previewStart, setPreviewStart] = usePreviewStart();
+  const choice = (active: boolean) =>
+    `rounded px-4 py-2 font-semibold ${active ? "bg-white text-black" : "bg-surface-raised hover:bg-neutral-700"}`;
 
   function chooseDesign(next: Design) {
     saveDesign(next); // switches at once; the refresh keeps server-rendered parts in step
@@ -93,6 +104,54 @@ export function SettingsForm({ design }: { design: Design }) {
             </button>
           ))}
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold">{t("settings.audio")}</h2>
+        <p className="mt-1 text-sm text-muted">{t("settings.audioInfo")}</p>
+        <div role="radiogroup" aria-label={t("settings.audio")} className="mt-3 flex gap-2">
+          {(["dub", "sub"] as const).map((a) => (
+            <button
+              key={a}
+              role="radio"
+              aria-checked={a === audio}
+              onClick={() => setAudio(a)}
+              className={choice(a === audio)}
+            >
+              {t(a === "dub" ? "settings.preferDub" : "settings.preferSub")}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold">{t("settings.heroPreview")}</h2>
+        <div className="mt-2 divide-y divide-white/10">
+          <Toggle
+            label={t("settings.heroPreviewOn")}
+            description={t("settings.heroPreviewInfo")}
+            checked={heroPreview === "on"}
+            onChange={(on) => setHeroPreview(on ? "on" : "off")}
+          />
+        </div>
+        {heroPreview === "on" && (
+          <div role="radiogroup" aria-label={t("settings.previewStart")} className="mt-2">
+            <p className="text-sm text-muted">{t("settings.previewStart")}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {(["start", "opening"] as const).map((s) => (
+                <button
+                  key={s}
+                  role="radio"
+                  aria-checked={s === previewStart}
+                  onClick={() => setPreviewStart(s)}
+                  className={choice(s === previewStart)}
+                >
+                  {t(s === "start" ? "settings.previewFromStart" : "settings.previewOpening")}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <section>

@@ -18,7 +18,8 @@ const BUTTON =
 /**
  * Where the desktop app's backend runs (only shown in the desktop app): the built-in server on
  * this PC (when the app has one), with its sign-in settings, or another server by its address
- * and API key. Saving restarts what runs and reloads the app.
+ * and API key, optionally with streams found and played on this PC (hybrid). Saving restarts
+ * what runs and reloads the app.
  */
 export function ServerSettings({ unreachable = false }: { unreachable?: boolean }) {
   const { t } = useT();
@@ -91,6 +92,9 @@ function RemoteForm({
   const { t } = useT();
   const [url, setUrl] = useState(saved.url ?? "");
   const [key, setKey] = useState("");
+  const builtIn = saved.builtIn;
+  const [hybrid, setHybrid] = useState(saved.hybrid);
+  const [aniworldVia, setAniworldVia] = useState(builtIn?.settings.aniworldVia ?? "aniscraper");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<BackendError | null>(null);
 
@@ -98,7 +102,10 @@ function RemoteForm({
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const result = await desktop.setBackend(url.trim(), key.trim());
+    const result = await desktop.setBackend(url.trim(), key.trim(), {
+      hybrid: !!builtIn && hybrid,
+      aniworldVia,
+    });
     // On success the app reloads; until then it says so.
     if (!result.ok) {
       setError(result.error);
@@ -111,6 +118,11 @@ function RemoteForm({
       {unreachable && saved.mode === "remote" && (
         <p className="mt-3 text-sm text-red-400">
           {saved.url ? t("server.unreachable", { url: saved.url }) : t("server.missing")}
+        </p>
+      )}
+      {saved.mode === "remote" && saved.hybrid && builtIn?.error && (
+        <p className="mt-3 text-sm text-red-400">
+          {t("server.hybridError", { error: builtIn.error })}
         </p>
       )}
       <form onSubmit={save} className="mt-4 space-y-3">
@@ -137,6 +149,33 @@ function RemoteForm({
             className={FIELD}
           />
         </Field>
+        {builtIn && (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="hybrid"
+              checked={hybrid}
+              onChange={(e) => setHybrid(e.target.checked)}
+              className="mt-1"
+            />
+            <span>
+              <span className="font-semibold">{t("server.hybrid")}</span>
+              <span className="block text-xs text-muted">{t("server.hybridInfo")}</span>
+            </span>
+          </label>
+        )}
+        {builtIn?.serienStream && hybrid && (
+          <Field label={t("server.aniworldVia")}>
+            <select
+              value={aniworldVia}
+              onChange={(e) => setAniworldVia(e.target.value as typeof aniworldVia)}
+              className={FIELD}
+            >
+              <option value="aniscraper">{t("server.viaAniScraper")}</option>
+              <option value="serienstream">{t("server.viaSerienStream")}</option>
+            </select>
+          </Field>
+        )}
         <button type="submit" disabled={busy} className={BUTTON}>
           {busy ? t("server.checking") : t("server.connect")}
         </button>

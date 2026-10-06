@@ -23,6 +23,11 @@ def http_client() -> httpx.AsyncClient:
     return _client
 
 
+# A link's video data doesn't change (episodes aren't live), so the browser may keep it.
+MEDIA_CACHE_S = 3600
+PLAYLIST_CACHE_S = 600
+
+
 @router.get("/proxy")
 async def proxy(t: str, request: Request):
     try:
@@ -63,7 +68,7 @@ async def proxy(t: str, request: Request):
         return Response(
             text,
             media_type="application/vnd.apple.mpegurl",
-            headers={"Cache-Control": "no-store"},
+            headers={"Cache-Control": f"private, max-age={PLAYLIST_CACHE_S}"},
         )
 
     async def body_stream():
@@ -71,9 +76,12 @@ async def proxy(t: str, request: Request):
         async for chunk in chunks:
             yield chunk
 
+    passed = {k: v for k in PASSTHROUGH_HEADERS if (v := upstream.headers.get(k))}
     return StreamingResponse(
         body_stream(),
         status_code=upstream.status_code,
-        headers={k: v for k in PASSTHROUGH_HEADERS if (v := upstream.headers.get(k))},
+        # The browser may keep the video's data: the player preloads the next episode's first
+        # minutes, which it then reads from its cache instead of loading them again.
+        headers={**passed, "Cache-Control": f"private, max-age={MEDIA_CACHE_S}"},
         background=BackgroundTask(upstream.aclose),
     )
