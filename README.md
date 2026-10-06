@@ -76,22 +76,19 @@ The API answers only requests that carry its key (`API_KEY`, at least 16 charact
 
 ### Deploying on a server
 
-The `docker-compose.yml` in the repository's root is for development: it builds from the source and mounts it into the containers. On a server, use the images from the registry and [`deploy/docker-compose.yml`](deploy/docker-compose.yml) instead. That compose file runs the API with its two workers, the web app, PostgreSQL and Redis. Nothing is mounted over the images' code.
+The `docker-compose.yml` in the repository's root is for development: it builds from the source and mounts it into the containers. On a server, use the backend's image from the registry and [`deploy/docker-compose.yml`](deploy/docker-compose.yml) instead. That compose file runs the API, its two workers, PostgreSQL and Redis, and publishes the API on port 6500. Nothing is mounted over the image's code.
 
-The server doesn't scrape. Every stream source is switched off there (AniScraper, AniWorld, Anivexa, ReAnime), whatever `.env` says. The server keeps accounts, lists, scores, friends, Watch Together and the [shared stream library](#both-streams-on-this-pc-hybrid). The desktop apps look for streams and play them on their PCs, in hybrid mode, and send what they find to the library. A show is then looked up once for everyone. As a consequence:
+The server is for the desktop apps, and it doesn't scrape. Every stream source is switched off there (AniScraper, AniWorld, Anivexa, ReAnime), whatever the settings say. The server keeps accounts, lists, scores, friends, recommendations, Watch Together and the [shared library](#both-streams-on-this-pc-hybrid) of streams and German synopses. The desktop apps look for streams and play them on their PCs, in hybrid mode, and send what they find to the library. A show is then looked up once for everyone. There's no web app on the server, so there's nothing to open in a browser. Add the `frontend` image yourself if you want one.
 
-- In a browser, the web app has the lists, friends and recommendations, but no streams to play. Watch in the desktop app.
-- German synopses come from AniWorld and AnimeToast too. The desktop apps look them up and share them, so a show has its German synopsis on the server (in browsers as well) once someone opened it in the app with NotFlix in German. Until then it shows MyAnimeList's English one.
-
-**1. Build and push the images** (on your PC, from the repository):
+**1. Build and push the image** (on your PC, from the repository):
 
 ```sh
-docker login registry.mfhost.de
+docker login registry.uwuenterprises.de
 scripts/publish.sh                     # Linux, macOS, Git Bash
 .\scripts\publish.ps1                  # Windows PowerShell
 ```
 
-This pushes `registry.mfhost.de/notflix-backend` and `notflix-frontend`, both tagged `publish`, built for `linux/amd64`. To push only one of them, name it: `scripts/publish.sh backend`. AniScraper isn't needed on the server; the desktop app has its own. `scripts/publish-backend.sh` is the same as `scripts/publish.sh backend`. To change the registry, tag or platform, use `REGISTRY=…`, `TAG=…` and `PLATFORM=…`, or `-Registry`, `-Tag` and `-Platform` in PowerShell.
+This pushes `registry.uwuenterprises.de/notflix-backend:latest`, built for `linux/amd64`. `scripts/publish.sh backend frontend` also pushes the web app (`aniscraper` works too). To change the registry, tag or platform, use `REGISTRY=…`, `TAG=…` and `PLATFORM=…`, or `-Registry`, `-Tag` and `-Platform` in PowerShell.
 
 **2. Set it up on the server.** Copy the two files from `deploy/` into a folder there (the rest of the repository isn't needed):
 
@@ -100,33 +97,31 @@ mkdir notflix && cd notflix
 # copy deploy/docker-compose.yml and deploy/.env.example here, then:
 cp .env.example .env
 nano .env                              # fill it in, see below
-docker login registry.mfhost.de
+docker login registry.uwuenterprises.de
 docker compose pull
 docker compose up -d
 ```
 
-In `.env`:
+In `.env`, or as the stack's environment variables in a deploy tool (Portainer, Dokploy, Coolify, …), since the compose file reads them either way:
 
 - `API_KEY`, `SECRET_KEY`, `POSTGRES_PASSWORD`: long random values of letters and digits, e.g. from `openssl rand -hex 32`. Avoid `$`, `@`, `%` and quotes. `POSTGRES_PASSWORD` only counts when the database is created; see below to change it later.
-- `FRONTEND_URL`: the address the web app is reached at from outside, e.g. `https://notflix.example.com`. Sign-ins come back there.
-- The sign-in apps (`MAL_*`, `ANILIST_*`). Register the redirect URLs `<FRONTEND_URL>/api/auth/callback` (MyAnimeList) and `<FRONTEND_URL>/api/auth/anilist/callback` (AniList), and enter the same in `MAL_REDIRECT_URI` and `ANILIST_REDIRECT_URI`.
-- `WEB_API_KEY`: set it to `API_KEY` to use NotFlix in a browser. Leave it empty if only the desktop app should get in: the app sends the key itself.
-- Any other backend setting from the repository's [`.env.example`](.env.example) can go in too. The compose file passes the whole `.env` to the backend.
-- With a deploy tool (Portainer, Dokploy, Coolify, …), you can enter the same settings as the stack's environment variables instead of a `.env` file. The compose file reads them either way. The redirect URLs default to `<FRONTEND_URL>/api/auth/callback` and `…/anilist/callback`.
+- `FRONTEND_URL`: the server's public address, e.g. `https://notflix.example.com`. That's your HTTPS proxy in front of port 6500, or `http://<server>:6500` without one. Sign-ins come back there and continue in the desktop app.
+- The sign-in apps (`MAL_CLIENT_ID`/`_SECRET`, `ANILIST_CLIENT_ID`/`_SECRET`). Register the redirect URLs `<FRONTEND_URL>/auth/callback` (MyAnimeList) and `<FRONTEND_URL>/auth/anilist/callback` (AniList). Those are the defaults; set `MAL_REDIRECT_URI` or `ANILIST_REDIRECT_URI` only if yours differ.
+- Any other backend setting from the repository's [`.env.example`](.env.example) can go in `.env` too. The compose file passes the whole file to the backend.
 
-On start, the backend migrates the database (`alembic upgrade head`), then serves the API. The workers wait until it's healthy. `docker compose ps` should show every service up and the backend `healthy`. `docker compose logs -f backend` shows what it does.
+A missing `API_KEY`, `SECRET_KEY`, `FRONTEND_URL` or `POSTGRES_PASSWORD` stops `docker compose up` with a message naming it. On start, the backend migrates the database, then serves the API; the workers wait until it's healthy. `docker compose ps` should show every service up and the backend `healthy`.
 
-**3. HTTPS in front.** The web app listens on port 3000 (`WEB_PORT`), and it is the only way in: it passes `/api/*` on to the backend, which isn't published. Put a reverse proxy with HTTPS in front of it, because the API key travels in a header. With [Caddy](https://caddyserver.com), the whole configuration is:
+**3. HTTPS in front.** Put a reverse proxy with HTTPS in front of port 6500, because the API key travels in a header and MyAnimeList wants HTTPS redirect URLs. With [Caddy](https://caddyserver.com), the whole configuration is:
 
 ```
 notflix.example.com {
-    reverse_proxy localhost:3000
+    reverse_proxy localhost:6500
 }
 ```
 
 With nginx, turn off buffering (`proxy_buffering off;`), or Watch Together's live updates (server-sent events) stall.
 
-**4. Connect the desktop app.** Choose **Another server**, enter `https://notflix.example.com/api` and the `API_KEY`. Keep **Find and play streams on this PC** ticked ([hybrid mode](#both-streams-on-this-pc-hybrid), on by default for a new server). Without it, the app has no streams, since the server doesn't look for any. This needs an app built with the built-in server (`npm run dist`, not `dist:client`).
+**4. Connect the desktop app.** Choose **Another server**, enter `https://notflix.example.com` (the backend itself, no `/api`) and the `API_KEY`. Keep **Find and play streams on this PC** ticked ([hybrid mode](#both-streams-on-this-pc-hybrid), on by default for a new server). Without it, the app has no streams, since the server doesn't look for any. This needs an app built with the built-in server (`npm run dist`, not `dist:client`).
 
 **Updating.** Publish again from your PC, then on the server run `docker compose pull && docker compose up -d`. New migrations run by themselves when the backend starts.
 
@@ -140,7 +135,7 @@ With nginx, turn off buffering (`proxy_buffering off;`), or Watch Together's liv
 - Use `deploy/docker-compose.yml` and nothing else. The repository's root `docker-compose.yml` (and `docker-compose.prod.yml`) build from the source and mount `./backend` over the image's code. A tool that deploys from the git repository (Portainer, Coolify, Dokploy, …) must point at `deploy/docker-compose.yml`, not the root.
 - Don't override the backend's `command`. It must stay `notflix-start`, which runs the migrations and then the API.
 
-**`API_KEY must be set to at least 16 characters`** means the setting doesn't reach the backend. `docker compose config | grep API_KEY` shows what compose makes of it. The file must be named exactly `.env` (not `env` or `.env.txt`, as Windows may save it) and sit next to `docker-compose.yml`, or the variables must be set in your deploy tool. A missing `API_KEY`, `SECRET_KEY`, `FRONTEND_URL` or `POSTGRES_PASSWORD` stops `docker compose up` with a message naming it.
+**`API_KEY must be set to at least 16 characters`** means the setting doesn't reach the backend: the error says whether it's missing or too short. `docker compose config | grep API_KEY` shows what compose makes of it. The file must be named exactly `.env` (not `env` or `.env.txt`, as Windows may save it) and sit next to `docker-compose.yml`, or the variables must be set in your deploy tool. Don't remove the backend's `environment:` lines in the compose file: they bring the settings to it.
 
 **`password authentication failed for user "notflix"`** means the database was created with another password. PostgreSQL only reads `POSTGRES_PASSWORD` the first time it starts with an empty volume. The development compose file uses `notflix`, and both compose files share the volume `notflix_pgdata` (same project name). The backend then prints how to fix it. Either:
 

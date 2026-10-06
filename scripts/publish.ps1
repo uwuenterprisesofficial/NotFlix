@@ -1,15 +1,15 @@
 # Build NotFlix's server images and push them to the registry, for deploy/docker-compose.yml
 # (Windows PowerShell).
 #
-#   docker login registry.mfhost.de      (once)
-#   .\scripts\publish.ps1                the server's images: backend and frontend
-#   .\scripts\publish.ps1 backend        only some of them (aniscraper too, if you want it)
+#   docker login registry.uwuenterprises.de      (once)
+#   .\scripts\publish.ps1                the server's image: backend
+#   .\scripts\publish.ps1 backend frontend   others too (the web app, aniscraper)
 #
-# Pushes registry.mfhost.de/notflix-<name>:publish. Override with -Registry, -Tag and -Platform
+# Pushes registry.uwuenterprises.de/notflix-<name>:latest. Override with -Registry, -Tag and -Platform
 # (default linux/amd64).
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$Images = @("backend", "frontend"),
+    [string[]]$Images = @("backend"),
     [string]$Registry = "registry.uwuenterprises.de",
     [string]$Tag = "latest",
     [string]$Platform = "linux/amd64"

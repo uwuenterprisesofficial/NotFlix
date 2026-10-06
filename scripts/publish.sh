@@ -1,22 +1,22 @@
 #!/usr/bin/env sh
 # Build NotFlix's server images and push them to the registry, for deploy/docker-compose.yml.
 #
-#   docker login registry.mfhost.de      (once)
-#   scripts/publish.sh                   the server's images: backend and frontend
-#   scripts/publish.sh backend           only some of them (aniscraper too, if you want it)
+#   docker login registry.uwuenterprises.de      (once)
+#   scripts/publish.sh                   the server's image: backend
+#   scripts/publish.sh backend frontend  others too (the web app, aniscraper)
 #
-# Pushes registry.mfhost.de/notflix-<name>:publish. Override with REGISTRY=..., TAG=... and the
+# Pushes registry.uwuenterprises.de/notflix-<name>:latest. Override with REGISTRY=..., TAG=... and the
 # target platform with PLATFORM=... (default linux/amd64, also when building on an ARM Mac).
 set -eu
 
-REGISTRY="${REGISTRY:-registry.mfhost.de}"
-TAG="${TAG:-publish}"
+REGISTRY="${REGISTRY:-registry.uwuenterprises.de}"
+TAG="${TAG:-latest}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Printed by the backend when it starts: shows which build a server runs.
 VERSION="$(git -C "$ROOT" describe --always --dirty 2>/dev/null || echo unknown) $(date -u +%Y-%m-%dT%H:%MZ)"
 
-[ $# -gt 0 ] || set -- backend frontend
+[ $# -gt 0 ] || set -- backend
 for name in "$@"; do
     case "$name" in
         backend | aniscraper) target="" ;;
