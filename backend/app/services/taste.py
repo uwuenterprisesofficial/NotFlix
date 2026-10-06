@@ -10,8 +10,18 @@ low scores (with half weight). Features seen on fewer than two shows are left ou
 ridge penalty pulls rarely seen ones towards zero, so a single loved show doesn't make its
 genre a favourite.
 
+MAL's score is held back (a strong ridge penalty on its weight): the user's own preferences
+should explain their scores, not the community's. Two things the regression can't see are added
+when predicting:
+
+- the franchise: the user's scores of the show's prequels, sequels, side stories and films (a
+  sequel of something they loved is likely loved too), and
+- the shows they scored highly whose MyAnimeList community recommendations include it.
+
 Predictions are labelled by where they fall among the (cross-validated) predictions for the
-user's own list: at the top of what they watched is a MUST WATCH, at the bottom an AVOID.
+user's own list: at the top of what they watched is a MUST WATCH, at the bottom an AVOID. A
+show the community rates low that fits the categories the user watches most is a GUILTY WATCH
+on top of that.
 """
 
 import math
@@ -24,7 +34,7 @@ import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Anime, ListEntry, ListStatus, TasteModel, User
+from app.models import Anime, CommunityRecommendation, ListEntry, ListStatus, TasteModel, User
 from app.services.tags import category, tags_from_names
 
 Tier = Literal["must_watch", "recommended", "maybe", "skip", "avoid"]
@@ -34,13 +44,30 @@ TIER_PERCENTILES = (85, 60, 30, 12)
 
 MIN_SCORED = 10  # fewer scored shows than this: no predictions
 MIN_FEATURE_COUNT = 2
-RIDGE = 4.0  # penalty on each one-hot weight, in shows
-RIDGE_MAL = 1.0
+RIDGE = 3.0  # penalty on each one-hot weight, in shows
+# MAL's score: penalised per training show, which roughly halves its weight (personal taste
+# should carry more).
+RIDGE_MAL_PER_SHOW = 0.3
 RIDGE_POPULARITY = 2.0
 DROPPED_WEIGHT = 0.5
 FOLDS = 5
 MAX_STUDIOS = 2
-MODEL_VERSION = 2  # bump to refit stored models after a change to the features
+MODEL_VERSION = 3  # bump to refit stored models after a change to the features
+
+# The franchise and community recommendations (see Context): points per point the user's
+# score of the related show is above (or below) their average, and at most this many points.
+FRANCHISE_WEIGHT = 0.6
+RECOMMENDED_WEIGHT = 0.3
+CONTEXT_CAP = 2.0
+# A show recommended by one the user scored at least this far above their average.
+LOVED_ABOVE_MEAN = 1.0
+# GUILTY WATCH: MAL's score below this (and below the user's usual by GUILTY_MAL_MARGIN), yet
+# at least GUILTY_TOP_MATCHES of the user's most watched categories and a liking for it.
+GUILTY_MAL_MAX = 7.0
+GUILTY_MAL_MARGIN = 0.5
+GUILTY_TOP_TAGS = 6
+GUILTY_TOP_MATCHES = 2
+GUILTY_MIN_TASTE = 0.3
 
 
 @dataclass(frozen=True)
@@ -135,19 +162,46 @@ def _popularity(show: Show) -> float | None:
 class Prediction:
     score: float
     tier: Tier
-    # The features that moved the prediction most, as (name, points), strongest first.
     # The features that moved it most, as (feature key, name, points), strongest first. The key
-    # ("tag:62", "source:manga", "mal", "popularity", ...) lets the UI translate the name.
+    # ("tag:62", "source:manga", "mal", "popularity", "franchise", "recommended", ...) lets the
+    # UI translate the name.
     reasons: list[tuple[str, str, float]] = field(default_factory=list)
+    # Rated low by the community, but it's what the user watches most (and likes).
+    guilty: bool = False
+
+
+# The user's scored shows a show is related to: (title, the user's score).
+Related = list[tuple[str, int]]
+
+
+@dataclass
+class Context:
+    """What the regression can't see, for one user (see predictor_for)."""
+
+    # anime id -> the user's scored shows of the same franchise (prequel, sequel, ...)
+    franchise: dict[int, Related] = field(default_factory=dict)
+    # anime id -> the shows the user scored highly whose community recommendations include it
+    recommended: dict[int, Related] = field(default_factory=dict)
+
+
+def _related_term(related: Related, mean: float, weight: float) -> tuple[str, float]:
+    """The strongest-felt related show's title, and the points: weight per point of the
+    average related score above the user's mean, capped."""
+    average = sum(score for _, score in related) / len(related)
+    title = max(related, key=lambda r: abs(r[1] - mean))[0]
+    points = max(-CONTEXT_CAP, min(CONTEXT_CAP, weight * (average - mean)))
+    return title, points
 
 
 class Predictor:
-    """A fitted model (the dict stored in TasteModel.data)."""
+    """A fitted model (the dict stored in TasteModel.data), with the user's Context."""
 
-    def __init__(self, data: dict[str, Any]):
+    def __init__(self, data: dict[str, Any], context: Context | None = None):
         self.data = data
         self.weights: dict[str, float] = data["weights"]
-        self.names: dict[str, str] = data["names"]
+        self.names: dict[str, str] = dict(data["names"])  # (gets the related shows' titles)
+        self.context = context or Context()
+        self.top_tags: set[str] = set(data.get("top_tags", []))
 
     def _terms(self, show: Show) -> tuple[float, list[tuple[str, float]]]:
         d = self.data
@@ -160,10 +214,31 @@ class Predictor:
         for key in features(show):
             if key in self.weights:
                 terms.append((key, self.weights[key]))
+        mean = d.get("user_mean", 7.0)
+        for kind, related, weight in (
+            ("franchise", self.context.franchise.get(show.id), FRANCHISE_WEIGHT),
+            ("recommended", self.context.recommended.get(show.id), RECOMMENDED_WEIGHT),
+        ):
+            if related:
+                title, points = _related_term(related, mean, weight)
+                self.names[f"{kind}:{show.id}"] = title
+                terms.append((f"{kind}:{show.id}", points))
         return d["intercept"] + sum(v for _, v in terms), terms
 
     def name(self, key: str) -> str:
         return {"mal": "MAL score", "popularity": "Popularity"}.get(key) or self.names[key]
+
+    def guilty(self, show: Show, terms: list[tuple[str, float]]) -> bool:
+        """The community rates it low, yet it's in the categories the user watches most and
+        their taste (everything but MAL's score and popularity) likes it."""
+        if show.mean is None or not self.top_tags:
+            return False
+        limit = min(GUILTY_MAL_MAX, self.data["mal_center"] - GUILTY_MAL_MARGIN)
+        if show.mean >= limit:
+            return False
+        matches = sum(1 for key in features(show) if key in self.top_tags)
+        taste = sum(v for key, v in terms if key not in ("mal", "popularity"))
+        return matches >= GUILTY_TOP_MATCHES and taste >= GUILTY_MIN_TASTE
 
     def score(self, show: Show) -> float:
         return round(min(10.0, max(1.0, self._terms(show)[0])), 2)
@@ -182,10 +257,17 @@ class Predictor:
             score=score,
             tier=self.tier(score),
             reasons=[
-                (key, self.name(key), round(v, 2))
+                # franchise:<id> / recommended:<id> -> franchise / recommended (the name is
+                # the related show's title)
+                (
+                    key.split(":")[0] if key.startswith(("franchise:", "recommended:")) else key,
+                    self.name(key),
+                    round(v, 2),
+                )
                 for key, v in strongest[:reasons]
                 if abs(v) >= 0.05
-            ],
+            ],  # fmt: skip
+            guilty=self.guilty(show, terms),
         )
 
 
@@ -222,7 +304,8 @@ def _design(
 
 
 def _solve(x: np.ndarray, y: np.ndarray, w: np.ndarray, n_onehot: int) -> np.ndarray:
-    penalty = np.diag([0.0, RIDGE_MAL, RIDGE_POPULARITY] + [RIDGE] * n_onehot)
+    ridge_mal = RIDGE_MAL_PER_SHOW * len(y)
+    penalty = np.diag([0.0, ridge_mal, RIDGE_POPULARITY] + [RIDGE] * n_onehot)
     xtw = x.T * w
     return np.linalg.solve(xtw @ x + penalty, xtw @ y)
 
@@ -280,6 +363,7 @@ def fit(rated: list[Rated]) -> dict[str, Any] | None:
     offset = user_mean - float(np.mean(community)) if community else 0.0
     baseline = np.array([(s.mean + offset) if s.mean is not None else user_mean for s in shows])
     model.update(
+        top_tags=_top_tags(rated),
         version=MODEL_VERSION,
         n=int(real.sum()),
         user_mean=user_mean,
@@ -288,6 +372,18 @@ def fit(rated: list[Rated]) -> dict[str, Any] | None:
         baseline_mae=float(np.abs(baseline - y)[real].mean()),
     )
     return model
+
+
+def _top_tags(rated: list[Rated]) -> list[str]:
+    """The categories (genres, themes, demographics) the user watches most: on the most shows
+    they watched (not dropped, not just planned)."""
+    counts: dict[str, int] = {}
+    for r in rated:
+        if r.status in (ListStatus.plan_to_watch, ListStatus.dropped):
+            continue
+        for tag_id, _ in r.show.tags:
+            counts[f"tag:{tag_id}"] = counts.get(f"tag:{tag_id}", 0) + 1
+    return [k for k, _ in sorted(counts.items(), key=lambda kv: -kv[1])[:GUILTY_TOP_TAGS]]
 
 
 async def load_rated(db: AsyncSession, user_id: int) -> list[Rated]:
@@ -315,8 +411,43 @@ async def refit(db: AsyncSession, user: User, rated: list[Rated] | None = None) 
     return Predictor(data) if data else None
 
 
+async def load_context(db: AsyncSession, user_id: int, mean: float) -> Context:
+    """The user's scored shows' franchises (AniList relations, cached; missing ones are fetched
+    in the background) and the community recommendations of the ones they loved."""
+    from app.services import related
+
+    rows = await db.execute(
+        select(ListEntry.anime_id, ListEntry.score, Anime.title, Anime.title_en)
+        .join(Anime, Anime.id == ListEntry.anime_id)
+        .where(ListEntry.user_id == user_id, ListEntry.score > 0)
+    )
+    scored = {anime_id: (title_en or title, score) for anime_id, score, title, title_en in rows}
+    context = Context()
+    relations = await related.cached(list(scored))
+    related.ensure(user_id, [i for i in scored if i not in relations])
+    for anime_id, found in relations.items():
+        for entry in found:
+            context.franchise.setdefault(entry["row"]["id"], []).append(scored[anime_id])
+    loved = [i for i, (_, score) in scored.items() if score >= mean + LOVED_ABOVE_MEAN]
+    if loved:
+        recs = await db.scalars(
+            select(CommunityRecommendation).where(CommunityRecommendation.anime_id.in_(loved))
+        )
+        for rec in recs:
+            context.recommended.setdefault(rec.recommended_id, []).append(scored[rec.anime_id])
+    return context
+
+
 async def predictor_for(db: AsyncSession, user: User | None) -> Predictor | None:
-    """The user's stored model, fitted first if it's missing or older than their list."""
+    """The user's stored model (fitted first if it's missing or older than their list), with
+    their context (see load_context)."""
+    predictor = await _fitted(db, user)
+    if predictor is not None and user is not None:
+        predictor.context = await load_context(db, user.id, predictor.data.get("user_mean", 7.0))
+    return predictor
+
+
+async def _fitted(db: AsyncSession, user: User | None) -> Predictor | None:
     if user is None:
         return None
     row = await db.get(TasteModel, user.id)

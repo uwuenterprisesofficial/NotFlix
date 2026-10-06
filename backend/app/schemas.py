@@ -16,7 +16,9 @@ class Progress(BaseModel):
 
 
 class ReasonOut(BaseModel):
-    key: str  # tag:<id>, studio:<name>, source:<source>, type:<type>, era:<decade>, mal, popularity
+    # tag:<id>, studio:<name>, source:<source>, type:<type>, era:<decade>, mal, popularity, or
+    # franchise / recommended (the name is the related show's title)
+    key: str
     name: str
     points: float  # how much this feature moves the predicted score
 
@@ -27,6 +29,8 @@ class PredictionOut(BaseModel):
     score: float
     tier: Literal["must_watch", "recommended", "maybe", "skip", "avoid"]
     reasons: list[ReasonOut] = []
+    # GUILTY WATCH: rated low by the community, but in the categories the user watches most.
+    guilty: bool = False
 
 
 class TagOut(BaseModel):

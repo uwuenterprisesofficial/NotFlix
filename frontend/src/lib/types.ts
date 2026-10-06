@@ -14,6 +14,8 @@ export type Prediction = {
   tier: Tier;
   /** The features that moved the prediction most (detail page only). */
   reasons: { key: string; name: string; points: number }[];
+  /** Rated low by the community, but in the categories the user watches most. */
+  guilty?: boolean;
 };
 
 export type TagCategory = "genre" | "theme" | "demographic" | "explicit";

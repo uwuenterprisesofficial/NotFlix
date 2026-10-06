@@ -74,6 +74,8 @@ export function featureName(lang: Lang, key: string, name: string): string {
   const value = cut < 0 ? "" : key.slice(cut + 1);
   if (key === "mal") return t("feature.mal");
   if (key === "popularity") return t("feature.popularity");
+  if (key === "franchise") return t("feature.franchise", { title: name });
+  if (key === "recommended") return t("feature.recommended", { title: name });
   if (prefix === "tag") return tagName(lang, Number(value), name);
   if (prefix === "era") return t("feature.era", { decade: value });
   if (prefix === "source") return sources[value]?.[lang] ?? name;

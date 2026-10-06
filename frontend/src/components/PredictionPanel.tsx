@@ -17,7 +17,10 @@ export function PredictionPanel({ prediction }: { prediction: Prediction }) {
           <strong className="text-lg">{formatNumber(lang, prediction.score, 1)}</strong>
         </span>
       </div>
-      <p className="mt-1 text-xs text-muted">{t(`tierInfo.${prediction.tier}`)}.</p>
+      <p className="mt-1 text-xs text-muted">
+        {t(`tierInfo.${prediction.tier}`)}.
+        {prediction.guilty && ` ${t("prediction.guiltyInfo")}.`}
+      </p>
       {prediction.reasons.length > 0 && (
         <ul className="mt-3 flex flex-wrap gap-2 text-xs">
           {prediction.reasons.map((r) => (

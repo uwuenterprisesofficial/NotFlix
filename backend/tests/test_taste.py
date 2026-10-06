@@ -328,3 +328,91 @@ async def test_stats_in_an_old_format_are_not_shown(client, user):
     assert body["status"] == "loading" and body["stats"] is None
     await stats_jobs.wait_idle()
     assert (await client.get("/me/stats")).json()["status"] == "ready"
+
+
+def test_personal_taste_outweighs_mals_score():
+    # A user who agrees with MAL exactly: the model still leans less on MAL than that.
+    rng = random.Random(3)
+    rated = []
+    for i in range(120):
+        show = _show(rng, i)
+        rated.append(Rated(show, "completed", round(min(10, max(1, show.mean + 0.5)))))
+    model = fit(rated)
+    assert 0.2 < model["mal_coef"] < 0.75
+
+
+def test_franchise_and_community_recommendations_move_the_prediction():
+    from app.services.taste import FRANCHISE_WEIGHT, RECOMMENDED_WEIGHT, Context
+
+    model = fit(_list())
+    mean = model["user_mean"]
+    rng = random.Random(9)
+    sequel = _show(rng, 500, tags=[(1, "Action"), (4, "Comedy"), (27, "Shounen")])
+    plain = Predictor(model).predict(sequel, reasons=10)
+    context = Context(
+        franchise={500: [("Season 1", 10)]},
+        recommended={500: [("A favourite", 10), ("Another", 9)]},
+    )
+    boosted = Predictor(model, context).predict(sequel, reasons=10)
+    expected = FRANCHISE_WEIGHT * (10 - mean) + RECOMMENDED_WEIGHT * (9.5 - mean)
+    assert boosted.score == pytest.approx(min(10, plain.score + expected), abs=0.02)
+    reasons = {key: name for key, name, _ in boosted.reasons}
+    assert reasons["franchise"] == "Season 1"
+    assert reasons["recommended"] == "A favourite"
+    # A franchise the user disliked pulls it down.
+    disliked = Predictor(model, Context(franchise={500: [("Season 1", 3)]})).predict(sequel)
+    assert disliked.score < plain.score
+
+
+def test_guilty_watch_low_mal_score_in_the_users_favourite_categories():
+    model = fit(_list())
+    rng = random.Random(4)
+    predictor = Predictor(model)
+    names = dict(TAGS)
+    # Psychological (loved), with two of the categories the user watches most.
+    top = sorted(int(t[4:]) for t in predictor.top_tags if t not in ("tag:40", "tag:62"))[:2]
+    favourites = [(40, "Psychological"), *((t, names[t]) for t in top)]
+    trashy = _show(rng, 600, tags=favourites, mean=5.9)
+    assert predictor.predict(trashy).guilty is True
+    # Rated well by the community: just a good match, not a guilty one.
+    assert predictor.predict(_show(rng, 601, tags=favourites, mean=8.4)).guilty is False
+    # Low and not the user's thing: no label either.
+    isekai = _show(rng, 602, tags=[(62, "Isekai"), (36, "Slice of Life")], mean=5.9)
+    assert predictor.predict(isekai).guilty is False
+
+
+async def test_the_context_comes_from_relations_and_community_recommendations(database, user):
+    import json
+
+    from sqlalchemy import delete
+
+    from app.core.cache import close, redis
+    from app.db.session import AsyncSessionLocal, async_engine, sync_session
+    from app.models import Anime, CommunityRecommendation, ListEntry
+    from app.services.taste import load_context
+
+    with sync_session() as db:
+        db.execute(delete(ListEntry).where(ListEntry.user_id == user.id))
+        db.execute(delete(CommunityRecommendation))
+        db.execute(delete(Anime).where(Anime.id.in_([701, 702, 703])))
+        db.add(Anime(id=701, title="Loved S1", genres=[]))
+        db.add(Anime(id=702, title="Meh", genres=[]))
+        db.add(ListEntry(user_id=user.id, anime_id=701, status="completed", score=10))
+        db.add(ListEntry(user_id=user.id, anime_id=702, status="completed", score=6))
+        db.add_all(
+            CommunityRecommendation(anime_id=a, recommended_id=r, votes=5,
+                                    fetched_at=datetime.now(UTC))
+            for a, r in ((701, 800), (702, 801))
+        )  # fmt: skip
+        db.commit()
+    await redis().set(
+        "related:701", json.dumps([{"relation": "SEQUEL", "row": {"id": 703, "title": "S2"}}])
+    )
+    await redis().set("related:702", json.dumps([]))
+    async with AsyncSessionLocal() as db:
+        context = await load_context(db, user.id, mean=8.0)
+    assert context.franchise == {703: [("Loved S1", 10)]}
+    # Only what fans of the loved show recommend.
+    assert context.recommended == {800: [("Loved S1", 10)]}
+    await async_engine.dispose()
+    await close()

@@ -440,6 +440,15 @@ So they adapt to how generously you score. The statistics page shows the thresho
 
 **Loading.** Statistics are computed in the background and cached (Redis) until your next list sync, so the page opens at once and shows progress while they're computed. The first time, listed shows that lack the details the statistics need (genre ids, studios, source, members — e.g. shows cached before those were stored) get them from MAL: from your list in a request or two, then one request per show still missing something. Shows cached before the genre ids were stored still count by their genre names in the meantime. "Sync MAL" starts the computation for the new list right away.
 
+**What goes into a prediction.** The regression learns your taste from your scores: genres, themes, demographics, studios, source, type and era. MyAnimeList's score is held back, so your own preferences carry more weight. Two more things are added on top:
+
+- **The franchise:** your scores of a show's prequels, sequels, side stories and films (AniList relations), at 0.6 points per point above or below your average. A sequel of something you loved moves up.
+- **Fans' recommendations:** the shows you scored at least a point above your average whose MyAnimeList community recommendations include it, at 0.3 points per point. These recommendations are stored when you sync.
+
+Both are capped at 2 points and show up among the reasons on the show's page ("Same franchise as …", "Recommended by fans of …").
+
+**Guilty Watch.** A show the community rates low gets this extra label when it's in at least two of the six categories you watch most and your taste likes it anyway. "Low" means a MAL score under 7, and half a point under what you usually watch.
+
 ## Development
 
 ```bash

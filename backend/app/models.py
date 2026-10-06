@@ -144,6 +144,18 @@ class Recommendation(Base):
     reason: Mapped[str | None] = mapped_column(Text)
 
 
+class CommunityRecommendation(Base):
+    """MyAnimeList's community recommendations: fans of `anime_id` recommend `recommended_id`.
+    Stored when a sync fetches them (for the user's favourites); predictions use them."""
+
+    __tablename__ = "community_recommendations"
+
+    anime_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    recommended_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    votes: Mapped[int] = mapped_column(Integer, default=0)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class AnimeSynopsis(Base):
     """A show's synopsis in another language than MAL's English (e.g. German from AniWorld).
     `synopsis` is None when none was found; it's looked for again after a while."""

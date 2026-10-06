@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models import Anime, ListEntry, Recommendation, User
+from app.models import Anime, CommunityRecommendation, ListEntry, Recommendation, User
 from app.services import anilist_account, catalog_jobs, list_writer, mal, taste
 from app.services.recommender import Candidate, ListItem, rank, seed_shows
 from app.services.sync_tokens import mal_token
@@ -176,6 +176,30 @@ async def sync_user(db: AsyncSession, user: User) -> dict[str, int]:
     }
 
 
+async def _store_community_recommendations(
+    db: AsyncSession, seeds: list[ListItem], details: list[dict | None]
+) -> None:
+    """Keep what the community recommends to fans of these shows (predictions use it)."""
+    now = datetime.now(UTC)
+    for seed, detail in zip(seeds, details, strict=True):
+        if detail is None:
+            continue  # unknown, not "none": what's stored stays
+        await db.execute(
+            delete(CommunityRecommendation).where(CommunityRecommendation.anime_id == seed.anime_id)
+        )
+        found = {
+            rec["node"]["id"]: rec.get("num_recommendations", 0)
+            for rec in detail.get("recommendations", [])
+        }
+        db.add_all(
+            CommunityRecommendation(
+                anime_id=seed.anime_id, recommended_id=rec_id, votes=votes, fetched_at=now
+            )
+            for rec_id, votes in found.items()
+        )
+    await db.flush()
+
+
 async def _collect_candidates(
     db: AsyncSession,
     client: mal.MalClient,
@@ -185,6 +209,7 @@ async def _collect_candidates(
     seeds = seed_shows(items)
     details = await _gather_limited(client.anime(s.anime_id, "recommendations") for s in seeds)
 
+    await _store_community_recommendations(db, seeds, details)
     on_list = {i.anime_id for i in items}
     candidates: dict[int, Candidate] = {}
     for seed, detail in zip(seeds, details, strict=True):

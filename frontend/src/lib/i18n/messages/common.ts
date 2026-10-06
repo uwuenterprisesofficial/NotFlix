@@ -286,6 +286,19 @@ export const common = {
   },
   "prediction.predicted": { en: "predicted {score}", de: "Prognose {score}" },
   "prediction.yourScore": { en: "Your predicted score", de: "Deine vorhergesagte Wertung" },
+  "feature.franchise": {
+    en: (v: { title: string }) => `Same franchise as ${v.title}`,
+    de: (v: { title: string }) => `Gleiche Reihe wie ${v.title}`,
+  },
+  "feature.recommended": {
+    en: (v: { title: string }) => `Recommended by fans of ${v.title}`,
+    de: (v: { title: string }) => `Empfohlen von Fans von ${v.title}`,
+  },
+  "prediction.guilty": { en: "Guilty Watch", de: "Guilty Pleasure" },
+  "prediction.guiltyInfo": {
+    en: "The community rates it low, but it's exactly the kind of show you watch most",
+    de: "Die Community bewertet es schwach, aber es ist genau die Art Serie, die du am meisten schaust",
+  },
   "feature.mal": { en: "MAL score", de: "MAL-Wertung" },
   "feature.popularity": { en: "Popularity", de: "Beliebtheit" },
   "feature.era": { en: "{decade}s", de: "{decade}er" },

@@ -51,6 +51,7 @@ def _build(
             score=p.score,
             tier=p.tier,
             reasons=[ReasonOut(key=k, name=n, points=v) for k, n, v in p.reasons],
+            guilty=p.guilty,
         )
     return card
 
