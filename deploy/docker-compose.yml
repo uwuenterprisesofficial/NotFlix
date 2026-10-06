@@ -15,9 +15,26 @@ name: notflix
 x-backend: &backend
   image: ${REGISTRY:-registry.uwuenterprises.de}/notflix-backend:${TAG:-latest}
   restart: unless-stopped
-  # Everything in .env (API_KEY, SECRET_KEY, sign-in apps, providers, ...); the lines below win.
+  # Settings come from .env next to this file, or from the deploy tool's variables (Portainer,
+  # Dokploy, ...): both fill in the ${...} below. A .env file is also passed as a whole, for any
+  # other backend setting (see the repository's .env.example); the lines below win.
+  env_file:
+    - path: .env
+      required: false
   environment:
-    DATABASE_URL: postgresql+psycopg://notflix:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/notflix
+    API_KEY: ${API_KEY:?Set API_KEY (at least 16 characters)}
+    SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
+    # The server's public address (this backend, e.g. https://notflix.example.com): sign-ins
+    # come back here, then go on to the desktop app.
+    FRONTEND_URL: ${FRONTEND_URL:?Set FRONTEND_URL (the server's public address, e.g. https://notflix.example.com)}
+    MAL_CLIENT_ID: ${MAL_CLIENT_ID:-}
+    MAL_CLIENT_SECRET: ${MAL_CLIENT_SECRET:-}
+    MAL_REDIRECT_URI: ${MAL_REDIRECT_URI:-${FRONTEND_URL}/auth/callback}
+    ANILIST_CLIENT_ID: ${ANILIST_CLIENT_ID:-}
+    ANILIST_CLIENT_SECRET: ${ANILIST_CLIENT_SECRET:-}
+    ANILIST_REDIRECT_URI: ${ANILIST_REDIRECT_URI:-${FRONTEND_URL}/auth/anilist/callback}
+    ADMINS: ${ADMINS:-}
+    DATABASE_URL: postgresql+psycopg://notflix:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/notflix
     REDIS_URL: redis://redis:6379/0
     MEDIA_DIR: /media
     # No scraping on the server: every stream source is off (whatever .env says). Streams are
@@ -47,8 +64,8 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
 
-  # The API. On start it migrates the database (alembic upgrade head), then serves on port 8000
-  # inside the network; it's reached through the web app's /api (see frontend below).
+  # The API, which the desktop apps connect to (port 6500 on the server; put an HTTPS reverse
+  # proxy in front, the API key travels in a header). On start it migrates the database.
   backend:
     <<: *backend
     # The image's start script: migrations, then the API. (An image older than this script
@@ -89,7 +106,5 @@ services:
       backend:
         condition: service_healthy
 
-  # The web app, and the way in for everything: it passes /api/* on to the backend. Put an
-  # HTTPS reverse proxy in front of this port (the API key travels in a header).
 volumes:
   pgdata:

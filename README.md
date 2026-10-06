@@ -112,6 +112,7 @@ In `.env`:
 - The sign-in apps (`MAL_*`, `ANILIST_*`). Register the redirect URLs `<FRONTEND_URL>/api/auth/callback` (MyAnimeList) and `<FRONTEND_URL>/api/auth/anilist/callback` (AniList), and enter the same in `MAL_REDIRECT_URI` and `ANILIST_REDIRECT_URI`.
 - `WEB_API_KEY`: set it to `API_KEY` to use NotFlix in a browser. Leave it empty if only the desktop app should get in: the app sends the key itself.
 - Any other backend setting from the repository's [`.env.example`](.env.example) can go in too. The compose file passes the whole `.env` to the backend.
+- With a deploy tool (Portainer, Dokploy, Coolify, …), you can enter the same settings as the stack's environment variables instead of a `.env` file. The compose file reads them either way. The redirect URLs default to `<FRONTEND_URL>/api/auth/callback` and `…/anilist/callback`.
 
 On start, the backend migrates the database (`alembic upgrade head`), then serves the API. The workers wait until it's healthy. `docker compose ps` should show every service up and the backend `healthy`. `docker compose logs -f backend` shows what it does.
 
@@ -138,6 +139,8 @@ With nginx, turn off buffering (`proxy_buffering off;`), or Watch Together's liv
 - Publish again (`scripts/publish.sh`), then on the server run `docker compose pull && docker compose up -d --remove-orphans`. The first log line must show the new build.
 - Use `deploy/docker-compose.yml` and nothing else. The repository's root `docker-compose.yml` (and `docker-compose.prod.yml`) build from the source and mount `./backend` over the image's code. A tool that deploys from the git repository (Portainer, Coolify, Dokploy, …) must point at `deploy/docker-compose.yml`, not the root.
 - Don't override the backend's `command`. It must stay `notflix-start`, which runs the migrations and then the API.
+
+**`API_KEY must be set to at least 16 characters`** means the setting doesn't reach the backend. `docker compose config | grep API_KEY` shows what compose makes of it. The file must be named exactly `.env` (not `env` or `.env.txt`, as Windows may save it) and sit next to `docker-compose.yml`, or the variables must be set in your deploy tool. A missing `API_KEY`, `SECRET_KEY`, `FRONTEND_URL` or `POSTGRES_PASSWORD` stops `docker compose up` with a message naming it.
 
 **`password authentication failed for user "notflix"`** means the database was created with another password. PostgreSQL only reads `POSTGRES_PASSWORD` the first time it starts with an empty volume. The development compose file uses `notflix`, and both compose files share the volume `notflix_pgdata` (same project name). The backend then prints how to fix it. Either:
 

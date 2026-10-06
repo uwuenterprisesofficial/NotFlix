@@ -34,7 +34,10 @@ async def test_oauth_redirects_come_without_it(anonymous):
         assert res.status_code == 307 and res.headers["location"].endswith("&reason=expired")
 
 
-@pytest.mark.parametrize("key", ["", "short"])
-def test_the_api_needs_a_key(key):
-    with pytest.raises(RuntimeError, match="API_KEY"):
+@pytest.mark.parametrize(
+    ("key", "says"), [("", "isn't set in this container"), ("short", "it has 5")]
+)
+def test_the_api_needs_a_key(key, says):
+    with pytest.raises(RuntimeError, match=says):
         check_configured(key)
+    check_configured("x" * 16)

@@ -19,9 +19,15 @@ OPEN_PATHS = frozenset({"/auth/callback", "/auth/anilist/callback"})
 
 def check_configured(key: str) -> None:
     if len(key) < MIN_LENGTH:
+        got = (
+            "it isn't set in this container (check that it reaches it: the environment of the "
+            "backend service, or a .env file next to docker-compose.yml)"
+            if not key
+            else f"it has {len(key)}"
+        )
         raise RuntimeError(
-            f"API_KEY must be set to at least {MIN_LENGTH} characters. Generate one with: "
-            'python -c "import secrets; print(secrets.token_urlsafe(32))"'
+            f"API_KEY must be set to at least {MIN_LENGTH} characters, but {got}. Generate one "
+            'with: python -c "import secrets; print(secrets.token_urlsafe(32))"'
         )
 
 
