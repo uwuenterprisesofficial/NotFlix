@@ -13,6 +13,8 @@ REGISTRY="${REGISTRY:-registry.mfhost.de}"
 TAG="${TAG:-publish}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Printed by the backend when it starts: shows which build a server runs.
+VERSION="$(git -C "$ROOT" describe --always --dirty 2>/dev/null || echo unknown) $(date -u +%Y-%m-%dT%H:%MZ)"
 
 [ $# -gt 0 ] || set -- backend frontend
 for name in "$@"; do
@@ -24,7 +26,8 @@ for name in "$@"; do
     image="$REGISTRY/notflix-$name:$TAG"
     echo "==> Building $image ($PLATFORM)"
     # shellcheck disable=SC2086 # $target is empty or two words
-    docker build --platform "$PLATFORM" --pull $target -t "$image" "$ROOT/$name"
+    docker build --platform "$PLATFORM" --pull $target --build-arg NOTFLIX_VERSION="$VERSION" \
+        -t "$image" "$ROOT/$name"
     echo "==> Pushing $image"
     docker push "$image"
 done

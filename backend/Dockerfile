@@ -16,6 +16,9 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project --no-dev
 COPY . .
 COPY --chmod=755 docker-start.sh /usr/local/bin/notflix-start
+# Which build this is (scripts/publish.sh sets the commit); printed when the backend starts.
+ARG NOTFLIX_VERSION=dev
+ENV NOTFLIX_VERSION=$NOTFLIX_VERSION
 
 EXPOSE 8000
 # Migrations, then the API (see docker-start.sh). The workers run `rq worker ...` instead.

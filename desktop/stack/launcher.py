@@ -105,7 +105,9 @@ def setup() -> None:
     from alembic import command
     from alembic.config import Config
 
-    command.upgrade(Config(str(BACKEND / "alembic.ini")), "head")
+    config = Config(str(BACKEND / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND / "alembic"))
+    command.upgrade(config, "head")
     print("Database up to date", flush=True)
 
 
