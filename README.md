@@ -138,6 +138,18 @@ The key can be left empty later to keep the saved one. The box also shows on any
 
 The server must run this version too: the backend for the sign-in hand-over, and the web app if the desktop app connects through its `/api`.
 
+### Both: streams on this PC (hybrid)
+
+With **Another server**, tick **Find and play streams on this PC** (only in apps built with the built-in server). The server then keeps everything about you: sign-in, lists, scores, friends, Watch Together, recommendations. The built-in server starts too, without sign-in settings, and does everything about streams: it looks for an episode's sources, resolves them and relays the video, all over this PC's own connection. The server's bandwidth isn't used for video, and sites that block the server's IP still work.
+
+Nothing is looked for twice:
+
+- **Show data** (titles, episode counts, airing) comes from the server's catalogue (`/library/anime/{id}`, asked again after a day). So the PC needs no MyAnimeList keys.
+- **The shared library:** before the PC looks for a show's sources, it takes what the server's library already knows (`/library/sources/{id}`, at most every 15 minutes per show). It only looks for episodes nobody has checked, or that went stale (6 hours for airing shows, 7 days for finished ones). What it finds goes back to the server's library (`POST /library/sources`). The server's own scans, for the web app, go there too. So the first person to open a show finds its streams, and everyone after reuses them.
+- Sources are shared per provider *and* the way it gets them (e.g. AniWorld through AniScraper or straight from the site): option ids mean nothing to another kind of provider. Direct links aren't shared, since they expire and can be bound to the IP that fetched them; hoster embed pages are. Local files (`/media`) never are.
+
+The library endpoints sit behind the server's API key like everything else. When the server can't be reached, streams found before still work, and the PC looks for new ones itself. If the built-in server doesn't start, the app uses the server's streams and says why under **Settings → Server**.
+
 ### Good to know
 
 - Invite links made in the desktop app point to the web app (`FRONTEND_URL`). With the built-in server, Watch Together only works with others who can reach this PC.

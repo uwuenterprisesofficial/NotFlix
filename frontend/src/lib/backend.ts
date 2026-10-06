@@ -22,3 +22,27 @@ export const API_KEY_HEADER = "x-api-key";
 export function isDesktop(): boolean {
   return process.env.NOTFLIX_DESKTOP === "1";
 }
+
+/**
+ * Hybrid mode (desktop app): the built-in server on this PC (LOCAL_API_URL, its key in
+ * LOCAL_API_KEY) finds and plays streams, sharing what it finds with the online server, which
+ * does everything else (accounts, lists, Watch Together). Null outside hybrid mode.
+ */
+export function localBackend(): { url: string; key: string } | null {
+  const url = process.env.LOCAL_API_URL;
+  if (!url) return null;
+  return { url: url.replace(/\/+$/, ""), key: process.env.LOCAL_API_KEY || "" };
+}
+
+// What the local server answers in hybrid mode (paths without /api): looking for, resolving
+// and relaying streams.
+const LOCAL_PATHS = [
+  /^\/anime\/\d+\/(streams|availability(\/refresh)?|preview|mappings(\/\w+)?)$/,
+  /^\/anime\/\d+\/episodes\/\d+\/(sources|resolve|failures)$/,
+  /^\/proxy(\/|$)/,
+  /^\/providers$/,
+];
+
+export function answeredLocally(path: string): boolean {
+  return LOCAL_PATHS.some((pattern) => pattern.test(path));
+}

@@ -615,3 +615,36 @@ class TogetherOut(BaseModel):
 # AnimeCard.pair refers to PairOut, defined after it.
 AnimeCard.model_rebuild()
 AnimeDetail.model_rebuild()
+
+
+# The shared stream library (see services/library.py)
+LIBRARY_SOURCE = r"^[a-z0-9_-]{1,30}/[A-Za-z0-9_]{1,48}$"
+
+
+class SharedOptionIn(BaseModel):
+    id: str = Field(max_length=500)
+    label: str = Field(max_length=200)
+    language: Literal["de-dub", "de-sub", "en-dub", "en-sub", "unknown"]
+    resolved: dict | None = None
+
+
+class SharedEpisodeIn(BaseModel):
+    episode: int = Field(ge=0, le=10_000)
+    options: list[SharedOptionIn] = Field(max_length=100)
+
+
+class SharedSourcesIn(BaseModel):
+    anime_id: int = Field(gt=0)
+    source: str = Field(pattern=LIBRARY_SOURCE)
+    episodes: list[SharedEpisodeIn] = Field(max_length=3000)
+
+
+class SharedEpisodeOut(BaseModel):
+    episode: int
+    options: list[dict]
+    updated_at: datetime
+
+
+class SharedSourceOut(BaseModel):
+    source: str
+    episodes: list[SharedEpisodeOut]

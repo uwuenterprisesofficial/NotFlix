@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     # Where the browser reaches this API (the frontend proxies /api/* here); used for proxy URLs.
     public_api_prefix: str = "/api"
 
+    # Hybrid mode (the desktop app's built-in server): the online NotFlix server this one gets
+    # show data from (it has no MyAnimeList keys of its own) and shares the streams it finds
+    # with (see services/library.py). Empty: this server stands alone.
+    upstream_url: str = ""
+    upstream_api_key: str = ""
+
     # Self-hosted Anivexa API (English sources). Empty disables the provider.
     anivexa_url: str = ""
     # mkissa (captcha), reanime (obfuscated playlists) and animeonsen (DASH) are left out.

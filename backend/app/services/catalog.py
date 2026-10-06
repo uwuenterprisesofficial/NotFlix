@@ -8,7 +8,7 @@ from app.core.cache import get_json, redis, set_json
 from app.core.config import get_settings
 from app.models import Anime, ListEntry
 from app.schemas import AnimeCard, AnimeDetail, PredictionOut, Progress, ReasonOut, TagOut
-from app.services import catalog_jobs, mal
+from app.services import catalog_jobs, library, mal
 from app.services.sync import upsert_anime
 from app.services.tags import category, tags_from_names
 from app.services.taste import Predictor, Show
@@ -112,7 +112,9 @@ async def ranking(db: AsyncSession, ranking_type: str, limit: int = 20) -> list[
 async def get_anime(db: AsyncSession, anime_id: int) -> Anime | None:
     """A show from the catalogue (the database). Only a show that isn't in it yet is fetched
     from MAL right away; the catalogue worker completes it (and later refreshes stale data)
-    in the background."""
+    in the background. With an upstream server (hybrid mode), shows come from its catalogue."""
+    if library.upstream() is not None:
+        return await library.anime(db, anime_id)
     anime = await db.get(Anime, anime_id)
     if anime is not None:
         if catalog_jobs.incomplete(anime):

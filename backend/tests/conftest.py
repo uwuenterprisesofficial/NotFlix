@@ -47,13 +47,22 @@ async def client(database):
     from app.core import cache
     from app.db.session import async_engine
     from app.main import app
-    from app.services import airing, list_writer, related, source_scan, stats_jobs, sync_jobs
+    from app.services import (
+        airing,
+        library,
+        list_writer,
+        related,
+        source_scan,
+        stats_jobs,
+        sync_jobs,
+    )
 
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test", headers={"x-api-key": API_KEY}
     ) as c:
         yield c
     await source_scan.wait_idle()
+    await library.wait_idle()
     await stats_jobs.wait_idle()
     await sync_jobs.wait_idle()
     await related.wait_idle()
@@ -73,13 +82,14 @@ def clean_source_cache(request):
     from sqlalchemy import delete
 
     from app.db.session import sync_session
-    from app.models import EpisodeSource, ResolvedSource, SourceScan
+    from app.models import EpisodeSource, ResolvedSource, SharedSource, SourceScan
 
     request.getfixturevalue("database")
     with sync_session() as db:
         db.execute(delete(ResolvedSource))
         db.execute(delete(EpisodeSource))
         db.execute(delete(SourceScan))
+        db.execute(delete(SharedSource))
         db.commit()
 
 
@@ -127,7 +137,13 @@ def catalogue_jobs(monkeypatch):
         r = Redis.from_url(get_settings().redis_url)
         keys = [
             k
-            for pattern in ("catalog:queued:*", "mal:search:*", "mal:ranking:*", "airing:failed:*")
+            for pattern in (
+                "catalog:queued:*",
+                "mal:search:*",
+                "mal:ranking:*",
+                "airing:failed:*",
+                "library:*",
+            )
             for k in r.scan_iter(pattern)
         ]
         if keys:

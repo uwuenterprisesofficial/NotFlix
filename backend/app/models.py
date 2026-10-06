@@ -309,6 +309,21 @@ class SourceScan(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class SharedSource(Base):
+    """The shared library: one episode's sources as a provider found them (on this server or in
+    a desktop app that finds streams itself and shares them), for every app to reuse instead of
+    looking again. `source` is the provider with the way it gets them (e.g.
+    "aniworld/AniScraperProvider"): only the same kind of provider can use its option ids."""
+
+    __tablename__ = "shared_sources"
+
+    anime_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(80), primary_key=True)
+    episode: Mapped[int] = mapped_column(Integer, primary_key=True)
+    options: Mapped[list[dict]] = mapped_column(JSON, default=list)  # [] = checked, none found
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ProviderMapping(Base):
     """How a MAL anime is identified on another service (AniList id, AniWorld slug + season)."""
 

@@ -61,7 +61,7 @@ export function EpisodeBrowser({
     rescanned.current = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = () =>
-      fetch(`/api/anime/${animeId}/availability`)
+      fetch(`/api/anime/${animeId}/availability?episode=${watched + 1}`)
         .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
         .then((next: Availability) => {
           if (cancelled) return;
@@ -81,7 +81,7 @@ export function EpisodeBrowser({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [animeId, scanning]);
+  }, [animeId, scanning, watched]);
 
   useEffect(() => {
     // Marking the data as scanning restarts polling, and the first poll starts the scan.
@@ -97,7 +97,9 @@ export function EpisodeBrowser({
   async function refresh() {
     forgetShowStreams(animeId);
     setRefreshing(true);
-    const res = await fetch(`/api/anime/${animeId}/availability/refresh`, { method: "POST" });
+    const res = await fetch(`/api/anime/${animeId}/availability/refresh?episode=${watched + 1}`, {
+      method: "POST",
+    });
     if (res.ok) setData(await res.json());
     setRefreshing(false);
   }

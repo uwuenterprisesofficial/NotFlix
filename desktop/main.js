@@ -5,7 +5,9 @@
 // key. The backend is either
 //   - the built-in server (builtin-server.js): the backend and everything it needs, run on this
 //     PC from the bundle the app was built with, or
-//   - another server (e.g. on a home server), by its address and API key.
+//   - another server (e.g. on a home server), by its address and API key, or
+//   - both (hybrid): another server for everything but streams, which the built-in server
+//     finds and plays from this PC, sharing what it finds with the other server's library.
 // The choice and its settings are kept in config.json in the app's data folder (secrets
 // encrypted with the system's key store where there is one); changing them restarts what runs.
 
@@ -93,10 +95,15 @@ function withKey(config, key) {
   return { ...rest, key: seal(key) };
 }
 
-/** "builtin" (this PC) or "remote" (another server). */
+/** "builtin" (this PC) or "remote" (another server; see hybrid()). */
 function mode(config) {
   if (config.mode === "remote" || !builtIn) return "remote";
   return config.mode === "builtin" || !config.backend ? "builtin" : "remote";
+}
+
+/** With another server: streams are found and played by the built-in server on this PC. */
+function hybrid(config) {
+  return mode(config) === "remote" && !!config.backend && !!config.hybrid && !!builtIn;
 }
 
 /** The built-in server's passwords (made on first use) and settings. */
@@ -119,13 +126,19 @@ function builtInSettings(settings = {}) {
   };
 }
 
-/** The backend's settings from the app's: sign-in apps, AniWorld source, and server.env. */
-function builtInEnv(settings = {}) {
+/** The backend's settings from the app's: sign-in apps, AniWorld source, and server.env. With
+ * `upstream` (hybrid mode) no sign-in apps: users sign in there, and show data comes from it. */
+function builtInEnv(settings = {}, upstream = null) {
+  const signIn = upstream
+    ? { UPSTREAM_URL: upstream.url, UPSTREAM_API_KEY: upstream.key }
+    : {
+        MAL_CLIENT_ID: settings.malClientId ?? "",
+        MAL_CLIENT_SECRET: unseal(settings.malClientSecret),
+        ANILIST_CLIENT_ID: settings.anilistClientId ?? "",
+        ANILIST_CLIENT_SECRET: unseal(settings.anilistClientSecret),
+      };
   return {
-    MAL_CLIENT_ID: settings.malClientId ?? "",
-    MAL_CLIENT_SECRET: unseal(settings.malClientSecret),
-    ANILIST_CLIENT_ID: settings.anilistClientId ?? "",
-    ANILIST_CLIENT_SECRET: unseal(settings.anilistClientSecret),
+    ...signIn,
     ANIWORLD_VIA:
       settings.aniworldVia === "serienstream" && builtIn?.has("aniworld-api") ? "api" : "aniscraper",
     // Anything else the backend reads (see .env.example), one KEY=value per line.
@@ -221,28 +234,33 @@ async function startAll() {
   const port = await choosePort(config.port);
   if (port !== config.port) writeConfig((config = { ...config, port }));
   let target = { url: config.backend || NO_BACKEND, key: readKey(config) };
-  if (mode(config) === "builtin") {
+  let local = null; // hybrid mode: the built-in server, for streams
+  if (mode(config) === "builtin" || hybrid(config)) {
     const { secrets, settings } = builtInConfig(config);
+    const upstream = hybrid(config) ? target : null;
     try {
       builtInRunning = true;
-      target = await builtIn.start({
+      const started = await builtIn.start({
         dataDir: dataDir(),
         // Sign-ins return through localhost (what MyAnimeList and AniList accept as redirect
         // URLs) and are handed over to this window's 127.0.0.1 (see backend/app/api/auth.py).
         webOrigin: `http://localhost:${port}`,
         secrets,
-        env: builtInEnv(settings),
+        env: builtInEnv(settings, upstream),
         node: process.execPath, // Electron's own Node.js runs Anivexa
         taken: [port],
       });
+      if (upstream) local = started;
+      else target = started;
       builtInError = null;
     } catch (error) {
       builtInError = String(error?.message ?? error);
       await stopBuiltIn();
-      target = { url: NO_BACKEND, key: "" };
+      // Hybrid: the other server's streams meanwhile.
+      if (!upstream) target = { url: NO_BACKEND, key: "" };
     }
   }
-  await startServer(port, target);
+  await startServer(port, target, local);
 }
 
 async function stopAll() {
@@ -256,7 +274,9 @@ async function stopBuiltIn() {
   await builtIn.stop();
 }
 
-async function startServer(port, target) {
+/** The app's own server, passing /api/* on to `target` (and, in hybrid mode, the stream
+ * requests to `local`; see frontend/src/proxy.ts). */
+async function startServer(port, target, local = null) {
   const log = fs.createWriteStream(path.join(app.getPath("userData"), "server.log"));
   // Electron's own binary runs the server as plain Node.js.
   const child = spawn(process.execPath, [path.join(serverDir, "server.js")], {
@@ -271,6 +291,8 @@ async function startServer(port, target) {
       NOTFLIX_DESKTOP: "1",
       API_INTERNAL_URL: target.url,
       API_KEY: target.key,
+      LOCAL_API_URL: local?.url ?? "",
+      LOCAL_API_KEY: local?.key ?? "",
     },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
@@ -475,6 +497,7 @@ ipcMain.handle("backend:get", () => {
     mode: mode(config),
     url: config.backend ?? null,
     hasKey: readKey(config) !== "",
+    hybrid: hybrid(config),
     builtIn: builtIn && {
       error: builtInError,
       settings: builtInSettings(config.builtIn?.settings),
@@ -510,7 +533,7 @@ ipcMain.handle("builtin:logs", (event) => {
   void shell.openPath(path.join(dataDir(), "logs"));
 });
 
-ipcMain.handle("backend:set", async (event, raw, rawKey) => {
+ipcMain.handle("backend:set", async (event, raw, rawKey, options) => {
   if (!isApp(event.senderFrame?.url ?? "")) return { ok: false, error: "invalid" };
   const backend = normalize(raw);
   if (!backend) return { ok: false, error: "invalid" };
@@ -520,8 +543,15 @@ ipcMain.handle("backend:set", async (event, raw, rawKey) => {
   if (!key) return { ok: false, error: "missingKey" };
   const status = await check(backend, key);
   if (status !== "ok") return { ok: false, error: status };
+  const next = { ...config, backend, mode: "remote", hybrid: !!builtIn && !!options?.hybrid };
+  if (next.hybrid) {
+    // The AniWorld source is the built-in server's setting (kept for both ways of using it).
+    const current = builtInConfig(config);
+    const aniworldVia = options?.aniworldVia === "serienstream" ? "serienstream" : "aniscraper";
+    next.builtIn = { ...current, settings: { ...current.settings, aniworldVia } };
+  }
   // Signed in at another backend (or not at all): start over.
-  writeConfig(withKey({ ...config, backend, mode: "remote" }, key));
+  writeConfig(withKey(next, key));
   await restart();
   return { ok: true };
 });
