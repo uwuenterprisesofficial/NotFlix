@@ -52,6 +52,9 @@ services:
   # inside the network; it's reached through the web app's /api (see frontend below).
   backend:
     <<: *backend
+    # The image's start script: migrations, then the API. (An image older than this script
+    # fails with "notflix-start: not found": publish it again.)
+    command: notflix-start
     depends_on:
       db:
         condition: service_healthy

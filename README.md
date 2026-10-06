@@ -131,7 +131,15 @@ With nginx, turn off buffering (`proxy_buffering off;`), or Watch Together's liv
 
 **Backups.** The database is in the `pgdata` volume. To dump it, run `docker compose exec db pg_dump -U notflix notflix > notflix.sql`.
 
-**`FAILED: No 'script_location' key found in configuration`** (or, with new images, "/app has no alembic.ini") means a folder is mounted over the backend's code. That happens with the development compose file (`./backend:/app`) on a server without the source. Use `deploy/docker-compose.yml` instead.
+**Which build runs?** The backend's log starts with it: `docker compose logs backend | head -1` shows e.g. `NotFlix backend 8d7f82e 2026-10-06T09:30Z`, the commit and time it was published.
+
+**`FAILED: No 'script_location' key found in configuration`** comes from an old image, or from a compose file meant for development. Check these:
+
+- Publish again (`scripts/publish.sh`), then on the server run `docker compose pull && docker compose up -d --remove-orphans`. The first log line must show the new build.
+- Use `deploy/docker-compose.yml` and nothing else. The repository's root `docker-compose.yml` (and `docker-compose.prod.yml`) build from the source and mount `./backend` over the image's code. A tool that deploys from the git repository (Portainer, Coolify, Dokploy, …) must point at `deploy/docker-compose.yml`, not the root.
+- Don't override the backend's `command`. It must stay `notflix-start`, which runs the migrations and then the API.
+
+Since this version, migrations no longer depend on `alembic.ini` or the working directory. An empty folder mounted over the code now stops the backend with a message that says so.
 
 ## Desktop app
 
