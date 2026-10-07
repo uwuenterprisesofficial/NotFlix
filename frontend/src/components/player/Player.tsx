@@ -97,6 +97,20 @@ export function Player({
   // After the last episode there is: another show to watch (its sequel, else a recommendation).
   const upNext = useUpNext(animeId, signedIn && !hasNext);
   const upNextHref = upNext ? `/watch/${upNext.id}/${nextEpisode(upNext)}` : null;
+  // From the playlist: which episode (it may be one in the middle), else why it's suggested.
+  const fromPlaylist = !!upNext?.reason?.startsWith("playlist");
+  const upNextNote = !upNext
+    ? null
+    : fromPlaylist
+      ? [
+          t("playlist.episode", { episode: nextEpisode(upNext) }),
+          upNext.reason === "playlist:airing" ? t("playlist.newEpisodes") : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : upNext.reason
+        ? reasonText(t, upNext.reason)
+        : null;
   const analysis = useAutoAnalysis(animeId, episode, signedIn);
   // Timestamps from the source itself match its exact cut; analysed ones are the fallback
   // (including ones the analysis started while watching finds).
@@ -210,7 +224,8 @@ export function Player({
                           show: {
                             title: displayTitle(upNext),
                             picture: upNext.picture_url,
-                            note: upNext.reason ? reasonText(t, upNext.reason) : null,
+                            note: upNextNote,
+                            heading: fromPlaylist ? t("player.nextInPlaylist") : undefined,
                           },
                         }
                       : null

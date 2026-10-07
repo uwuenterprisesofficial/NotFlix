@@ -736,3 +736,27 @@ class FriendCodeOut(BaseModel):
 
 class FriendCodeIn(BaseModel):
     code: str = Field(min_length=4, max_length=20)
+
+
+class PlaylistItemOut(BaseModel):
+    anime: AnimeCard
+    # The episode it plays; None: no aired episode left to watch (waiting for the next one).
+    episode: int | None
+    auto: bool  # taken in as an airing show with new episodes
+
+
+class PlaylistOut(BaseModel):
+    auto_airing: bool
+    items: list[PlaylistItemOut]
+
+
+class PlaylistAdd(BaseModel):
+    anime_id: int
+
+
+class PlaylistOrder(BaseModel):
+    anime_ids: list[int] = Field(max_length=1000)
+
+
+class PlaylistSettings(BaseModel):
+    auto_airing: bool

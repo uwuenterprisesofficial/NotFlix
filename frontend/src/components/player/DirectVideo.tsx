@@ -70,7 +70,7 @@ export type NextEpisode = {
   label: string;
   go: () => void;
   /** Another show (after a show's last episode): shown with its poster and why. */
-  show?: { title: string; picture: string | null; note: string | null };
+  show?: { title: string; picture: string | null; note: string | null; heading?: string };
 };
 
 /**
@@ -392,7 +392,7 @@ function NextEpisodeCard({
           <div className="flex min-w-0 flex-col justify-between gap-2">
             <div>
               <p className="text-xs font-semibold tracking-wide text-muted uppercase">
-                {t("player.upNextForYou")}
+                {next.show.heading ?? t("player.upNextForYou")}
               </p>
               <p className="line-clamp-2 font-bold">{next.show.title}</p>
               {next.show.note && (

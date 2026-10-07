@@ -10,6 +10,7 @@ from app.api import (
     friends,
     library,
     me,
+    playlist,
     proxy,
     search,
     streams,
@@ -38,6 +39,7 @@ app.add_middleware(StripApiPrefix)
 
 app.include_router(auth.router)
 app.include_router(me.router)
+app.include_router(playlist.router)
 app.include_router(browse.router)
 app.include_router(search.router)
 app.include_router(calendar.router)

@@ -403,3 +403,13 @@ export type ShowRecommendations = {
   }[];
   received: FriendRecommendation[];
 };
+
+export type PlaylistItem = {
+  anime: AnimeCard;
+  /** The episode it plays; null: caught up, waiting for the next one. */
+  episode: number | null;
+  /** Taken in as an airing show with new episodes. */
+  auto: boolean;
+};
+
+export type Playlist = { auto_airing: boolean; items: PlaylistItem[] };

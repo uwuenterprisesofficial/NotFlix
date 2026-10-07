@@ -65,6 +65,10 @@ class User(Base):
     is_guest: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     # Friends connect by entering it (see api/together.py); made on first use.
     friend_code: Mapped[str | None] = mapped_column(String(16), unique=True)
+    # The playlist takes in airing shows they watch with new episodes (see services/playlist.py).
+    playlist_auto_airing: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     @property
@@ -131,6 +135,23 @@ class ListEntry(Base):
     score: Mapped[int] = mapped_column(Integer, default=0)
     episodes_watched: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PlaylistItem(Base):
+    """A show on a user's playlist: played after the last episode of whatever they watch."""
+
+    __tablename__ = "playlist_items"
+    __table_args__ = (UniqueConstraint("user_id", "anime_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    anime_id: Mapped[int] = mapped_column(ForeignKey("anime.id", ondelete="CASCADE"))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    # Taken in by the automatic airing shows (not added by hand).
+    auto: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Removed while airing: hidden until an episode after this one has aired.
+    hidden_through: Mapped[int | None] = mapped_column(Integer)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Recommendation(Base):

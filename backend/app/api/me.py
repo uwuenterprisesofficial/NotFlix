@@ -23,6 +23,7 @@ from app.services import (
     catalog,
     list_writer,
     mal,
+    playlist,
     positions,
     related,
     stats_jobs,
@@ -169,9 +170,14 @@ OPEN_STATUSES = {ListStatus.plan_to_watch, ListStatus.watching, ListStatus.on_ho
 
 @router.get("/up-next", response_model=AnimeCard | None)
 async def up_next(after: int, user: ListUser, db: DB):
-    """What to watch after the last episode of `after` there is: its sequel when that's out
-    and not seen, else the best recommendation, else the best of the plan-to-watch list."""
+    """What to watch after the last episode of `after` there is: the first playlist show with
+    an episode to play, else its sequel when that's out and not seen, else the best
+    recommendation, else the best of the plan-to-watch list."""
     predictor = await predictor_for(db, user)
+    for e in await playlist.current(db, user):
+        if e.anime.id != after and e.episode is not None:
+            reason = "playlist:airing" if e.item.auto else "playlist"
+            return catalog.to_card(e.anime, e.entry, reason, predictor)
     entries = {
         e.anime_id: e
         for e in await db.scalars(select(ListEntry).where(ListEntry.user_id == user.id))

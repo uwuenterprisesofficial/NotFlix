@@ -122,3 +122,75 @@ async def test_up_next_after_the_last_episode(client, listed, monkeypatch):
         db.commit()
     nxt = (await client.get("/me/up-next", params={"after": 2})).json()
     assert nxt["id"] == 4
+
+
+async def test_playlist(client, listed, monkeypatch):
+    from sqlalchemy import update
+
+    from app.models import PlaylistItem, Recommendation
+    from app.services import catalog_jobs
+
+    monkeypatch.setattr(catalog_jobs, "enqueue", lambda *a, **k: _none())
+    now = datetime.now(UTC)
+    with sync_session() as db:
+        db.execute(delete(PlaylistItem))
+        db.execute(delete(Recommendation))
+        # The airing show (Watching, nothing seen yet) has aired 3 episodes; known just now.
+        for anime_id in (1, 4):
+            db.execute(update(Anime).where(Anime.id == anime_id).values(
+                next_episode=4, next_episode_at=now + timedelta(days=2), airing_checked_at=now,
+            ))  # fmt: skip
+        db.execute(update(Anime).where(Anime.id == 3).values(num_episodes=12))
+        db.commit()
+
+    def shows(body):
+        return [(i["anime"]["id"], i["episode"], i["auto"]) for i in body["items"]]
+
+    body = (await client.get("/me/playlist")).json()
+    assert body == {"auto_airing": False, "items": []}
+    await client.post("/me/playlist", json={"anime_id": 3})
+    body = (await client.post("/me/playlist", json={"anime_id": 2})).json()
+    assert shows(body) == [(3, 1, False)]  # the completed show isn't kept
+    assert (await client.post("/me/playlist", json={"anime_id": 999})).status_code == 404
+
+    # After the last episode of anything: the playlist first.
+    nxt = (await client.get("/me/up-next", params={"after": 2})).json()
+    assert (nxt["id"], nxt["reason"]) == (3, "playlist")
+
+    # Airing shows with new episodes are taken in by themselves (Watching only), at the end.
+    body = (await client.put("/me/playlist/settings", json={"auto_airing": True})).json()
+    assert body["auto_airing"] is True
+    assert shows(body) == [(3, 1, False), (1, 1, True)]
+    body = (await client.put("/me/playlist/order", json={"anime_ids": [1, 3]})).json()
+    assert shows(body) == [(1, 1, True), (3, 1, False)]
+    nxt = (await client.get("/me/up-next", params={"after": 2})).json()
+    assert (nxt["id"], nxt["reason"]) == (1, "playlist:airing")
+    # Up next after the airing show itself: the next one.
+    assert (await client.get("/me/up-next", params={"after": 1})).json()["id"] == 3
+
+    # Removed, it stays away until its next episode is out; then it's back at the end.
+    body = (await client.delete("/me/playlist/1")).json()
+    assert shows(body) == [(3, 1, False)]
+    assert shows((await client.get("/me/playlist")).json()) == [(3, 1, False)]
+    with sync_session() as db:
+        db.execute(update(Anime).where(Anime.id == 1).values(next_episode=5))
+        db.commit()
+    assert shows((await client.get("/me/playlist")).json()) == [(3, 1, False), (1, 1, True)]
+
+    # Caught up: it leaves (and comes back with the next episode).
+    with sync_session() as db:
+        db.execute(update(ListEntry).where(ListEntry.anime_id == 1).values(episodes_watched=4))
+        db.commit()
+    assert shows((await client.get("/me/playlist")).json()) == [(3, 1, False)]
+    # A show added by hand stays while there's nothing to play yet.
+    await client.post("/me/playlist", json={"anime_id": 1})
+    body = (await client.get("/me/playlist")).json()
+    assert shows(body) == [(3, 1, False), (1, None, False)]
+    nxt = (await client.get("/me/up-next", params={"after": 3})).json()
+    assert nxt is None or not (nxt["reason"] or "").startswith("playlist")
+    # Finished (every episode watched): it leaves.
+    with sync_session() as db:
+        db.execute(update(ListEntry).where(ListEntry.anime_id == 3).values(episodes_watched=12))
+        db.commit()
+    assert shows((await client.get("/me/playlist")).json()) == [(1, None, False)]
+    await client.put("/me/playlist/settings", json={"auto_airing": False})

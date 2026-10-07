@@ -223,6 +223,20 @@ async def _check(anime_id: int) -> None:
         await redis().set(f"airing:failed:{anime_id}", 1, ex=CHECK_FAILED_TTL_S)
 
 
+def check_soon(anime: Anime) -> None:
+    """Ask AniList about an airing show in the background when what's known may be out of date
+    (never checked, checked a while ago, or the next episode's air time has passed)."""
+    if anime.status == "finished_airing":
+        return
+    now = datetime.now(UTC)
+    passed = anime.next_episode_at is not None and anime.next_episode_at <= now
+    stale = anime.airing_checked_at is None or now - anime.airing_checked_at >= SHOW_TTL
+    if passed or stale:
+        task = asyncio.create_task(_check(anime.id))
+        _background.add(task)
+        task.add_done_callback(_background.discard)
+
+
 async def aired_episodes(db: AsyncSession, anime: Anime | None) -> int | None:
     """How many episodes have aired; None when there's no limit to apply (finished, or not
     known). Episodes after that haven't aired, so there are no streams to look for.

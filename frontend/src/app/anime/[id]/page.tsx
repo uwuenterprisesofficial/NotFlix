@@ -9,6 +9,7 @@ import { EpisodeBrowser } from "@/components/EpisodeBrowser";
 import { RecommendedBy, RecommendToFriend } from "@/components/friends/RecommendToFriend";
 import { LazyDetails } from "@/components/LazyDetails";
 import { PredictionPanel } from "@/components/PredictionPanel";
+import { PlaylistButton } from "@/components/playlist/PlaylistEditor";
 import { ScoreEditor } from "@/components/ScoreEditor";
 import { WatchTogetherMenu } from "@/components/together/TogetherBar";
 import { apiOrNull } from "@/lib/api";
@@ -135,6 +136,7 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
                     ? t("detail.resume", { episode: playableEpisode(anime) })
                     : t("detail.play1")}
               </Link>
+              {me && !me.guest && <PlaylistButton animeId={anime.id} large />}
               {me && (
                 <WatchTogetherMenu
                   href={`/watch/${anime.id}/${anime.resume?.episode ?? playableEpisode(anime)}`}

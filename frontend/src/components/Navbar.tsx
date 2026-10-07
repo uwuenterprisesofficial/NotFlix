@@ -51,6 +51,11 @@ export async function Navbar() {
               {badge}
             </Link>
           )}
+          {withList && (
+            <Link href="/playlist" className="hover:text-white">
+              {t("nav.playlist")}
+            </Link>
+          )}
           <Link href="/calendar" className="hover:text-white">
             {t("nav.calendar")}
           </Link>
