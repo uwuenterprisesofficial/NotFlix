@@ -1,19 +1,24 @@
 import asyncio
 import contextlib
-from typing import Literal
+import logging
+from dataclasses import dataclass
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import cast, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.api.deps import DB, OptionalUser
 from app.core.cache import get_json, redis, set_json
-from app.models import Anime, EpisodeSource, ListEntry
+from app.db.session import AsyncSessionLocal
+from app.models import Anime, EpisodeSource, ListEntry, ListStatus
 from app.schemas import GenreOut, SearchResponse
-from app.services import catalog, catalog_jobs, jikan, mal
+from app.services import catalog, catalog_jobs, caught_up, jikan, mal
+from app.services.sync import insert_missing_anime
 from app.services.tags import KNOWN_TAGS, category
-from app.services.taste import predictor_for
+from app.services.taste import Show, predictor_for
 
+log = logging.getLogger(__name__)
 router = APIRouter(tags=["search"])
 
 PAGE_SIZE = 24
@@ -58,7 +63,118 @@ async def _cards(db: DB, user, animes: list[Anime]):
     cards = [catalog.to_card(a, entries.get(a.id), predictor=predictor) for a in animes]
     for card in cards:
         card.dubs = dubs.get(card.id, [])
+    await caught_up.mark(db, cards)
     return cards
+
+
+Order = Literal["score", "popularity", "newest", "for_you"]
+SORTS = {
+    "score": Anime.mean.desc().nulls_last(),
+    "popularity": Anime.num_list_users.desc().nulls_last(),
+    "newest": Anime.start_year.desc().nulls_last(),
+}
+# Seen: on the list as anything but plan to watch.
+SEEN = (ListStatus.watching, ListStatus.completed, ListStatus.on_hold, ListStatus.dropped)
+PREDICT_POOL = 3000  # shows predicted at most for "for you" or a predicted-score range
+
+
+@dataclass
+class Filters:
+    hide_seen: bool = False
+    min_score: float | None = None  # MAL's score
+    max_score: float | None = None
+    min_predicted: float | None = None  # the user's predicted score
+    max_predicted: float | None = None
+
+    @property
+    def by_prediction(self) -> bool:
+        return self.min_predicted is not None or self.max_predicted is not None
+
+
+def filters(
+    hide_seen: bool = False,
+    min_score: float | None = Query(None, ge=0, le=10),
+    max_score: float | None = Query(None, ge=0, le=10),
+    min_predicted: float | None = Query(None, ge=0, le=10),
+    max_predicted: float | None = Query(None, ge=0, le=10),
+) -> Filters:
+    return Filters(hide_seen, min_score, max_score, min_predicted, max_predicted)
+
+
+SearchFilters = Annotated[Filters, Depends(filters)]
+
+
+def _sort_key(order: str):
+    if order == "popularity":
+        return lambda a: -(a.num_list_users or 0)
+    if order == "newest":
+        return lambda a: -(a.start_year or 0)
+    return lambda a: -(a.mean or 0)
+
+
+async def _catalogue_page(db: DB, user, where, order: str, page: int, f: Filters):
+    """One page of catalogue shows matching `where` and the filters: (cards, has_next). Ordered
+    by "for you" or filtered by predicted score, the most popular PREDICT_POOL shows are
+    predicted and sorted here; otherwise the database does it all."""
+    query = select(Anime).where(where)
+    if f.min_score is not None:
+        query = query.where(Anime.mean >= f.min_score)
+    if f.max_score is not None:
+        query = query.where(Anime.mean <= f.max_score)
+    if f.hide_seen and user is not None:
+        seen = select(ListEntry.anime_id).where(
+            ListEntry.user_id == user.id, ListEntry.status.in_(SEEN)
+        )
+        query = query.where(Anime.id.not_in(seen))
+    predictor = await predictor_for(db, user)
+    start = (page - 1) * PAGE_SIZE
+    if predictor is None or not (order == "for_you" or f.by_prediction):
+        sort = SORTS["score" if order == "for_you" else order]
+        found = list(
+            await db.scalars(query.order_by(sort, Anime.id).offset(start).limit(PAGE_SIZE + 1))
+        )
+        return await _cards(db, user, found[:PAGE_SIZE]), len(found) > PAGE_SIZE
+
+    pool = list(
+        await db.scalars(
+            query.order_by(Anime.num_list_users.desc().nulls_last(), Anime.id).limit(PREDICT_POOL)
+        )
+    )
+    scored = {}
+    if user is not None and pool:
+        scored = {
+            e.anime_id: e.score
+            for e in await db.scalars(
+                select(ListEntry).where(ListEntry.user_id == user.id, ListEntry.score > 0)
+            )
+        }
+    predicted = {
+        a.id: float(scored[a.id]) if a.id in scored else predictor.predict(Show.of(a)).score
+        for a in pool
+    }
+    lo = f.min_predicted if f.min_predicted is not None else 0
+    hi = f.max_predicted if f.max_predicted is not None else 10
+    pool = [a for a in pool if lo <= predicted[a.id] <= hi]
+    pool.sort(key=(lambda a: -predicted[a.id]) if order == "for_you" else _sort_key(order))
+    return await _cards(db, user, pool[start : start + PAGE_SIZE]), len(pool) > start + PAGE_SIZE
+
+
+def _keep(card, f: Filters) -> bool:
+    """Whether a card passes the filters (for results that don't come from the catalogue)."""
+    if f.hide_seen and card.progress is not None and card.progress.status in SEEN:
+        return False
+    if f.min_score is not None and (card.mean is None or card.mean < f.min_score):
+        return False
+    if f.max_score is not None and (card.mean is None or card.mean > f.max_score):
+        return False
+    if f.by_prediction:
+        own = card.progress.score if card.progress and card.progress.score else None
+        value = own if own is not None else (card.prediction.score if card.prediction else None)
+        lo = f.min_predicted if f.min_predicted is not None else 0
+        hi = f.max_predicted if f.max_predicted is not None else 10
+        if value is None or not lo <= value <= hi:
+            return False
+    return True
 
 
 async def _from_catalogue(db: DB, ids: list[int], rows: dict[int, dict]) -> list[Anime]:
@@ -116,6 +232,7 @@ async def _mal_search(q: str, page: int) -> list[dict] | None:
 async def search(
     user: OptionalUser,
     db: DB,
+    f: SearchFilters,
     q: str = Query(min_length=1, max_length=100),
     page: int = Query(1, ge=1, le=50),
     quick: bool = False,
@@ -136,16 +253,18 @@ async def search(
             local = await _catalogue_search(db, q, 0, PAGE_SIZE)
             ids += [i for i in local if i not in ids][:CATALOGUE_EXTRA]
         rows = {n["id"]: mal.anime_from_node(n) for n in nodes}
+        cards = await _cards(db, user, await _from_catalogue(db, ids, rows))
         return SearchResponse(
-            items=await _cards(db, user, await _from_catalogue(db, ids, rows)),
+            items=[c for c in cards if _keep(c, f)],
             page=page,
             has_next=len(nodes) > PAGE_SIZE,
             source="mal",
         )
 
     ids = await _catalogue_search(db, q, (page - 1) * PAGE_SIZE, PAGE_SIZE + 1)
+    cards = await _cards(db, user, await _from_catalogue(db, ids[:PAGE_SIZE], {}))
     return SearchResponse(
-        items=await _cards(db, user, await _from_catalogue(db, ids[:PAGE_SIZE], {})),
+        items=[c for c in cards if _keep(c, f)],
         page=page,
         has_next=len(ids) > PAGE_SIZE,
         source="local",
@@ -164,33 +283,16 @@ async def _refresh_genres() -> None:
 async def search_dubbed(
     user: OptionalUser,
     db: DB,
+    f: SearchFilters,
     language: Literal["de-dub", "en-dub"] = "de-dub",
     page: int = Query(1, ge=1, le=200),
-    order: Literal["score", "popularity", "newest"] = "popularity",
+    order: Order = "popularity",
 ):
     """Shows NotFlix has found dubbed streams of (in one language), from the shared stream
     cache: every show someone opened adds to it."""
-    sort = {
-        "score": Anime.mean.desc().nulls_last(),
-        "popularity": Anime.num_list_users.desc().nulls_last(),
-        "newest": Anime.start_year.desc().nulls_last(),
-    }[order]
     dubbed = select(EpisodeSource.anime_id).where(EpisodeSource.language == language)
-    ids = list(
-        await db.scalars(
-            select(Anime.id)
-            .where(Anime.id.in_(dubbed))
-            .order_by(sort, Anime.id)
-            .offset((page - 1) * PAGE_SIZE)
-            .limit(PAGE_SIZE + 1)
-        )
-    )
-    return SearchResponse(
-        items=await _cards(db, user, await _from_catalogue(db, ids[:PAGE_SIZE], {})),
-        page=page,
-        has_next=len(ids) > PAGE_SIZE,
-        source="local",
-    )
+    cards, has_next = await _catalogue_page(db, user, Anime.id.in_(dubbed), order, page, f)
+    return SearchResponse(items=cards, page=page, has_next=has_next, source="local")
 
 
 @router.get("/genres", response_model=list[GenreOut])
@@ -210,53 +312,71 @@ async def genres():
     return out
 
 
+GENRE_IMPORT_AHEAD = 1  # Jikan pages fetched past the one asked for
+_imports: dict[tuple[int, str], asyncio.Task] = {}
+
+
+async def _import_genre(genre_id: int, order: str, last_page: int) -> None:
+    """Add Jikan's shows with the genre (its first pages in this order) to the catalogue."""
+    for page in range(1, last_page + 1):
+        key = f"jikan:genre:{genre_id}:{order}:{page}"
+        if (done := await get_json(key)) is not None:
+            if not done.get("has_next"):
+                return
+            continue
+        try:
+            rows, has_next = await jikan.by_genre(genre_id, page, order)  # type: ignore[arg-type]
+        except jikan.JikanError as e:
+            log.info("Jikan genre %s page %s: %s", genre_id, page, e)
+            return
+        async with AsyncSessionLocal() as db:
+            await insert_missing_anime(db, rows)
+            await db.commit()
+            await catalog_jobs.complete(await catalog.anime_by_ids(db, [r["id"] for r in rows]))
+        await set_json(key, {"has_next": has_next}, GENRE_PAGE_TTL_SECONDS)
+        if not has_next:
+            return
+
+
+async def _importing(genre_id: int, order: str, page: int) -> bool:
+    """Start adding the genre's shows from Jikan in the background (when not done lately);
+    whether that's still going on."""
+    if not jikan.enabled():
+        return False
+    task = _imports.get((genre_id, order))
+    if task is None or task.done():
+        last = page + GENRE_IMPORT_AHEAD
+        done = await get_json(f"jikan:genre:{genre_id}:{order}:{last}")
+        if done is not None:
+            return False
+        task = asyncio.create_task(_import_genre(genre_id, order, last))
+        _imports[(genre_id, order)] = task
+        task.add_done_callback(lambda _: _imports.pop((genre_id, order), None))
+    return not task.done()
+
+
+async def wait_imports() -> None:
+    """Wait for genre imports (tests)."""
+    while _imports:
+        await asyncio.gather(*list(_imports.values()), return_exceptions=True)
+
+
 @router.get("/search/genre/{genre_id}", response_model=SearchResponse)
 async def search_genre(
     genre_id: int,
     user: OptionalUser,
     db: DB,
+    f: SearchFilters,
     page: int = Query(1, ge=1, le=200),
-    order: Literal["score", "popularity", "newest"] = "score",
+    order: Order = "score",
 ):
-    """Shows with a genre/theme/demographic: from Jikan (shows already in the catalogue come
-    from there, new ones are added in the background), else from the catalogue."""
-    if jikan.enabled():
-        key = f"jikan:genre:{genre_id}:{order}:{page}"
-        cached = await get_json(key)
-        if cached is None:
-            try:
-                rows, has_next = await jikan.by_genre(genre_id, page, order)
-            except jikan.JikanError:
-                rows = None
-            if rows is not None:
-                cached = {"rows": rows, "has_next": has_next}
-                await set_json(key, cached, GENRE_PAGE_TTL_SECONDS)
-        if cached is not None and "rows" in cached:
-            rows = {r["id"]: r for r in cached["rows"]}
-            return SearchResponse(
-                items=await _cards(db, user, await _from_catalogue(db, list(rows), rows)),
-                page=page,
-                has_next=cached["has_next"],
-                source="jikan",
-            )
-
-    sort = {
-        "score": Anime.mean.desc().nulls_last(),
-        "popularity": Anime.num_list_users.desc().nulls_last(),
-        "newest": Anime.start_year.desc().nulls_last(),
-    }[order]
-    ids = list(
-        await db.scalars(
-            select(Anime.id)
-            .where(cast(Anime.genre_tags, JSONB).contains([{"id": genre_id}]))
-            .order_by(sort, Anime.id)
-            .offset((page - 1) * PAGE_SIZE)
-            .limit(PAGE_SIZE + 1)
-        )
-    )
+    """Shows with a genre/theme/demographic, from the catalogue: answered at once. Jikan's
+    shows with the genre are added to the catalogue in the background meanwhile (`pending`:
+    ask again in a moment for more)."""
+    jikan_order = "score" if order == "for_you" else order
+    pending = await _importing(genre_id, jikan_order, page)
+    tagged = cast(Anime.genre_tags, JSONB).contains([{"id": genre_id}])
+    cards, has_next = await _catalogue_page(db, user, tagged, order, page, f)
     return SearchResponse(
-        items=await _cards(db, user, await _from_catalogue(db, ids[:PAGE_SIZE], {})),
-        page=page,
-        has_next=len(ids) > PAGE_SIZE,
-        source="local",
+        items=cards, page=page, has_next=has_next or pending, source="local", pending=pending
     )

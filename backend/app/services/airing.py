@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -221,6 +221,31 @@ async def _check(anime_id: int) -> None:
     except anilist_account.AniListError as e:
         log.info("Next episode of anime %s unknown: %s", anime_id, e)
         await redis().set(f"airing:failed:{anime_id}", 1, ex=CHECK_FAILED_TTL_S)
+
+
+def known_aired(anime: Anime, now: datetime | None = None) -> int | None:
+    """Episodes aired so far as far as known, without asking anyone; None: not known (no
+    limit is applied)."""
+    now = now or datetime.now(UTC)
+    if anime.status == "not_yet_aired":
+        return 0
+    if anime.status == "finished_airing" or anime.next_episode is None:
+        return anime.num_episodes or None
+    if anime.next_episode_at is not None and anime.next_episode_at <= now:
+        return anime.next_episode
+    return anime.next_episode - 1
+
+
+async def latest_aired(db: AsyncSession, ids: list[int]) -> dict[int, int]:
+    """The latest episode the release calendar has seen air, per show."""
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(AiringEpisode.anime_id, func.max(AiringEpisode.episode))
+        .where(AiringEpisode.anime_id.in_(ids), AiringEpisode.airing_at <= datetime.now(UTC))
+        .group_by(AiringEpisode.anime_id)
+    )
+    return {anime_id: episode for anime_id, episode in rows}
 
 
 def check_soon(anime: Anime) -> None:

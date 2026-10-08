@@ -11,6 +11,7 @@ import { LazyDetails } from "@/components/LazyDetails";
 import { PredictionPanel } from "@/components/PredictionPanel";
 import { PlaylistButton } from "@/components/playlist/PlaylistEditor";
 import { ScoreEditor } from "@/components/ScoreEditor";
+import { StoryRow } from "@/components/story/StoryRow";
 import { WatchTogetherMenu } from "@/components/together/TogetherBar";
 import { apiOrNull } from "@/lib/api";
 import { Synopsis } from "@/components/Synopsis";
@@ -162,6 +163,8 @@ export default async function AnimePage({ params }: PageProps<"/anime/[id]">) {
         aired={anime.aired_episodes}
         nextAt={anime.next_episode_at}
       />
+
+      <StoryRow animeId={anime.id} />
 
       {me && !me.guest && (
         // Rarely needed: fixing a wrong source match, and intro/outro detection.

@@ -32,9 +32,11 @@ from app.schemas import (
     Progress,
     ProgressUpdate,
     ReferenceOut,
+    RelatedShow,
     ResumeOut,
     ScoreUpdate,
     SkipSegmentOut,
+    StoryOut,
     SynopsisOut,
 )
 from app.services import airing, aniskip, catalog, list_status, positions, related, synopsis
@@ -95,6 +97,34 @@ async def anime_detail(anime_id: int, user: OptionalUser, db: DB, lang: str = "e
         if row is not None and row.synopsis:
             detail.synopsis, detail.synopsis_language = row.synopsis, lang
     return detail
+
+
+@router.get("/anime/{anime_id}/story", response_model=StoryOut)
+async def anime_story(anime_id: int, user: OptionalUser, db: DB):
+    """The show's prequels and sequels in order (with the show itself), and its other relations
+    (films, side stories, spin-offs), from AniList (cached for a week)."""
+    from app.api.search import _cards, _from_catalogue
+
+    anime = await catalog.get_anime(db, anime_id)
+    if anime is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Anime not found")
+    before, after, other, complete = await related.story(anime_id)
+    found = [*before, *after, *other]
+    rows = {r["row"]["id"]: r["row"] for r in found}
+    ids = [r["row"]["id"] for r in found]
+    shows = await _from_catalogue(db, [anime_id, *ids], rows)
+    cards = {c.id: c for c in await _cards(db, user, shows)}
+
+    def items(relations: list[dict]) -> list[RelatedShow]:
+        return [
+            RelatedShow(relation=r["relation"], anime=cards[r["row"]["id"]])
+            for r in relations
+            if r["row"]["id"] in cards
+        ]
+
+    current = [RelatedShow(relation="CURRENT", anime=cards[anime_id])] if anime_id in cards else []
+    story = [*items(before), *current, *items(after)] if before or after else []
+    return StoryOut(story=story, other=items(other), complete=complete)
 
 
 @router.get("/anime/{anime_id}/synopsis", response_model=SynopsisOut)

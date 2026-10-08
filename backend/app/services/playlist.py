@@ -35,19 +35,6 @@ class Entry:
     episode: int | None  # the episode to play; None: none aired that hasn't been watched
 
 
-def aired_now(anime: Anime, now: datetime | None = None) -> int | None:
-    """Episodes aired so far as far as known, without asking anyone; None: not known (no
-    limit is applied)."""
-    now = now or datetime.now(UTC)
-    if anime.status == "not_yet_aired":
-        return 0
-    if anime.status == "finished_airing" or anime.next_episode is None:
-        return anime.num_episodes or None
-    if anime.next_episode_at is not None and anime.next_episode_at <= now:
-        return anime.next_episode
-    return anime.next_episode - 1
-
-
 def next_to_play(anime: Anime, entry: ListEntry | None, now: datetime | None = None) -> int | None:
     """The episode after the ones watched, when it has aired."""
     if anime.status == "not_yet_aired":
@@ -55,7 +42,7 @@ def next_to_play(anime: Anime, entry: ListEntry | None, now: datetime | None = N
     episode = (entry.episodes_watched if entry else 0) + 1
     if anime.num_episodes and episode > anime.num_episodes:
         return None
-    aired = aired_now(anime, now)
+    aired = airing.known_aired(anime, now)
     return None if aired is not None and episode > aired else episode
 
 
@@ -105,7 +92,7 @@ async def current(db: AsyncSession, user: User) -> list[Entry]:
             changed = True
             continue
         if item.hidden_through is not None:
-            aired = aired_now(anime, now)
+            aired = airing.known_aired(anime, now)
             back = aired is not None and aired > item.hidden_through and episode is not None
             if not (back and (user.playlist_auto_airing or not item.auto)):
                 continue
@@ -181,7 +168,7 @@ async def remove(db: AsyncSession, user: User, anime_id: int) -> None:
     entry = await db.scalar(
         select(ListEntry).where(ListEntry.user_id == user.id, ListEntry.anime_id == anime_id)
     )
-    aired = aired_now(anime) if anime is not None else None
+    aired = airing.known_aired(anime) if anime is not None else None
     if anime is not None and anime.status == "currently_airing" and aired is not None:
         item.hidden_through = max(aired, entry.episodes_watched if entry else 0)
         item.auto = True  # (it only comes back with automatic airing shows on)

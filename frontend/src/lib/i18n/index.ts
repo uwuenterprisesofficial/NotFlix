@@ -8,6 +8,7 @@ import { friends } from "./messages/friends";
 import { player } from "./messages/player";
 import { playlist } from "./messages/playlist";
 import { search } from "./messages/search";
+import { seasons } from "./messages/seasons";
 import { stats } from "./messages/stats";
 import { mediaTypes, sources, tags } from "./messages/tags";
 import { together } from "./messages/together";
@@ -26,6 +27,7 @@ const messages = {
   ...desktop,
   ...friends,
   ...playlist,
+  ...seasons,
 } satisfies Messages;
 
 export type MessageKey = keyof typeof messages;

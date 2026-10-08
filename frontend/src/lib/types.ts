@@ -45,6 +45,8 @@ export type AnimeCard = {
   pair?: { me: PairSide | null; partner: PairSide | null } | null;
   /** Dubs NotFlix has found streams of (search results; shows looked up before only). */
   dubs?: Language[];
+  /** Every episode out so far watched (or completed): greyed out. */
+  caught_up?: boolean;
 };
 
 /** One user's side of a show: their list status and score, else their predicted score. */
@@ -84,6 +86,8 @@ export type SearchResponse = {
   page: number;
   has_next: boolean;
   source: "mal" | "jikan" | "local";
+  /** More shows are being added for this search: ask again in a moment. */
+  pending?: boolean;
 };
 
 export type Genre = { id: number; name: string; category: TagCategory; count: number | null };
@@ -413,3 +417,23 @@ export type PlaylistItem = {
 };
 
 export type Playlist = { auto_airing: boolean; items: PlaylistItem[] };
+
+export type RelatedShow = { relation: string; anime: AnimeCard };
+
+/** GET /anime/{id}/story: prequels, the show (CURRENT) and sequels in order; other relations. */
+export type Story = { story: RelatedShow[]; other: RelatedShow[]; complete: boolean };
+
+export type SeasonName = "winter" | "spring" | "summer" | "fall";
+
+export type Season = {
+  year: number;
+  season: SeasonName;
+  current: boolean;
+  items: AnimeCard[];
+  recommended: AnimeCard[];
+  highlights: AnimeCard[];
+  underrated: AnimeCard[];
+  completion: { total: number; watched: number; watching: number; planned: number } | null;
+  genres: { genre: string; total: number; watched: number }[];
+  complete: boolean;
+};

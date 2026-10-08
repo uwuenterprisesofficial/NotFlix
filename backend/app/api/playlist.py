@@ -12,7 +12,7 @@ from app.schemas import (
     PlaylistOut,
     PlaylistSettings,
 )
-from app.services import catalog, playlist
+from app.services import catalog, caught_up, playlist
 from app.services.taste import predictor_for
 
 router = APIRouter(prefix="/me/playlist", tags=["playlist"])
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/me/playlist", tags=["playlist"])
 
 async def _out(db: DB, user: User) -> PlaylistOut:
     predictor = await predictor_for(db, user)
-    return PlaylistOut(
+    out = PlaylistOut(
         auto_airing=user.playlist_auto_airing,
         items=[
             PlaylistItemOut(
@@ -31,6 +31,8 @@ async def _out(db: DB, user: User) -> PlaylistOut:
             for e in await playlist.current(db, user)
         ],
     )
+    await caught_up.mark(db, [i.anime for i in out.items])
+    return out
 
 
 @router.get("", response_model=PlaylistOut)

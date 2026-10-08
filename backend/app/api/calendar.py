@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.api.deps import DB, OptionalUser
 from app.models import ListEntry
 from app.schemas import AiringOut, AnimeCard, CalendarOut
-from app.services import airing, catalog
+from app.services import airing, catalog, caught_up
 from app.services.taste import predictor_for
 
 router = APIRouter(tags=["calendar"])
@@ -32,6 +32,7 @@ async def cards(db: DB, user, episodes: list[airing.Airing]) -> list[AnimeCard]:
         card = catalog.to_card(shows[e.anime_id], entries.get(e.anime_id), predictor=predictor)
         card.airing = AiringOut(episode=e.episode, airing_at=e.airing_at)
         out.append(card)
+    await caught_up.mark(db, out)
     return out
 
 

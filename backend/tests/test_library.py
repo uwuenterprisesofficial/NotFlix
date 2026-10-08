@@ -194,3 +194,127 @@ async def test_playlist(client, listed, monkeypatch):
         db.commit()
     assert shows((await client.get("/me/playlist")).json()) == [(1, None, False)]
     await client.put("/me/playlist/settings", json={"auto_airing": False})
+
+
+async def test_story_of_a_show(client, listed, monkeypatch):
+    from app.services import catalog_jobs, related
+
+    monkeypatch.setattr(catalog_jobs, "enqueue", lambda *a, **k: _none())
+    # Season 1 (70) -> Season 2 (2, "Finished show") -> Season 3 (71) -> Season 4 (72); a film.
+    graph = {
+        70: [{"relation": "SEQUEL", "row": _row(2, "Finished show")}],
+        2: [
+            {"relation": "PREQUEL", "row": _row(70, "Season 1")},
+            {"relation": "SIDE_STORY", "row": _row(73, "The Film", "movie")},
+            {"relation": "SEQUEL", "row": _row(71, "Season 3")},
+        ],
+        71: [
+            {"relation": "PREQUEL", "row": _row(2, "Finished show")},
+            {"relation": "SEQUEL", "row": _row(72, "Season 4", status="not_yet_aired")},
+        ],
+    }
+    fetched: list[list[int]] = []
+
+    async def fetch(ids, http=None):
+        fetched.append(ids)
+        for i in ids:
+            await redis().set(f"related:{i}", json.dumps(graph.get(i, [])))
+
+    monkeypatch.setattr(related, "fetch", fetch)
+    for i in (2, 70, 71, 72, 73):
+        await redis().delete(f"related:{i}")
+    body = (await client.get("/anime/2/story")).json()
+    assert [(s["relation"], s["anime"]["id"]) for s in body["story"]] == [
+        ("PREQUEL", 70), ("CURRENT", 2), ("SEQUEL", 71), ("SEQUEL", 72),
+    ]  # fmt: skip
+    assert [(s["relation"], s["anime"]["id"]) for s in body["other"]] == [("SIDE_STORY", 73)]
+    assert body["complete"] is True
+    # The show itself is completed on the list: marked as caught up.
+    assert body["story"][1]["anime"]["caught_up"] is True
+    assert sorted(i for ids in fetched for i in ids) == [2, 70, 71, 72]
+    for i in (2, 70, 71, 72, 73):
+        await redis().delete(f"related:{i}")
+
+
+async def test_season_page(client, listed, monkeypatch):
+    from sqlalchemy import update
+
+    from app.services import catalog_jobs
+
+    monkeypatch.setattr(catalog_jobs, "enqueue", lambda *a, **k: _none())
+    with sync_session() as db:
+        # 1: watching, nothing seen; 2: completed; 3: planned; 80-83: not on the list.
+        for anime_id in (1, 2, 3):
+            db.execute(update(Anime).where(Anime.id == anime_id).values(
+                start_season="spring 2026", num_list_users=1000 * anime_id, mean=7.0,
+                genres=["Fantasy", "Action"],
+            ))  # fmt: skip
+        db.add_all([
+            Anime(id=80, title="Big hit", genres=["Fantasy"], status="finished_airing",
+                  start_season="spring 2026", num_list_users=90000, mean=8.9),
+            Anime(id=81, title="Hidden gem", genres=["Drama"], status="finished_airing",
+                  start_season="spring 2026", num_list_users=10, mean=8.2),
+            Anime(id=82, title="Music video", genres=[], status="finished_airing",
+                  start_season="spring 2026", media_type="music", num_list_users=5),
+            Anime(id=83, title="Other season", genres=[], status="finished_airing",
+                  start_season="winter 2026", num_list_users=5),
+        ])  # fmt: skip
+        db.commit()
+    body = (await client.get("/seasons/2026/spring")).json()
+    assert [c["id"] for c in body["items"]] == [80, 3, 2, 1, 81]
+    assert body["completion"] == {"total": 5, "watched": 1, "watching": 1, "planned": 1}
+    caught = {c["id"]: c["caught_up"] for c in body["items"]}
+    assert caught[2] is True and caught[1] is False
+    genres = {g["genre"]: (g["total"], g["watched"]) for g in body["genres"]}
+    assert genres["Fantasy"] == (4, 1) and genres["Drama"] == (1, 0)
+    assert [c["id"] for c in body["highlights"]][0] == 80
+    # Underrated: less popular than most, yet good (no predictions here: MAL's score).
+    assert [c["id"] for c in body["underrated"]] == [81]
+    assert (await client.get("/seasons/2026/monsoon")).status_code == 422
+
+
+async def test_genre_search_answers_from_the_catalogue_and_fills_it(client, listed, monkeypatch):
+    from sqlalchemy import update
+
+    from app.api import search
+    from app.services import catalog_jobs, jikan
+
+    monkeypatch.setattr(catalog_jobs, "enqueue", lambda *a, **k: _none())
+    fantasy = [{"id": 10, "name": "Fantasy"}]
+    with sync_session() as db:
+        db.execute(update(Anime).where(Anime.id.in_([1, 2, 3])).values(genre_tags=fantasy))
+        db.execute(update(Anime).where(Anime.id == 1).values(mean=8.5))
+        db.execute(update(Anime).where(Anime.id == 2).values(mean=7.5))
+        db.commit()
+    for page in (1, 2):
+        await redis().delete(f"jikan:genre:10:score:{page}")
+    calls: list[int] = []
+
+    async def by_genre(genre_id, page, order):
+        calls.append(page)
+        row = {"id": 90 + page, "title": f"From Jikan {page}", "genres": ["Fantasy"],
+               "genre_tags": fantasy, "mean": 9.0, "status": "finished_airing"}  # fmt: skip
+        return [row], page < 2
+
+    monkeypatch.setattr(jikan, "enabled", lambda: True)
+    monkeypatch.setattr(jikan, "by_genre", by_genre)
+    first = (await client.get("/search/genre/10")).json()
+    # At once, from the catalogue (Jikan's shows are on their way).
+    assert first["pending"] is True
+    # (a quick import may have added one already)
+    assert [a["id"] for a in first["items"]][-3:] == [1, 2, 3]
+    await search.wait_imports()
+    again = (await client.get("/search/genre/10")).json()
+    assert again["pending"] is False and calls == [1, 2]
+    assert [a["id"] for a in again["items"]] == [91, 92, 1, 2, 3]
+
+    # Filters: hide what's been seen (2 is completed, 1 is being watched), MAL's score range.
+    body = (await client.get("/search/genre/10", params={"hide_seen": "true"})).json()
+    assert [a["id"] for a in body["items"]] == [91, 92, 3]
+    body = (await client.get("/search/genre/10", params={"min_score": 7, "max_score": 8.6})).json()
+    assert [a["id"] for a in body["items"]] == [1, 2]
+    found = (await client.get("/search", params={"q": "show", "max_score": 8})).json()
+    assert {a["id"] for a in found["items"]} == {2, 3}  # (4: 8.1, 1: 8.5)
+    with sync_session() as db:
+        db.execute(delete(Anime).where(Anime.id.in_([91, 92])))
+        db.commit()

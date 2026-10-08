@@ -87,7 +87,7 @@ export function AnimeCard({
         href={href}
         onPointerEnter={onPointerEnter}
         onPointerLeave={onPointerLeave}
-        className={`group/card relative block shrink-0 transition duration-200 hover:brightness-110 ${fluid ? "w-full" : "w-36 md:w-44"}`}
+        className={`group/card relative block shrink-0 transition duration-200 hover:brightness-110 ${fluid ? "w-full" : "w-36 md:w-44"} ${anime.caught_up ? "opacity-50 grayscale-[60%] hover:opacity-100 hover:grayscale-0" : ""}`}
         title={anime.reason ? reasonText(t, anime.reason) : title}
       >
         <div className="relative aspect-[2/3] overflow-hidden rounded-md bg-surface-raised">
@@ -105,6 +105,14 @@ export function AnimeCard({
           <div className="absolute top-1.5 left-1.5">
             <PredictionBadge prediction={anime.prediction} />
           </div>
+          {anime.caught_up && (
+            <span
+              title={t("card.caughtUpInfo")}
+              className="absolute top-1.5 right-1.5 rounded bg-black/80 px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase shadow"
+            >
+              ✓ {anime.progress?.status === "completed" ? t("card.watched") : t("card.caughtUp")}
+            </span>
+          )}
           {!!anime.dubs?.length && (
             <span
               title={t("card.dubs")}

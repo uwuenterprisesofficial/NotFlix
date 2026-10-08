@@ -79,6 +79,8 @@ class AnimeCard(ORM):
     pair: "PairOut | None" = None  # Watch Together: both users' side of the show
     # Dubs NotFlix has found streams of ("de-dub", "en-dub"; shows looked up before only).
     dubs: list[str] = []
+    # Every episode out so far watched (or the show completed): greyed out in the lists.
+    caught_up: bool = False
 
 
 class AnimeDetail(AnimeCard):
@@ -105,6 +107,8 @@ class SearchResponse(BaseModel):
     page: int
     has_next: bool
     source: Literal["mal", "jikan", "local"]  # where the results came from
+    # More shows are being added to the catalogue for this search: ask again in a moment.
+    pending: bool = False
 
 
 class GenreOut(TagOut):
@@ -760,3 +764,42 @@ class PlaylistOrder(BaseModel):
 
 class PlaylistSettings(BaseModel):
     auto_airing: bool
+
+
+class RelatedShow(BaseModel):
+    relation: str  # PREQUEL, SEQUEL, SIDE_STORY, ...; CURRENT: the show itself
+    anime: AnimeCard
+
+
+class StoryOut(BaseModel):
+    """A show's story in order (prequels, the show, sequels), and its other relations."""
+
+    story: list[RelatedShow]
+    other: list[RelatedShow]
+    complete: bool  # False: some relations are still being looked up (ask again soon)
+
+
+class SeasonGenre(BaseModel):
+    genre: str
+    total: int
+    watched: int
+
+
+class SeasonCompletion(BaseModel):
+    total: int  # shows that have started airing
+    watched: int  # completed, or every episode out watched
+    watching: int  # started, not caught up
+    planned: int
+
+
+class SeasonOut(BaseModel):
+    year: int
+    season: str
+    current: bool
+    items: list[AnimeCard]  # everything, the most popular first
+    recommended: list[AnimeCard]
+    highlights: list[AnimeCard]
+    underrated: list[AnimeCard]
+    completion: SeasonCompletion | None  # signed in with a list
+    genres: list[SeasonGenre]
+    complete: bool  # MAL's seasonal list is part of it (else only the catalogue's shows)

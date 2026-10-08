@@ -103,3 +103,68 @@ async def wait_idle() -> None:
     """Wait for running fetches (tests, shutdown)."""
     while _running:
         await asyncio.gather(*list(_running.values()), return_exceptions=True)
+
+
+# A show's page: the whole story in order (prequels of prequels, sequels of sequels).
+STORY_MAX_STEPS = 12
+STORY_WAIT_S = 6
+_story_fetches: dict[int, asyncio.Task] = {}
+
+
+async def _relations(anime_id: int, deadline: float) -> list[dict[str, Any]] | None:
+    """A show's relations: cached, else fetched (waiting until `deadline` at most; the fetch
+    carries on in the background after that). None: not known yet."""
+    found = (await cached([anime_id])).get(anime_id)
+    if found is not None:
+        return found
+    task = _story_fetches.get(anime_id)
+    if task is None:
+        task = asyncio.create_task(fetch([anime_id]))
+        _story_fetches[anime_id] = task
+        task.add_done_callback(lambda _: _story_fetches.pop(anime_id, None))
+    remaining = deadline - asyncio.get_running_loop().time()
+    if remaining <= 0:
+        return None
+    try:
+        await asyncio.wait_for(asyncio.shield(task), remaining)
+    except (TimeoutError, httpx.HTTPError, ValueError) as e:
+        log.info("Relations of anime %s: %s", anime_id, e)
+        return None
+    return (await cached([anime_id])).get(anime_id)
+
+
+def _pick(relations: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
+    """The prequel/sequel to follow: a series (TV, ONA) before films and specials."""
+    found = [r for r in relations if r["relation"] == kind]
+    found.sort(key=lambda r: r["row"].get("media_type") not in ("tv", "ona"))
+    return found[0] if found else None
+
+
+async def story(anime_id: int) -> tuple[list[dict], list[dict], list[dict], bool]:
+    """The show's prequels (oldest first) and sequels (in order), following the main line
+    step by step, and its other relations (films, side stories, spin-offs). Returns
+    (before, after, other, complete): `complete` is False when some relations weren't known
+    in time (they're fetched in the background)."""
+    deadline = asyncio.get_running_loop().time() + STORY_WAIT_S
+    own = await _relations(anime_id, deadline)
+    if own is None:
+        return [], [], [], False
+    complete = True
+    seen = {anime_id}
+    lines: dict[str, list[dict]] = {}
+    for kind in ("PREQUEL", "SEQUEL"):
+        line: list[dict] = []
+        relations: list[dict] | None = own
+        for _ in range(STORY_MAX_STEPS):
+            nxt = _pick(relations or [], kind)
+            if nxt is None or nxt["row"]["id"] in seen:
+                break
+            seen.add(nxt["row"]["id"])
+            line.append(nxt)
+            relations = await _relations(nxt["row"]["id"], deadline)
+            if relations is None:
+                complete = False
+                break
+        lines[kind] = line
+    other = [r for r in own if r["row"]["id"] not in seen]
+    return list(reversed(lines["PREQUEL"])), lines["SEQUEL"], other, complete

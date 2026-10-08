@@ -156,6 +156,24 @@ class MalClient:
         )
         return [item["node"] for item in page.get("data", [])]
 
+    async def season(self, year: int, season: str, pages: int = 2) -> list[dict[str, Any]]:
+        """The shows starting in a season (winter, spring, summer, fall), the most popular first."""
+        nodes: list[dict[str, Any]] = []
+        url: str | None = f"{API_BASE}/anime/season/{year}/{season}"
+        params: dict[str, Any] | None = {
+            "limit": 500,
+            "sort": "anime_num_list_users",
+            "fields": ANIME_FIELDS,
+            "nsfw": "true",
+        }
+        for _ in range(pages):
+            if not url:
+                break
+            page = await self._get(url, params)
+            nodes.extend(item["node"] for item in page.get("data", []))
+            url, params = (page.get("paging") or {}).get("next"), None
+        return nodes
+
     async def search(self, query: str, limit: int = 30, offset: int = 0) -> list[dict[str, Any]]:
         """MAL's title search (the query needs at least 3 characters)."""
         page = await self._get(

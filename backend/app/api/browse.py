@@ -8,7 +8,15 @@ from app.api.calendar import cards as calendar_cards
 from app.api.deps import DB, OptionalUser
 from app.models import Anime, ListEntry, ListStatus, Recommendation
 from app.schemas import AnimeDetail, BrowseResponse, ResumeOut, Row
-from app.services import airing, anilist_account, catalog, mal, positions, sync_jobs
+from app.services import (
+    airing,
+    anilist_account,
+    catalog,
+    caught_up,
+    mal,
+    positions,
+    sync_jobs,
+)
 from app.services.taste import Predictor, Show, predictor_for
 
 router = APIRouter(tags=["browse"])
@@ -168,6 +176,8 @@ async def browse(user: OptionalUser, db: DB):
             if card.id in saved and not card.airing:
                 card.resume = ResumeOut.model_validate(saved[card.id])
 
+    # Shows the user has caught up with come last in each row (greyed out).
+    await caught_up.mark_rows(db, rows)
     return BrowseResponse(
         hero=hero,
         rows=[r for r in rows if r.items],

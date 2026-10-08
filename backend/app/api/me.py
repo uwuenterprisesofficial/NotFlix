@@ -21,6 +21,7 @@ from app.schemas import (
 from app.services import (
     anilist_account,
     catalog,
+    caught_up,
     list_writer,
     mal,
     playlist,
@@ -144,22 +145,25 @@ async def library(user: ListUser, db: DB):
         if c.id in saved:
             c.resume = ResumeOut.model_validate(saved[c.id])
 
+    sections = [
+        Row(id="continue", title="Continue Watching", items=_by_appeal(continue_cards)),
+        Row(id="season", title="Airing This Season", items=_by_appeal(card(a) for a in season)),
+        Row(id="planned", title="Plan to Watch", items=_by_appeal(card(a) for a in planned)),
+        Row(
+            id="related",
+            title="Related to What You Watched",
+            items=_by_appeal(aired)[:RELATED_MAX],
+        ),
+        Row(
+            id="related_upcoming",
+            title="Coming Up, Related to What You Watched",
+            items=_by_appeal(upcoming)[:RELATED_MAX],
+        ),
+    ]
+    # Shows the user has caught up with come last (greyed out).
+    await caught_up.mark_rows(db, sections)
     return LibraryResponse(
-        sections=[
-            Row(id="continue", title="Continue Watching", items=_by_appeal(continue_cards)),
-            Row(id="season", title="Airing This Season", items=_by_appeal(card(a) for a in season)),
-            Row(id="planned", title="Plan to Watch", items=_by_appeal(card(a) for a in planned)),
-            Row(
-                id="related",
-                title="Related to What You Watched",
-                items=_by_appeal(aired)[:RELATED_MAX],
-            ),
-            Row(
-                id="related_upcoming",
-                title="Coming Up, Related to What You Watched",
-                items=_by_appeal(upcoming)[:RELATED_MAX],
-            ),
-        ],
+        sections=sections,
         related_pending=related.loading(user.id),
     )
 

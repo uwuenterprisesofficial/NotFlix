@@ -13,6 +13,7 @@ from app.api import (
     playlist,
     proxy,
     search,
+    seasons,
     streams,
     together,
 )
@@ -42,6 +43,7 @@ app.include_router(me.router)
 app.include_router(playlist.router)
 app.include_router(browse.router)
 app.include_router(search.router)
+app.include_router(seasons.router)
 app.include_router(calendar.router)
 app.include_router(anime.router)
 app.include_router(streams.router)
