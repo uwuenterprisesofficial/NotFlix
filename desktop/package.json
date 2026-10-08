@@ -1,6 +1,6 @@
 {
   "name": "notflix-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "NotFlix as a desktop app: with its own built-in server, or connected to a NotFlix server",
   "main": "main.js",
@@ -25,6 +25,7 @@
       "main.js",
       "builtin-server.js",
       "preload.js",
+      "updater.js",
       "package.json"
     ],
     "win": {
@@ -35,10 +36,14 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "NotFlix-Setup-${version}.${ext}"
     },
     "mac": {
-      "target": "dmg",
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "category": "public.app-category.entertainment"
     },
     "linux": {
@@ -48,6 +53,15 @@
     "afterPack": "scripts/after-pack.cjs",
     "portable": {
       "artifactName": "NotFlix-${version}-portable.exe"
-    }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://127.0.0.1/updates"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

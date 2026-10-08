@@ -16,6 +16,7 @@ from app.api import (
     seasons,
     streams,
     together,
+    updates,
 )
 from app.core.api_key import ApiKeyMiddleware, check_configured
 from app.core.config import get_settings
@@ -50,6 +51,7 @@ app.include_router(streams.router)
 app.include_router(streams.providers_router)
 app.include_router(proxy.router)
 app.include_router(together.router)
+app.include_router(updates.router)
 app.include_router(admin.router)
 app.include_router(library.router)
 app.include_router(friends.router)

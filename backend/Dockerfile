@@ -15,6 +15,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project --no-dev
 COPY . .
+# The desktop app's latest release (copied into releases/ by scripts/publish.sh), served at
+# /updates/ for the app's auto-update: updating the server updates the app.
+COPY releases/ /app/releases/
+ENV RELEASES_DIR=/app/releases
 COPY --chmod=755 docker-start.sh /usr/local/bin/notflix-start
 # Which build this is (scripts/publish.sh sets the commit); printed when the backend starts.
 ARG NOTFLIX_VERSION=dev

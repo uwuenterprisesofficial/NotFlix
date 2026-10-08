@@ -170,8 +170,8 @@ npm run dist:win        # or dist:mac, dist:linux
 
 On Windows this makes two files in `desktop/dist/`, each a single executable:
 
-- `NotFlix Setup <version>.exe`, an installer. This is the one to use: it unpacks once and starts quickly.
-- `NotFlix-<version>-portable.exe`, which runs without installing. It unpacks itself (about 700 MB) on every start, so it starts slowly.
+- `NotFlix-Setup-<version>.exe`, an installer. This is the one to use: it unpacks once, starts quickly, and updates itself (see **Updates**).
+- `NotFlix-<version>-portable.exe`, which runs without installing. It unpacks itself (about 700 MB) on every start, so it starts slowly, and it doesn't update itself.
 
 What the build does:
 
@@ -187,6 +187,18 @@ What the build does:
 - `npm run dist:client` builds the app without the built-in server, for connecting to another server only (about 100 MB instead of 700).
 
 For development: `npm run server`, `npm run stack`, then `npm start`.
+
+### Updates
+
+The app updates itself from the NotFlix server it's connected to (with **Another server**, hybrid or not), using [electron-updater](https://www.electron.build/auto-update):
+
+- **Shipping an update.** The server's image carries the app's latest build. `scripts/publish.sh` (and `publish.ps1`) first copies the release from `desktop/dist` into `backend/releases`, via `scripts/copy-release.mjs`. That means electron-updater's `latest.yml` / `latest-linux.yml` / `latest-mac.yml`, the installers they name and their `.blockmap` files. The Dockerfile puts that folder into the image. So to ship a version: raise it (see [CHANGELOG.md](CHANGELOG.md)), `npm run dist` in `desktop/`, then publish the server and pull the new image there. A publish without a build in `desktop/dist` keeps whatever `backend/releases` holds.
+- **Serving it.** The backend serves the files at `/updates/<file>`, with the API key like every request (the app sends it). Range requests let the app download only the parts that changed. `GET /updates` says which version the server hands out. `RELEASES_DIR` points elsewhere if needed.
+- **In the app.** The app checks 10 seconds after starting and then every 4 hours. It downloads in the background. Once an update is ready, a notification and a **Restart now** prompt appear in the window; otherwise it's installed when the app closes.
+- **Where it shows.** **Settings → App version** shows the version and the update's state, with **Check for updates**.
+- **What's new.** The first time a new version opens, it shows what's new since the version used before (from `frontend/src/lib/changelog.ts`). Every version's notes are at **Settings → Changelog** (`/changelog`).
+- **What doesn't update itself.** The portable .exe and a development run (`npm start`) don't update. The built-in server alone hands out no updates either, unless `NOTFLIX_UPDATE_URL` (and `NOTFLIX_UPDATE_KEY`) name a server to update from.
+- **macOS.** electron-updater installs the `.zip` that the mac build now also makes. macOS only accepts updates of signed apps.
 
 ### This PC (built-in)
 

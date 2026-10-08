@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AccountSettings } from "@/components/AccountSettings";
 import { SettingsForm } from "@/components/SettingsForm";
+import { AppVersion } from "@/components/desktop/DesktopUpdates";
 import { ServerSettings } from "@/components/desktop/ServerSettings";
 import { cookies } from "next/headers";
 import { api, apiOrNull } from "@/lib/api";
@@ -32,6 +33,12 @@ export default async function SettingsPage() {
       </section>
       <SettingsForm design={isDesign(chosen) ? chosen : "standard"} />
       <ServerSettings />
+      <AppVersion />
+      <p className="mt-10 text-sm">
+        <Link href="/changelog" className="text-muted hover:text-white">
+          {t("changelog.title")} ›
+        </Link>
+      </p>
       {me?.admin && (
         <section className="mt-10">
           <h2 className="text-lg font-semibold">{t("admin.title")}</h2>

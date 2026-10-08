@@ -5,6 +5,9 @@
 #   scripts/publish.sh                   the server's image: backend
 #   scripts/publish.sh backend frontend  others too (the web app, aniscraper)
 #
+# The backend's image includes the desktop app's latest build (desktop/dist, made with npm run
+# dist there first): servers hand it out as the app's auto-update.
+#
 # Pushes registry.uwuenterprises.de/notflix-<name>:latest. Override with REGISTRY=..., TAG=... and the
 # target platform with PLATFORM=... (default linux/amd64, also when building on an ARM Mac).
 set -eu
@@ -18,6 +21,11 @@ VERSION="$(git -C "$ROOT" describe --always --dirty 2>/dev/null || echo unknown)
 
 [ $# -gt 0 ] || set -- backend
 for name in "$@"; do
+    if [ "$name" = backend ]; then
+        # The desktop app's latest build goes into the image: the server hands it out as the
+        # app's update (see backend/app/api/updates.py).
+        node "$ROOT/scripts/copy-release.mjs"
+    fi
     case "$name" in
         backend | aniscraper) target="" ;;
         frontend) target="--target prod" ;;  # the optimized build, not the development server

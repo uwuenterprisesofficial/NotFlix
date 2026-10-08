@@ -17,6 +17,7 @@ const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
 const { BuiltInServer, readEnvFile } = require("./builtin-server");
+const updater = require("./updater");
 
 // A fixed port keeps the app's origin, and so its local storage (player settings, resume
 // points), the same between runs. The next few are tried when it's taken.
@@ -261,6 +262,13 @@ async function startAll() {
     }
   }
   await startServer(port, target, local);
+  // Updates come from the server the app is connected to (its image carries the app's latest
+  // release); the built-in server alone has none, unless NOTFLIX_UPDATE_URL names a server.
+  const remote = mode(config) === "remote" && config.backend;
+  const updateUrl = remote ? config.backend : process.env.NOTFLIX_UPDATE_URL || null;
+  updater.configure(updateUrl, remote ? readKey(config) : process.env.NOTFLIX_UPDATE_KEY || "", (s) =>
+    win?.webContents.send("update:status", s),
+  );
 }
 
 async function stopAll() {
@@ -554,6 +562,35 @@ ipcMain.handle("backend:set", async (event, raw, rawKey, options) => {
   writeConfig(withKey(next, key));
   await restart();
   return { ok: true };
+});
+
+// --- Updates and the changelog ---
+
+ipcMain.handle("update:get", (event) => {
+  if (!isApp(event.senderFrame?.url ?? "")) return null;
+  return { ...updater.status(), current: app.getVersion() };
+});
+
+ipcMain.handle("update:check", async (event) => {
+  if (!isApp(event.senderFrame?.url ?? "")) return null;
+  return { ...(await updater.check()), current: app.getVersion() };
+});
+
+ipcMain.handle("update:install", (event) => {
+  if (!isApp(event.senderFrame?.url ?? "")) return false;
+  return updater.install();
+});
+
+/** The version, and the one opened before it (the changelog shows what's new since then). */
+ipcMain.handle("app:version", (event) => {
+  if (!isApp(event.senderFrame?.url ?? "")) return null;
+  const seen = readConfig().lastSeenVersion ?? null;
+  return { version: app.getVersion(), previous: seen, isNew: seen !== app.getVersion() };
+});
+
+ipcMain.handle("app:changelogSeen", (event) => {
+  if (!isApp(event.senderFrame?.url ?? "")) return;
+  writeConfig({ ...readConfig(), lastSeenVersion: app.getVersion() });
 });
 
 function buildMenu() {

@@ -54,6 +54,34 @@ export type RemoteOptions = {
 
 type Result = { ok: true } | { ok: false; error: BackendError };
 
+/** The app's update (see desktop/updater.js): checked, downloaded in the background, then
+ * "ready" (installed on restart). */
+export type UpdateStatus = {
+  state:
+    | "idle"
+    | "unsupported" // while developing, or the portable .exe
+    | "noServer" // the built-in server alone hands out no updates
+    | "checking"
+    | "upToDate"
+    | "downloading"
+    | "ready"
+    | "error";
+  /** The update's version (downloading or ready). */
+  version: string | null;
+  progress: number | null;
+  error: string | null;
+  /** The running version. */
+  current?: string;
+};
+
+export type AppVersion = {
+  version: string;
+  /** The version opened before (null: the first start). */
+  previous: string | null;
+  /** This version is opened for the first time: show what's new. */
+  isNew: boolean;
+};
+
 /** What the desktop app's preload script offers the page (see desktop/preload.js). */
 export type DesktopBridge = {
   backend(): Promise<DesktopBackend>;
@@ -64,6 +92,15 @@ export type DesktopBridge = {
   setBuiltIn(settings: BuiltInUpdate): Promise<Result>;
   /** Open the built-in server's log folder. */
   openLogs(): Promise<void>;
+  version?(): Promise<AppVersion | null>;
+  /** The changelog of this version was shown. */
+  changelogSeen?(): Promise<void>;
+  updateStatus?(): Promise<UpdateStatus | null>;
+  checkForUpdates?(): Promise<UpdateStatus | null>;
+  /** Restart into the downloaded update. */
+  installUpdate?(): Promise<boolean>;
+  /** Called whenever the update's status changes; returns a function to stop. */
+  onUpdateStatus?(callback: (status: UpdateStatus) => void): () => void;
 };
 
 declare global {

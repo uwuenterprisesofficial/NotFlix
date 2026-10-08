@@ -11,3 +11,7 @@ __pycache__/
 
 # Redis snapshots of a local redis-server
 dump.rdb
+
+# The desktop app's release, copied in by scripts/publish.sh (see backend/releases/README.md)
+backend/releases/*
+!backend/releases/README.md

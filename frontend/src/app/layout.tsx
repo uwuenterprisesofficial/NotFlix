@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Nunito, Oswald } from "next/font/google";
 import { I18nProvider } from "@/components/I18nProvider";
 import { Navbar } from "@/components/Navbar";
+import { DesktopUpdates } from "@/components/desktop/DesktopUpdates";
 import { TogetherSessions } from "@/components/together/Session";
 import { cookies } from "next/headers";
 import { apiOrNull } from "@/lib/api";
@@ -43,6 +44,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             <Navbar />
             <main className="flex-1">{children}</main>
           </TogetherSessions>
+          {/* The desktop app: what's new after an update, and "Restart to update". */}
+          <DesktopUpdates />
         </I18nProvider>
       </body>
     </html>

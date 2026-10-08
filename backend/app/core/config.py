@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,6 +18,9 @@ class Settings(BaseSettings):
     # start without one.
     api_key: str = ""
     frontend_url: str = "http://localhost:3000"
+    # The desktop app's latest release (installers and electron-updater's latest*.yml), served
+    # at /updates/ for its auto-update. scripts/publish.sh puts it into the image.
+    releases_dir: str = str(Path(__file__).resolve().parents[2] / "releases")
 
     mal_client_id: str = ""
     mal_client_secret: str = ""
