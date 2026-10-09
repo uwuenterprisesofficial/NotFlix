@@ -83,6 +83,13 @@ export const CHANGELOG: ChangelogEntry[] = [
         },
       },
       {
+        title: { en: "A logo of our own", de: "Ein eigenes Logo" },
+        text: {
+          en: "NotFlix has its own logo now: a screen that looks back with an anime eye's sparkle, in Catchlight Rose. It's the app icon, the browser tab and the top bar.",
+          de: "NotFlix hat jetzt ein eigenes Logo: ein Bildschirm, der mit dem Glanz eines Anime-Auges zurückschaut, in Catchlight Rose. Es ist App-Icon, Browser-Tab und obere Leiste.",
+        },
+      },
+      {
         title: { en: "Automatic updates", de: "Automatische Updates" },
         text: {
           en: "The app updates itself from your NotFlix server in the background and asks you to restart once an update is ready. This changelog shows what's new after each update.",

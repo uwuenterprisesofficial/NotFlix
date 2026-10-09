@@ -377,7 +377,7 @@ async function offerWayBack() {
           button.textContent = "← NotFlix";
           button.title = "Back to NotFlix (Alt+←)";
           button.style.cssText = "position:fixed;top:12px;left:12px;z-index:2147483647;" +
-            "padding:8px 14px;border:0;border-radius:6px;background:#e50914;color:#fff;" +
+            "padding:8px 14px;border:0;border-radius:6px;background:#e11d5c;color:#fff;" +
             "font:600 14px system-ui,sans-serif;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,.4)";
           button.addEventListener("click", () => { location.href = ${target}; });
           document.body.appendChild(button);
@@ -421,6 +421,8 @@ function createWindow() {
     minHeight: 500,
     backgroundColor: "#141414",
     title: "NotFlix",
+    // (Windows and macOS take the icon from the installed app; Linux needs it here)
+    icon: path.join(__dirname, "icons", "icon-256.png"),
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -473,10 +475,15 @@ function createWindow() {
   });
 }
 
+// The logo (brand/), inline: the splash shows before the app's own server is up.
+const LOGO_SVG = fs
+  .readFileSync(path.join(__dirname, "icons", "notflix-horizontal.svg"), "utf8")
+  .replace(/<title>.*?<\/title>/, "")
+  .replace(/ width="[^"]*" height="[^"]*"/, ' width="300" height="62"');
 const SPLASH = `data:text/html;charset=utf-8,${encodeURIComponent(
   `<!doctype html><title>NotFlix</title>
   <body style="margin:0;height:100vh;display:grid;place-items:center;background:#141414;color:#aaa;font:16px system-ui">
-  <div style="text-align:center"><div style="color:#e50914;font:900 42px system-ui">NOTFLIX</div><p>Starting…</p></div>`,
+  <div style="text-align:center">${LOGO_SVG}<p>Starting…</p></div>`,
 )}`;
 
 function showSplash() {

@@ -21,6 +21,13 @@ A Netflix-style front end for anime, backed by your MyAnimeList account:
 - **Player**: plays a direct stream (mp4/HLS) or embeds a third-party player in an `<iframe>`. In an episode's last five minutes, the next one's stream is looked up, checked and its beginning loaded in the background, so Next Episode starts at once (with a stream known to work). The iframe isn't sandboxed because hosters refuse to play in one, so use your browser's popup/ad blocker against their ads.
 - **Intro/outro detection**: compares audio fingerprints of two or more episodes to find the shared opening and ending. Results are stored in Postgres, so each episode is only analysed once, and they drive the "Skip Intro" / auto-skip controls.
 
+## Brand
+
+NotFlix's logo ("Catchlight") is a screen that looks back with an anime eye's catchlights, in Catchlight Rose
+`#E11D5C` on ink. The masters, icons, colours and usage rules are in [brand/](brand/README.md). `brand/build.py`
+draws them and syncs the logo into the web app (`frontend/src/lib/logo.ts`, the `Logo` component, the favicons
+and the manifest) and the desktop app (`desktop/icons/`).
+
 ## Stack
 
 | Layer    | Tech |

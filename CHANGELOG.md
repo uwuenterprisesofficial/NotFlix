@@ -31,6 +31,9 @@ build the desktop app (`npm run dist` in `desktop/`) and publish the server
 - **Watch Together, reworked**: sessions you invite a friend to. Whatever one of you opens plays
   for both, and pausing pauses both. The players stay close without stuttering. Friends can be
   added with a friend code.
+- **A logo of our own**: a screen that looks back with an anime eye's catchlights, in Catchlight Rose
+  (`#E11D5C`, replacing Netflix red). It's used for the app icon, the favicon, the top bar and the splash screen. See
+  [brand/](brand/README.md).
 - **Automatic updates**: the desktop app updates itself from its NotFlix server in the
   background and asks to restart once an update is ready. After an update it shows what's new.
 
