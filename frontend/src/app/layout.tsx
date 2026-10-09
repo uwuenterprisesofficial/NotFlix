@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Nunito, Oswald } from "next/font/google";
 import { I18nProvider } from "@/components/I18nProvider";
 import { Navbar } from "@/components/Navbar";
@@ -22,7 +22,10 @@ const nunito = Nunito({ variable: "--font-nunito", subsets: ["latin"], preload: 
 export const metadata: Metadata = {
   title: "NotFlix",
   description: "Your anime, Netflix style — synced with MyAnimeList.",
+  // (favicon.ico, icon.svg and apple-icon.png next to this file are picked up by themselves)
 };
+
+export const viewport: Viewport = { themeColor: "#141414" };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const lang = await getLang();

@@ -3,6 +3,7 @@ import { apiOrNull } from "@/lib/api";
 import { getT } from "@/lib/i18n/server";
 import type { Me } from "@/lib/types";
 import { BackButton } from "./BackButton";
+import { Logo } from "./Logo";
 import { UserMenu } from "./UserMenu";
 
 async function currentUser(): Promise<Me | null> {
@@ -33,13 +34,12 @@ export async function Navbar() {
     <header className="fixed inset-x-0 top-0 z-50 bg-gradient-to-b from-black/90 to-transparent">
       <nav className="mx-auto flex h-16 items-center gap-8 px-4 md:px-12">
         <BackButton />
-        <Link href="/" className="logo text-2xl font-black tracking-tight text-brand md:text-3xl">
+        <Link href="/" className="logo flex items-center gap-1.5 text-2xl text-white">
           <span aria-hidden className="logo-mark star">
-            ★{" "}
+            ★
           </span>
-          NOTFLIX
+          <Logo className="h-7 w-auto md:h-8" />
           <span aria-hidden className="logo-mark note">
-            {" "}
             ♪
           </span>
         </Link>

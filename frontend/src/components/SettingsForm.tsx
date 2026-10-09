@@ -57,7 +57,7 @@ function Toggle({
 
 // Swatches of each design: surface, raised surface, brand, accent.
 const SWATCHES: Record<Design, string[]> = {
-  standard: ["#141414", "#232323", "#e50914", "#ffffff"],
+  standard: ["#141414", "#232323", "#e11d5c", "#ffffff"],
   communism: ["#170405", "#2c0a0b", "#d7141a", "#f5c518"],
   miku: ["#081a21", "#10303a", "#39c5bb", "#e12885"],
 };

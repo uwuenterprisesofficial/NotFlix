@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand: #e50914;
-  --color-brand-dark: #b20710;
+  /* Catchlight Rose: the logo's colour (brand/README.md) */
+  --color-brand: #e11d5c;
+  --color-brand-dark: #b0124a;
   --color-surface: #141414;
   --color-surface-raised: #232323;
   --color-muted: #a3a3a3;

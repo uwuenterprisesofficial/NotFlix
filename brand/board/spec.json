@@ -1,0 +1,34 @@
+{
+  "brand": "NotFlix",
+  "tagline": "Your anime, Netflix style",
+  "brief": "A self-hosted, Netflix-style home for your anime: your MyAnimeList and AniList lists, streams, predictions, and watching together with friends. Playful and a little cheeky, clearly its own thing, not a Netflix look-alike.",
+  "adjectives": ["playful", "cinematic", "anime", "social"],
+  "criteria": "Success: unmistakably not Netflix, says screen + anime at a glance, recognisable at 16 px in a browser tab, works in one colour.",
+  "industry": "consumer-app",
+  "nav": ["Home", "My List", "Seasons"],
+  "brand_color": "#E11D5C",
+  "tile_color": "#141414",
+  "greyscale": false,
+  "final": true,
+  "deck_title": "final identity",
+  "designer": "NotFlix",
+  "concepts": [
+    {
+      "name": "Catchlight",
+      "symbol": "../logo/notflix-symbol.svg",
+      "lockup": "../logo/notflix-horizontal-on-light.svg",
+      "symbol_on_tile": "../logo/notflix-symbol.svg",
+      "symbol_on_dark": "../logo/notflix-symbol.svg",
+      "lockup_on_dark": "../logo/notflix-horizontal.svg",
+      "stacked_on_dark": "../logo/notflix-stacked.svg",
+      "idea": "A screen that looks back at you with an anime eye's catchlights.",
+      "rationale": [
+        "Screen and anime in one shape: no letters, no film strips, no ribbon N",
+        "Catchlight Rose (#E11D5C) on ink: its own colour, not Netflix red",
+        "A small-size cut with bigger catchlights keeps it readable at 16 px"
+      ]
+    }
+  ],
+  "recommendation": "Catchlight in Catchlight Rose: the symbol alone for icons, the horizontal lockup in the app's top bar.",
+  "next_steps": ["Use in the web app and desktop app", "Animate the catchlights (a blink) for the splash screen"]
+}
