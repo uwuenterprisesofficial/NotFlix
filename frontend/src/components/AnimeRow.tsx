@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useRef } from "react";
 import type { MessageKey } from "@/lib/i18n";
+import { seriesWatchHref, type SeriesProgress } from "@/lib/series";
 import type { Row } from "@/lib/types";
 import { AnimeCard, type PairNames } from "./AnimeCard";
 import { useT } from "./I18nProvider";
+import { SeriesCard } from "./series/SeriesCard";
 
 // Row ids the backend sends, with their translated titles.
 const ROW_TITLES = new Set([
@@ -21,7 +23,16 @@ const ROW_TITLES = new Set([
   "row.new-episodes",
 ]);
 
-export function AnimeRow({ row, pairNames }: { row: Row; pairNames?: PairNames }) {
+export function AnimeRow({
+  row,
+  pairNames,
+  series = [],
+}: {
+  row: Row;
+  pairNames?: PairNames;
+  /** Series without a MyAnimeList id the user is watching (Continue Watching only). */
+  series?: SeriesProgress[];
+}) {
   const { t } = useT();
   const scroller = useRef<HTMLDivElement>(null);
   const key = `row.${row.id}`;
@@ -52,6 +63,15 @@ export function AnimeRow({ row, pairNames }: { row: Row; pairNames?: PairNames }
         ref={scroller}
         className="no-scrollbar flex gap-2 overflow-x-auto scroll-smooth px-4 py-4 md:px-12"
       >
+        {series.map((s) => (
+          <SeriesCard
+            key={s.slug}
+            href={seriesWatchHref(s.slug, s.season, s.episode)}
+            title={s.title}
+            image={s.image_url}
+            badge={t("series.card", { season: s.season, episode: s.episode })}
+          />
+        ))}
         {row.items.map((anime) => (
           <AnimeCard key={anime.id} anime={anime} pairNames={pairNames} />
         ))}

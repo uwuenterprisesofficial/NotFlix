@@ -44,6 +44,9 @@ let origin = null; // the local server, e.g. http://127.0.0.1:47300
 // Where the backend's sign-in callbacks land (its web app), learnt from the backend.
 let publicOrigin = null;
 let builtInRunning = false;
+// SerienStream's series service (stack/series-api), run on this PC whatever the backend is: the
+// app's pages ask it directly (through this app's server), never the backend.
+let seriesService = null;
 let builtInError = null; // why the built-in server didn't start
 // The last page of the app itself: where "Back to NotFlix" on a sign-in page returns to.
 let lastAppPage = null;
@@ -261,7 +264,8 @@ async function startAll() {
       if (!upstream) target = { url: NO_BACKEND, key: "" };
     }
   }
-  await startServer(port, target, local);
+  const seriesUrl = await startSeries();
+  await startServer(port, target, local, seriesUrl);
   // Updates come from the server the app is connected to (its image carries the app's latest
   // release); the built-in server alone has none, unless NOTFLIX_UPDATE_URL names a server.
   const remote = mode(config) === "remote" && config.backend;
@@ -273,7 +277,65 @@ async function startAll() {
 
 async function stopAll() {
   await stopServer();
+  await stopSeries();
   await stopBuiltIn();
+}
+
+/** A free port on 127.0.0.1 (the OS picks it). */
+function anyFreePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+/** Start the series service (SerienStreamAPI) on this PC. Its address, or "" when this app was
+ * built without it or it doesn't start: series are then left out and the rest works. */
+async function startSeries() {
+  if (!builtIn?.has("series-api")) return "";
+  const exe = path.join(
+    builtIn.dir,
+    "series-api",
+    process.platform === "win32" ? "series-api.exe" : "series-api",
+  );
+  const host = readEnvFile(path.join(dataDir(), "server.env")).SERIES_HOST ?? "";
+  const port = await anyFreePort();
+  fs.mkdirSync(path.join(dataDir(), "logs"), { recursive: true });
+  const log = fs.openSync(path.join(dataDir(), "logs", "series-api.log"), "a");
+  const child = spawn(exe, ["--urls", `http://127.0.0.1:${port}`], {
+    env: { ...process.env, ...(host ? { SERIES_HOST: host } : {}) },
+    stdio: ["ignore", log, log],
+    windowsHide: true,
+  });
+  fs.closeSync(log);
+  seriesService = child;
+  child.on("error", () => {});
+  const url = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + START_TIMEOUT_MS;
+  while (Date.now() < deadline && child.exitCode === null) {
+    try {
+      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(1000) });
+      if (res.ok) return url;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }
+  await stopSeries();
+  return "";
+}
+
+function stopSeries() {
+  const child = seriesService;
+  seriesService = null;
+  if (!child || child.exitCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    child.once("exit", resolve);
+    child.kill();
+  });
 }
 
 async function stopBuiltIn() {
@@ -284,7 +346,7 @@ async function stopBuiltIn() {
 
 /** The app's own server, passing /api/* on to `target` (and, in hybrid mode, the stream
  * requests to `local`; see frontend/src/proxy.ts). */
-async function startServer(port, target, local = null) {
+async function startServer(port, target, local = null, seriesUrl = "") {
   const log = fs.createWriteStream(path.join(app.getPath("userData"), "server.log"));
   // Electron's own binary runs the server as plain Node.js.
   const child = spawn(process.execPath, [path.join(serverDir, "server.js")], {
@@ -301,6 +363,7 @@ async function startServer(port, target, local = null) {
       API_KEY: target.key,
       LOCAL_API_URL: local?.url ?? "",
       LOCAL_API_KEY: local?.key ?? "",
+      SERIES_API_URL: seriesUrl,
     },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,

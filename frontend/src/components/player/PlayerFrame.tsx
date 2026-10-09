@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { createContext, type ReactNode, use, useState, useSyncExternalStore } from "react";
 import { useT } from "../I18nProvider";
 
-const FrameContext = createContext<HTMLDivElement | null>(null);
+export const FrameContext = createContext<HTMLDivElement | null>(null);
 
 /**
  * The box the video plays in. It lives in the watch layout, which stays mounted when "Next

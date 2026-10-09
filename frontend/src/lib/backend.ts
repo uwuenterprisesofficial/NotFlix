@@ -47,3 +47,13 @@ const LOCAL_PATHS = [
 export function answeredLocally(path: string): boolean {
   return LOCAL_PATHS.some((pattern) => pattern.test(path));
 }
+
+/**
+ * The series service (SerienStream through SerienStreamAPI), which the desktop app runs on the
+ * user's PC and its pages ask directly (as /series-api/*, see proxy.ts) rather than the backend.
+ * Null elsewhere: series are a desktop-app feature.
+ */
+export function seriesService(): string | null {
+  const url = process.env.SERIES_API_URL;
+  return url ? url.replace(/\/+$/, "") : null;
+}

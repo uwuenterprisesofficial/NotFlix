@@ -19,6 +19,27 @@ export type ChangelogEntry = {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.3.0",
+    date: "2026-10-09",
+    title: { en: "Series", de: "Serien" },
+    items: [
+      {
+        title: { en: "Series from SerienStream", de: "Serien von SerienStream" },
+        text: {
+          en: "The desktop app can now search and play series next to anime. Tick Include series on the search page and they are mixed into the results in one list, best matches first, with covers. A series page has its seasons and episodes and plays them in NotFlix's own player (direct streams, like anime), falling back to the hoster's player if one won't play. The series service runs on your PC inside the app, not on the server. Series have no MyAnimeList entry, so they only show up in search and in Continue Watching.",
+          de: "Die Desktop-App kann jetzt neben Anime auch Serien suchen und abspielen. Setze auf der Suchseite den Haken bei Serien einbeziehen, dann stehen sie mit Covern in einer gemeinsamen Liste mit den Ergebnissen von MyAnimeList, die besten Treffer zuerst. Eine Serienseite zeigt Staffeln und Folgen und spielt sie im eigenen NotFlix-Player ab (direkte Streams wie bei Anime), mit dem Player des Hosters als Rückfall, falls einer nicht abspielt. Der Serien-Dienst läuft in der App auf deinem PC, nicht auf dem Server. Serien haben keinen MyAnimeList-Eintrag und erscheinen daher nur in der Suche und unter Weiterschauen.",
+        },
+      },
+      {
+        title: { en: "Continue Watching for series", de: "Weiterschauen für Serien" },
+        text: {
+          en: "The server remembers the episode you opened last of each series (per account), so it appears first in Continue Watching on the home page and opens at that episode.",
+          de: "Der Server merkt sich pro Konto die Folge, die du zuletzt von einer Serie geöffnet hast. Sie erscheint auf der Startseite zuerst unter Weiterschauen und öffnet genau diese Folge.",
+        },
+      },
+    ],
+  },
+  {
     version: "0.2.0",
     date: "2026-10-08",
     title: {

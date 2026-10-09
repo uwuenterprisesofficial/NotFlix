@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- SerienStream (s.to) through SerienStreamAPI as a small web service. The desktop app runs
+       it on the user's PC and its pages talk to it directly (not the backend). Published by
+       desktop/scripts/prepare-stack.mjs as one self-contained executable; the Dockerfile next
+       to this builds it as a container image instead. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>series-api</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SerienStreamAPI" Version="1.1.2" />
+  </ItemGroup>
+
+</Project>

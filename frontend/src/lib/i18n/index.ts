@@ -9,6 +9,7 @@ import { player } from "./messages/player";
 import { playlist } from "./messages/playlist";
 import { search } from "./messages/search";
 import { seasons } from "./messages/seasons";
+import { series } from "./messages/series";
 import { stats } from "./messages/stats";
 import { mediaTypes, sources, tags } from "./messages/tags";
 import { together } from "./messages/together";
@@ -29,6 +30,7 @@ const messages = {
   ...friends,
   ...playlist,
   ...seasons,
+  ...series,
   ...updates,
 } satisfies Messages;
 

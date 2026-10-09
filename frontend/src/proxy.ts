@@ -6,6 +6,7 @@ import {
   backendUrl,
   isDesktop,
   localBackend,
+  seriesService,
 } from "@/lib/backend";
 
 // Tells the backend which origin the browser uses, so a sign-in started in the desktop app
@@ -20,6 +21,15 @@ const ORIGIN_HEADER = "x-notflix-origin";
  */
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
+  if (pathname.startsWith("/series-api/")) {
+    // The series service on this PC (desktop app only), without the browser's cookies.
+    const series = seriesService();
+    if (!series) return NextResponse.json({ detail: "No series service" }, { status: 503 });
+    const headers = new Headers(request.headers);
+    headers.delete("cookie");
+    const path = pathname.slice("/series-api".length);
+    return NextResponse.rewrite(new URL(`${series}${path}${search}`), { request: { headers } });
+  }
   const path = pathname.slice("/api".length);
   const headers = new Headers(request.headers);
   // Hybrid mode: streams are found and played on this PC.
@@ -39,4 +49,4 @@ export function proxy(request: NextRequest) {
   return NextResponse.rewrite(target, { request: { headers } });
 }
 
-export const config = { matcher: "/api/:path*" };
+export const config = { matcher: ["/api/:path*", "/series-api/:path*"] };

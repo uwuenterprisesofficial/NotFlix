@@ -10,6 +10,21 @@ MINOR, fixes PATCH. For a release, set it in `desktop/package.json`, `frontend/p
 build the desktop app (`npm run dist` in `desktop/`) and publish the server
 (`scripts/publish.sh`): its image carries the new app, which every connected app downloads.
 
+## 0.3.1 — 2026-10-09
+Hotfix: Fixed the SerienStreamAPI failing to connect
+
+## 0.3 — 2026-10-09
+
+- **Series**: the desktop app can now search and play series from SerienStream, next to
+  anime. Tick **Include series** on the search page and they are mixed into the
+  results, best matches first. A series page has its seasons and episodes, and plays them in NotFlix's own
+  player (direct streams, like anime), falling back to the hoster's player if one won't play.
+  The series service runs on your PC, inside the app, not on the server. Series have no
+  MyAnimeList entry, so they only show up in search and in Continue Watching.
+- **Continue Watching for series**: the server remembers the episode you opened last of each
+  series (per account), so it appears first in Continue Watching on the home page and opens
+  at that episode.
+
 ## 0.2 — 2026-10-08
 
 - **Seasons**: a page for every season (**Seasons** in the menu). It has recommendations for

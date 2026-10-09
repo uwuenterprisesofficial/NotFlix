@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
 import { formatNumber, type MessageKey, tagName } from "@/lib/i18n";
 import { type Order, readQuery, type SearchQuery, searchHref } from "@/lib/search";
+import { useIncludeSeries, useSeriesAvailable } from "@/lib/series";
 import type { Genre, TagCategory } from "@/lib/types";
 import { useT } from "./I18nProvider";
 
@@ -40,6 +41,9 @@ export function SearchControls({ genres }: { genres: Genre[] }) {
     setText(q);
   }
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Series (SerienStream) are searched too, when the desktop app's series service is there.
+  const seriesAvailable = useSeriesAvailable();
+  const [includeSeries, setIncludeSeries] = useIncludeSeries();
 
   function go(next: Partial<SearchQuery>, replace = false) {
     clearTimeout(timer.current);
@@ -129,6 +133,20 @@ export function SearchControls({ genres }: { genres: Genre[] }) {
         />
         {t("search.dub")}
       </label>
+      {seriesAvailable && (
+        <label
+          className="flex items-center gap-2 rounded border border-white/20 bg-surface-raised px-3 py-2 text-sm"
+          title={t("series.includeInfo")}
+        >
+          <input
+            type="checkbox"
+            checked={includeSeries === "on"}
+            onChange={(e) => setIncludeSeries(e.target.checked ? "on" : "off")}
+            className="accent-brand"
+          />
+          {t("series.include")}
+        </label>
+      )}
       <button className="rounded bg-brand px-5 py-2 font-semibold hover:bg-brand-dark">
         {t("search.submit")}
       </button>

@@ -1,0 +1,47 @@
+import type { Messages } from "../core";
+
+export const series = {
+  "series.include": { en: "Include series", de: "Serien einbeziehen" },
+  "series.includeInfo": {
+    en: "Also search SerienStream. These series have no MyAnimeList entry, so they only show up here, and in Continue Watching once you watch one.",
+    de: "Durchsucht zusätzlich SerienStream. Diese Serien haben keinen MyAnimeList-Eintrag und erscheinen nur hier und unter „Weiterschauen“, sobald du eine schaust.",
+  },
+  "series.heading": { en: "Series", de: "Serien" },
+  "series.searching": { en: "Searching series…", de: "Suche Serien…" },
+  "series.failed": { en: "The series search failed.", de: "Die Serien-Suche ist fehlgeschlagen." },
+  "series.nothing": { en: "No series found.", de: "Keine Serien gefunden." },
+  "series.unavailable": {
+    en: "Series need the NotFlix desktop app with its built-in series service.",
+    de: "Serien brauchen die NotFlix-Desktop-App mit ihrem eingebauten Serien-Dienst.",
+  },
+  "series.notFound": { en: "Series not found.", de: "Serie nicht gefunden." },
+  "series.loadFailed": { en: "Couldn't load the series.", de: "Die Serie konnte nicht geladen werden." },
+  "series.seasons": { en: "Seasons", de: "Staffeln" },
+  "series.season": { en: "Season {season}", de: "Staffel {season}" },
+  "series.movies": { en: "Movies", de: "Filme" },
+  "series.episode": { en: "Episode {episode}", de: "Folge {episode}" },
+  "series.movie": { en: "Movie {episode}", de: "Film {episode}" },
+  "series.card": { en: "S{season} E{episode}", de: "S{season} F{episode}" },
+  "series.continue": { en: "Continue with {episode}", de: "Weiter mit {episode}" },
+  "series.start": { en: "Start watching", de: "Jetzt anschauen" },
+  "series.noEpisodes": { en: "No episodes found.", de: "Keine Folgen gefunden." },
+  "series.removeProgress": { en: "Remove from Continue Watching", de: "Aus „Weiterschauen“ entfernen" },
+  "series.streamsFailed": {
+    en: "Couldn't load the streams of this episode.",
+    de: "Die Streams dieser Folge konnten nicht geladen werden.",
+  },
+  "series.noStreams": { en: "No streams for this episode.", de: "Keine Streams für diese Folge." },
+  "series.stream": { en: "Stream", de: "Stream" },
+  "series.previous": { en: "‹ Previous episode", de: "‹ Vorherige Folge" },
+  "series.next": { en: "Next episode ›", de: "Nächste Folge ›" },
+  "series.finished": { en: "Finished the series", de: "Serie beendet" },
+  "series.embedInfo": {
+    en: "The hoster's own player plays this one: skipping and resuming inside the video aren't available. NotFlix still remembers the episode you're on.",
+    de: "Hier spielt der Player des Hosters: Überspringen und Fortsetzen im Video sind nicht möglich. NotFlix merkt sich trotzdem die Folge, bei der du bist.",
+  },
+  "series.audio.German": { en: "German", de: "Deutsch" },
+  "series.audio.English": { en: "English", de: "Englisch" },
+  "series.audio.Japanese": { en: "Japanese", de: "Japanisch" },
+  "series.audio.Unknown": { en: "Unknown", de: "Unbekannt" },
+  "series.subtitles": { en: "{language} subtitles", de: "{language} Untertitel" },
+} satisfies Messages;

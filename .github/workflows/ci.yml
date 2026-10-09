@@ -65,4 +65,6 @@ jobs:
       - name: Built-in server's Python
         run: uvx ruff@0.16.8 check --line-length 100 stack && uvx ruff@0.16.8 format --check --line-length 100 stack
       - name: SerienStreamAPI service builds
-        run: dotnet build stack/aniworld-api -c Release
+        run: |
+          dotnet build stack/aniworld-api -c Release
+          dotnet build stack/series-api -c Release

@@ -149,6 +149,13 @@ With nginx, turn off buffering (`proxy_buffering off;`), or Watch Together's liv
 
 Since this version, migrations no longer depend on `alembic.ini` or the working directory. An empty folder mounted over the code now stops the backend with a message that says so.
 
+## Series (desktop app)
+
+Besides anime, the desktop app can search and play series from SerienStream (serienstream.to) through [SerienStreamAPI](https://github.com/IcySnex/SerienStreamAPI). The service (`desktop/stack/series-api/`) is started by the app itself on a free port of the PC, whichever backend it uses; the pages reach it as `/series-api/*` on the app's own server, so **the backend never talks to SerienStream**. A `Dockerfile` next to it builds the same service as a container image. `SERIES_HOST` in the built-in server's `server.env` changes the site's address.
+
+- **Search:** tick **Include series** on the search page. SerienStream's results are then mixed into MyAnimeList's in one list, best matches first (a series that matches your text better than an anime comes before it), with their covers. Series have no MyAnimeList id, so no other page (rows, recommendations, lists, stats) lists them.
+- **Progress:** the backend remembers, per account, the episode you opened last of each series (`GET /series/progress`, `PUT|DELETE /series/{slug}/progress`, table `series_progress`). Those series come first in **Continue Watching** on the home page and open at that episode. Episodes play like anime: the service resolves the hoster's page (VOE, Streamtape, Doodstream, Vidoza) to the video's own address (`GET /resolve`) and NotFlix's player streams it. If a hoster can't be resolved or its video won't play, the hoster's own embedded player takes over. The position inside an episode isn't saved yet, only the episode.
+
 ## Desktop app
 
 `desktop/` is an Electron app for your PC. It works in one of two ways, chosen under **Settings → Server**:
@@ -181,9 +188,10 @@ What the build does:
   - PostgreSQL 18 (from the [embedded-postgres](https://github.com/leinelissen/embedded-postgres) packages);
   - Anivexa, at a tested commit;
   - SerienStreamAPI's AniWorld service (`desktop/stack/aniworld-api/`), published as one self-contained executable;
+  - the series service (`desktop/stack/series-api/`, SerienStream through SerienStreamAPI), also one self-contained executable;
   - ffmpeg (from imageio-ffmpeg).
 
-  `--without=anivexa,aniworld-api` leaves those out, e.g. without the .NET SDK.
+  `--without=anivexa,aniworld-api,series-api` leaves those out, e.g. without the .NET SDK.
 - `npm run dist:client` builds the app without the built-in server, for connecting to another server only (about 100 MB instead of 700).
 
 For development: `npm run server`, `npm run stack`, then `npm start`.

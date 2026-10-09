@@ -1,12 +1,12 @@
 // Builds the built-in server (build/stack/), which the desktop app runs on the PC instead of
 // connecting to a server: PostgreSQL, a Python runtime with the backend, its workers,
-// AniScraper and a Redis stand-in, Anivexa, SerienStreamAPI's AniWorld service and ffmpeg.
+// AniScraper and a Redis stand-in, Anivexa, SerienStreamAPI's AniWorld service, the series service (SerienStream) and ffmpeg.
 // Nothing needs Docker or anything installed on the PC that runs the app.
 //
 // Run it on the system the app is for (it fetches that system's binaries). It needs uv, git and
 // npm, and the .NET 8 SDK for the SerienStreamAPI service.
 //
-//   node scripts/prepare-stack.mjs [--without=anivexa,aniworld-api]
+//   node scripts/prepare-stack.mjs [--without=anivexa,aniworld-api,series-api]
 //
 // NOTFLIX_STACK_PYTHON=<python executable> uses a virtual environment made from that Python
 // instead of a portable one (for development: the result only works on this machine).
@@ -225,7 +225,8 @@ async function dotnetSdk() {
   return local;
 }
 
-async function prepareAniworldApi() {
+/** Publish one of the .NET services in stack/ (project folder `name`) as an executable. */
+async function publishDotnet(name) {
   const rid = {
     "win32-x64": "win-x64", "win32-arm64": "win-arm64", "darwin-x64": "osx-x64",
     "darwin-arm64": "osx-arm64", "linux-x64": "linux-x64", "linux-arm64": "linux-arm64",
@@ -234,8 +235,8 @@ async function prepareAniworldApi() {
   run(
     dotnet,
     [
-      "publish", join(desktop, "stack", "aniworld-api"), "-c", "Release", "-r", rid,
-      "-o", join(stack, "aniworld-api"),
+      "publish", join(desktop, "stack", name), "-c", "Release", "-r", rid,
+      "-o", join(stack, name),
     ],
     {
       env: {
@@ -249,6 +250,10 @@ async function prepareAniworldApi() {
   );
 }
 
+const prepareAniworldApi = () => publishDotnet("aniworld-api");
+// SerienStream's series (the app runs it on the PC, apart from the backend).
+const prepareSeriesApi = () => publishDotnet("series-api");
+
 rmSync(stack, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 const python = preparePython();
@@ -260,7 +265,11 @@ const components = ["postgres", "redis", "backend", "aniscraper", "ffmpeg"];
 // Optional parts: without them the built-in server still works (no English sources from
 // Anivexa; AniWorld only through AniScraper).
 const skipped = [];
-for (const [name, prepare] of [["anivexa", prepareAnivexa], ["aniworld-api", prepareAniworldApi]]) {
+for (const [name, prepare] of [
+  ["anivexa", prepareAnivexa],
+  ["aniworld-api", prepareAniworldApi],
+  ["series-api", prepareSeriesApi],
+]) {
   if (without.has(name)) continue;
   try {
     await prepare();

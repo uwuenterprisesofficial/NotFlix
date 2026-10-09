@@ -53,6 +53,27 @@ class PositionIn(BaseModel):
     duration_s: float | None = Field(default=None, gt=0)
 
 
+class SeriesProgressIn(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    image_url: str | None = Field(default=None, max_length=1000)
+    season: int = Field(ge=0, le=1000)
+    episode: int = Field(ge=1, le=10000)
+
+    @field_validator("image_url")
+    @classmethod
+    def _web_image(cls, v: str | None) -> str | None:
+        return v if v and v.startswith(("https://", "http://")) else None
+
+
+class SeriesProgressOut(ORM):
+    slug: str
+    title: str
+    image_url: str | None
+    season: int
+    episode: int
+    updated_at: datetime
+
+
 class AiringOut(BaseModel):
     episode: int
     airing_at: datetime

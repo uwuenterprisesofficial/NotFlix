@@ -5,10 +5,12 @@ import { useEffect, useState } from "react";
 import { tagName } from "@/lib/i18n";
 import { prefetchShows } from "@/lib/prefetch";
 import { filterParams, readQuery, type SearchQuery, searchHref } from "@/lib/search";
+import { mixResults, seriesHref, useSeriesHits } from "@/lib/series";
 import type { Genre, SearchResponse } from "@/lib/types";
 import { AnimeCard } from "./AnimeCard";
 import { useT } from "./I18nProvider";
 import { Prefetch } from "./Prefetch";
+import { SeriesCard } from "./series/SeriesCard";
 
 const GRID =
   "mt-4 grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-x-3 gap-y-6 md:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]";
@@ -51,6 +53,8 @@ function Results({ query, genres }: { query: SearchQuery; genres: Genre[] }) {
   const dubLanguage = lang === "de" ? "de-dub" : "en-dub";
   const genre = genres.find((g) => g.id === genreId) ?? null;
   const [state, setState] = useState<State>({ quick: null, full: null, failed: false });
+  // Series (when included) are mixed into a title search's first page.
+  const series = useSeriesHits(q, !genreId && !dub && page === 1);
 
   useEffect(() => {
     if (!q && !genreId && !dub) return;
@@ -105,7 +109,7 @@ function Results({ query, genres }: { query: SearchQuery; genres: Genre[] }) {
   if (!q && !genreId && !dub) return <p className="mt-10 text-muted">{t("search.intro")}</p>;
 
   const shown = state.full ?? state.quick;
-  const busy = !state.full && !state.failed;
+  const busy = (!state.full && !state.failed) || series.pending;
   let items = shown?.items ?? [];
   // MAL's search can't filter by genre: this page is narrowed down to it here.
   if (q && genre) items = items.filter((a) => a.genres.includes(genre.name));
@@ -114,6 +118,7 @@ function Results({ query, genres }: { query: SearchQuery; genres: Genre[] }) {
   if (order === "for_you" && q) {
     items = [...items].sort((a, b) => (b.prediction?.score ?? 0) - (a.prediction?.score ?? 0));
   }
+  const mixed = mixResults(q, items, (a) => [a.title, a.title_en], series.hits);
   const genreLabel = genre ? tagName(lang, genre.id, genre.name) : null;
   const heading =
     (q
@@ -136,21 +141,34 @@ function Results({ query, genres }: { query: SearchQuery; genres: Genre[] }) {
         {state.full?.pending && <Searching label={t("search.addingMore")} />}
         {busy && <Searching label={shown ? t("search.searchingMore") : t("search.searching")} />}
         {state.failed && !state.full && <span className="text-red-400">{t("search.failed")}</span>}
+        {series.failed && <span className="text-red-400">{t("series.failed")}</span>}
       </div>
       {dub && <p className="mt-1 text-xs text-muted">{t("search.dubInfo")}</p>}
       {state.full && <Prefetch shows={prefetchShows(items)} />}
       {busy && <ProgressBar />}
       {!shown && busy ? (
         <Skeleton />
-      ) : items.length === 0 ? (
+      ) : mixed.length === 0 ? (
         !busy && <p className="mt-10 text-muted">{t("search.nothing")}</p>
       ) : (
         <div className={`${GRID} transition-opacity ${busy ? "opacity-80" : ""}`}>
-          {items.map((anime) => (
-            <div key={anime.id}>
-              <AnimeCard anime={anime} fluid />
-            </div>
-          ))}
+          {mixed.map((entry) =>
+            entry.kind === "anime" ? (
+              <div key={`a${entry.anime.id}`}>
+                <AnimeCard anime={entry.anime} fluid />
+              </div>
+            ) : (
+              <div key={`s${entry.hit.slug}`}>
+                <SeriesCard
+                  href={seriesHref(entry.hit.slug)}
+                  title={entry.hit.title}
+                  image={entry.hit.image}
+                  tag={t("series.heading")}
+                  fluid
+                />
+              </div>
+            ),
+          )}
         </div>
       )}
       {state.full && (page > 1 || state.full.has_next) && (

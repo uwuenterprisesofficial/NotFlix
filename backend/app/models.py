@@ -222,6 +222,23 @@ class PlaybackPosition(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class SeriesProgress(Base):
+    """Where the user is in a series without a MyAnimeList id (a SerienStream series, found
+    and played by the desktop app): the episode they opened last, for Continue Watching."""
+
+    __tablename__ = "series_progress"
+    __table_args__ = (UniqueConstraint("user_id", "slug"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    slug: Mapped[str] = mapped_column(String(200))
+    title: Mapped[str] = mapped_column(String(300))
+    image_url: Mapped[str | None] = mapped_column(String(1000))
+    season: Mapped[int] = mapped_column(Integer)
+    episode: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Connection(Base):
     """Two users who watch together: joint recommendations and a synced player (Watch
     Together). Stored once per pair, with the lower user id first."""
