@@ -13,11 +13,13 @@ export function ChangelogEntries({ entries }: { entries: ChangelogEntry[] }) {
           <h2 className="flex flex-wrap items-baseline gap-x-3 text-xl font-bold">
             {t("changelog.version", { version: shortVersion(entry.version) })}
             <span className="text-base font-semibold text-white/80">{entry.title[lang]}</span>
-            <time dateTime={entry.date} className="text-sm font-normal text-muted">
-              {new Date(`${entry.date}T12:00:00Z`).toLocaleDateString(lang, {
-                dateStyle: "long",
-              })}
-            </time>
+            {entry.date && (
+              <time dateTime={entry.date} className="text-sm font-normal text-muted">
+                {new Date(`${entry.date}T12:00:00Z`).toLocaleDateString(lang, {
+                  dateStyle: "long",
+                })}
+              </time>
+            )}
           </h2>
           <ul className="mt-3 space-y-3">
             {entry.items.map((item) => (

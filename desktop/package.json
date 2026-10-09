@@ -1,6 +1,6 @@
 {
   "name": "notflix-desktop",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "private": true,
   "description": "NotFlix as a desktop app: with its own built-in server, or connected to a NotFlix server",
   "main": "main.js",

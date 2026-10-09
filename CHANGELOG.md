@@ -10,7 +10,7 @@ MINOR, fixes PATCH. For a release, set it in `desktop/package.json`, `frontend/p
 build the desktop app (`npm run dist` in `desktop/`) and publish the server
 (`scripts/publish.sh`): its image carries the new app, which every connected app downloads.
 
-## 0.2 — 2026-10-08
+## 0.4 — 2026-10-09
 
 - **Seasons**: a page for every season (**Seasons** in the menu). It has recommendations for
   you, highlights and underrated shows, your season completion with genre fun facts, and the
@@ -37,9 +37,9 @@ build the desktop app (`npm run dist` in `desktop/`) and publish the server
 - **Automatic updates**: the desktop app updates itself from its NotFlix server in the
   background and asks to restart once an update is ready. After an update it shows what's new.
 
-## 0.1 — 2026-09-30
+## 0.3.1 and earlier
 
-The first version. Your MyAnimeList and AniList lists Netflix-style, with:
+Before this changelog. Your MyAnimeList and AniList lists Netflix-style, with:
 
 - recommendations and predicted scores
 - statistics

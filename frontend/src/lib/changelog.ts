@@ -12,15 +12,15 @@ type Text = Record<Lang, string>;
 
 export type ChangelogEntry = {
   version: string;
-  date: string; // YYYY-MM-DD
+  date?: string; // YYYY-MM-DD
   title: Text;
   items: { title: Text; text: Text }[];
 };
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: "0.2.0",
-    date: "2026-10-08",
+    version: "0.4.0",
+    date: "2026-10-09",
     title: {
       en: "Seasons, playlists and what comes next",
       de: "Seasons, Playlists und was als Nächstes kommt",
@@ -99,22 +99,21 @@ export const CHANGELOG: ChangelogEntry[] = [
     ],
   },
   {
-    version: "0.1.0",
-    date: "2026-09-30",
-    title: { en: "The first version", de: "Die erste Version" },
+    version: "0.3.1",
+    title: { en: "Earlier versions", de: "Frühere Versionen" },
     items: [
       {
-        title: { en: "NotFlix", de: "NotFlix" },
+        title: { en: "Up to 0.3.1", de: "Bis 0.3.1" },
         text: {
-          en: "Your MyAnimeList and AniList lists Netflix-style: recommendations and predicted scores, statistics, the release calendar, streams with intro skipping, Watch Together, and the desktop app with its built-in server.",
-          de: "Deine MyAnimeList- und AniList-Listen im Netflix-Stil: Empfehlungen und vorhergesagte Wertungen, Statistiken, der Release-Kalender, Streams mit Intro-Überspringen, Zusammen schauen und die Desktop-App mit eingebautem Server.",
+          en: "Your MyAnimeList and AniList lists Netflix-style: recommendations and predicted scores, statistics, the release calendar, streams with intro skipping, Watch Together, and the desktop app with its built-in server. This changelog starts with 0.4.",
+          de: "Deine MyAnimeList- und AniList-Listen im Netflix-Stil: Empfehlungen und vorhergesagte Wertungen, Statistiken, der Release-Kalender, Streams mit Intro-Überspringen, Zusammen schauen und die Desktop-App mit eingebautem Server. Dieses Änderungsprotokoll beginnt mit 0.4.",
         },
       },
     ],
   },
 ];
 
-/** "0.2.0" → [0, 2, 0], for comparing. */
+/** "0.4.0" → [0, 4, 0], for comparing. */
 function parts(version: string): number[] {
   return version.split(".").map((p) => Number.parseInt(p, 10) || 0);
 }
@@ -135,7 +134,7 @@ export function changesSince(previous: string | null, current: string): Changelo
   );
 }
 
-/** "0.2.0" → "0.2" */
+/** "0.4.0" → "0.4" */
 export function shortVersion(version: string): string {
   return version.replace(/\.0$/, "");
 }

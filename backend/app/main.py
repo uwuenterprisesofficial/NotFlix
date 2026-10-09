@@ -25,7 +25,7 @@ from app.core.prefix import StripApiPrefix
 settings = get_settings()
 check_configured(settings.api_key)
 
-app = FastAPI(title="NotFlix API", version="0.1.0")
+app = FastAPI(title="NotFlix API", version="0.4.0")
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
